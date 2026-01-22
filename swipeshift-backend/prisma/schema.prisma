@@ -1,0 +1,104 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  worker
+  employer
+}
+
+enum OnboardingStatus {
+  pendingRole
+  pendingProfile
+  complete
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  role         UserRole?
+  onboarding   OnboardingStatus @default(pendingRole)
+
+  firstName String?
+  lastName  String?
+
+  location  String?
+  lat Float?
+  lng Float?
+  createdAt DateTime @default(now())
+
+  emailVerifiedAt DateTime?
+
+  worker   Worker?
+  employer Employer?
+
+  passwordResetTokens PasswordResetToken[]
+
+  emailVerificationTokens EmailVerificationToken[]
+}
+
+model Worker {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  dateOfBirth     DateTime
+  bio             String?  @db.Text
+  profilePhotoUrl String?
+
+  jobInterests Json
+  availability Json
+
+  createdAt DateTime @default(now())
+}
+
+model Employer {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  companyName String
+  companySize String
+  industry    String
+
+  companyLogoUrl     String?
+  websiteOrInstagram String?
+  companyDescription String? @db.Text
+}
+
+model PasswordResetToken {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model EmailVerificationToken {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  tokenHash String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}

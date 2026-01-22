@@ -1,0 +1,24 @@
+services:
+  db:
+    image: postgres:16
+    container_name: swipeshift-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: swipeshift
+      POSTGRES_PASSWORD: swipeshift_pw
+      POSTGRES_DB: swipeshift_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - swipeshift_pgdata:/var/lib/postgresql/data
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: swipeshift-mailhog
+    restart: unless-stopped
+    ports:
+      - "1025:1025"   # SMTP
+      - "8025:8025"   # Web UI
+
+volumes:
+  swipeshift_pgdata:

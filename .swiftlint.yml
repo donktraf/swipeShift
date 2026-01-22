@@ -1,0 +1,8 @@
+included:
+  - swipeShift
+
+disabled_rules:
+  - line_length
+  - trailing_whitespace
+  - todo
+  - identifier_name
