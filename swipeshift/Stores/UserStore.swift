@@ -28,6 +28,8 @@ final class UserStore: ObservableObject {
     
     @Published var loginPrefillEmail: String = ""
     
+    @Published var showSocialSuccess: Bool = false
+    
     @MainActor
     func presentLoginAfterReset() {
         // Sicherheitsmäßig: nicht automatisch einloggen
@@ -186,57 +188,69 @@ final class UserStore: ObservableObject {
             // Optional: nonce (sauberer). Kann später ergänzt werden.
         }
 
-        @MainActor
-        func handleAppleCompletion(_ result: Result<ASAuthorization, Error>) async {
-            errorMessage = nil
+    @MainActor
+    func handleAppleCompletion(_ result: Result<ASAuthorization, Error>) async {
+        errorMessage = nil
 
-            switch result {
-            case .failure(let err):
-                errorMessage = err.localizedDescription
+        switch result {
+        case .failure(let err):
+            errorMessage = err.localizedDescription
 
-            case .success(let auth):
-                guard
-                    let credential = auth.credential as? ASAuthorizationAppleIDCredential,
-                    let identityTokenData = credential.identityToken,
-                    let identityToken = String(data: identityTokenData, encoding: .utf8)
-                else {
-                    errorMessage = "Apple Sign-In failed: missing token."
-                    return
+        case .success(let auth):
+            guard
+                let credential = auth.credential as? ASAuthorizationAppleIDCredential,
+                let identityTokenData = credential.identityToken,
+                let identityToken = String(data: identityTokenData, encoding: .utf8)
+            else {
+                errorMessage = "Apple Sign-In failed: missing token."
+                return
+            }
+
+            do {
+                let response = try await APIClient.shared.loginWithApple(idToken: identityToken)
+                self.currentUser = response.user
+
+                // ✅ Nur neuer User bekommt den Success Screen
+                if response.isNewUser == true {
+                    self.showSocialSuccess = true
                 }
-
-                do {
-                    let user = try await APIClient.shared.loginWithApple(idToken: identityToken)
-                    self.currentUser = user
-                } catch {
-                    self.errorMessage = error.localizedDescription
-                }
+                // Bestehender User → direkt Home
+            } catch {
+                self.errorMessage = error.localizedDescription
             }
         }
+    }
 
-        // MARK: - Google Sign In
+    // MARK: - Google Sign In
 
-        @MainActor
-        func loginWithGoogle() async throws {
-            errorMessage = nil
+    @MainActor
+    func loginWithGoogle() async throws {
+        errorMessage = nil
 
-            guard let rootVC = UIApplication.shared.firstKeyWindowRootViewController else {
-                throw NSError(domain: "GoogleSignIn", code: 0, userInfo: [NSLocalizedDescriptionKey: "Missing root view controller."])
-            }
-
-            // ✅ du brauchst den Client-ID String (siehe AppConfig unten)
-            let config = GIDConfiguration(clientID: AppConfig.googleClientID)
-            GIDSignIn.sharedInstance.configuration = config
-
-            let signInResult = try await GIDSignIn.sharedInstance.signIn(withPresenting: rootVC)
-
-            // ID token an Backend schicken
-            guard let idToken = signInResult.user.idToken?.tokenString else {
-                throw NSError(domain: "GoogleSignIn", code: 0, userInfo: [NSLocalizedDescriptionKey: "Missing Google ID token."])
-            }
-
-            let user = try await APIClient.shared.loginWithGoogle(idToken: idToken)
-            self.currentUser = user
+        guard let rootVC = UIApplication.shared.firstKeyWindowRootViewController else {
+            throw NSError(domain: "GoogleSignIn", code: 0,
+                          userInfo: [NSLocalizedDescriptionKey: "Missing root view controller."])
         }
+
+        let config = GIDConfiguration(clientID: AppConfig.googleClientID)
+        GIDSignIn.sharedInstance.configuration = config
+
+        let signInResult = try await GIDSignIn.sharedInstance.signIn(withPresenting: rootVC)
+
+        guard let idToken = signInResult.user.idToken?.tokenString else {
+            throw NSError(domain: "GoogleSignIn", code: 0,
+                          userInfo: [NSLocalizedDescriptionKey: "Missing Google ID token."])
+        }
+
+        let response = try await APIClient.shared.loginWithGoogle(idToken: idToken)
+        self.currentUser = response.user
+
+        // ✅ Nur neuer User bekommt den Success Screen
+        if response.isNewUser == true {
+            self.showSocialSuccess = true
+        }
+        // Bestehender User → currentUser ist gesetzt → ContentView zeigt direkt Home
+    }
     
     @MainActor
     func refreshMe() async {
