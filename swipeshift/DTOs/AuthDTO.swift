@@ -48,6 +48,7 @@ struct UserDTO: Decodable {
 struct AuthResponseDTO: Decodable {
     let token: String
     let user: UserDTO
+    let isNewUser: Bool?
 }
 
 // Login Request Body
