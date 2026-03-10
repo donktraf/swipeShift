@@ -66,6 +66,20 @@ final class JobStore: ObservableObject {
             print("loadJobs error:", error.localizedDescription)
         }
     }
+    
+    // NEU in JobStore — unter loadJobs() hinzufügen
+    @MainActor
+    func loadJobsAll() async {
+        errorMessage = nil
+        do {
+            let result = try await APIClient.shared.fetchJobs(location: nil)
+            jobs = result
+            print("Jobs loaded (all):", jobs.count)
+        } catch {
+            errorMessage = error.localizedDescription
+            print("loadJobsAll error:", error.localizedDescription)
+        }
+    }
 
     // MARK: - Actions (Swipe)
 

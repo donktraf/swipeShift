@@ -11,69 +11,56 @@ struct RoleChoiceView: View {
     @EnvironmentObject var userStore: UserStore
 
     @State private var isSubmitting = false
-
     @State private var pendingRole: String? = nil
     @State private var showConfirm: Bool = false
 
     var body: some View {
-        VStack(spacing: 18) {
+        ZStack {
+            SS.background().ignoresSafeArea()
 
-            VStack(spacing: 8) {
-                Text("Set up your account")
-                    .font(.largeTitle).bold()
+            VStack {
+                Spacer()
 
-                Text("Choose how you want to use SwipeShift.")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-            .padding(.top, 20)
+                SSCard {
+                    VStack(spacing: 18) {
+                        Text("How will you use SwipeShift?")
+                            .font(.system(size: 30, weight: .bold))
+                            .multilineTextAlignment(.center)
 
-            VStack(spacing: 14) {
-                Button {
-                    pendingRole = "worker"
-                    showConfirm = true
-                } label: {
-                    Text(isSubmitting ? "Saving..." : "I’m looking for work")
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.blue)
-                        .foregroundColor(.white)
-                        .fontWeight(.semibold)
-                        .cornerRadius(14)
+                        Text("Choose one to get started")
+                            .font(.system(size: 16))
+                            .foregroundColor(.secondary)
+
+                        VStack(spacing: 14) {
+                            roleCard(
+                                icon: "person",
+                                title: "I'm looking for work",
+                                subtitle: "Browse jobs, create your profile, and get matched with employers",
+                                tint: SS.primary.opacity(0.18)
+                            ) {
+                                pendingRole = "worker"
+                                showConfirm = true
+                            }
+
+                            roleCard(
+                                icon: "doc.text",
+                                title: "I'm hiring",
+                                subtitle: "Post jobs, review candidates, and build your team",
+                                tint: Color.purple.opacity(0.16)
+                            ) {
+                                pendingRole = "employer"
+                                showConfirm = true
+                            }
+                        }
+                    }
                 }
-                .disabled(isSubmitting)
 
-                Button {
-                    pendingRole = "employer"
-                    showConfirm = true
-                } label: {
-                    Text(isSubmitting ? "Saving..." : "I’m hiring")
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.gray.opacity(0.15))
-                        .foregroundColor(.blue)
-                        .fontWeight(.semibold)
-                        .cornerRadius(14)
-                }
-                .disabled(isSubmitting)
+                Spacer()
             }
-            .padding(.horizontal, 24)
-
-            if let err = userStore.errorMessage {
-                Text(err)
-                    .font(.caption)
-                    .foregroundColor(.red)
-                    .padding(.horizontal, 24)
-            }
-
-            Spacer()
         }
-        .navigationTitle("Onboarding")
         .navigationBarTitleDisplayMode(.inline)
         .alert("Confirm role", isPresented: $showConfirm) {
             Button("Change", role: .cancel) { pendingRole = nil }
-
             Button("Continue") {
                 guard let role = pendingRole else { return }
                 Task {
@@ -85,5 +72,43 @@ struct RoleChoiceView: View {
         } message: {
             Text("You chose: \(pendingRole == "worker" ? "Worker" : "Employer"). Continue?")
         }
+    }
+
+    private func roleCard(icon: String, title: String, subtitle: String, tint: Color, action: @escaping () -> Void) -> some View {
+        Button {
+            guard !isSubmitting else { return }
+            action()
+        } label: {
+            VStack(spacing: 14) {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(tint)
+                    .frame(width: 76, height: 76)
+                    .overlay(
+                        Image(systemName: icon)
+                            .font(.system(size: 30, weight: .semibold))
+                            .foregroundColor(SS.primary)
+                    )
+
+                Text(title)
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundColor(.primary)
+
+                Text(subtitle)
+                    .font(.system(size: 15))
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 8)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 18)
+            .background(Color.white.opacity(0.70))
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(Color.white.opacity(0.65), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(isSubmitting)
     }
 }

@@ -14,10 +14,10 @@ struct OnboardingRootView: View {
         VStack {
             if let user = userStore.currentUser {
 
-                // Optional: falls du Email-Verifizierung als "Blocker" willst
-                // if user.isEmailVerified == false {
-                //     VerifyEmailView()
-                // } else {
+                //Email-Verifizierung als "Blocker" willst
+                if user.isEmailVerified == false {
+                     VerifyEmailView()
+                } else {
 
                 switch user.onboarding {
                 case .pendingRole:
@@ -36,7 +36,7 @@ struct OnboardingRootView: View {
                     ProgressView() // sollte hier eigentlich nie auftauchen
                 }
 
-                // } // <- nur wenn du den VerifyEmail Block aktivierst
+                } // <- nur wenn du den VerifyEmail Block aktivierst
 
             } else {
                 ProgressView()

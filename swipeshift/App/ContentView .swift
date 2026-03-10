@@ -1,8 +1,6 @@
 //
 //  ContentView.swift
-//  L1 Demo
-//
-//  Created by DON on 07.12.25.@
+//  swipeShift
 //
 
 import SwiftUI
@@ -14,12 +12,24 @@ struct ContentView: View {
         Group {
             if let user = userStore.currentUser {
 
+                // ✅ FALL 1: Email noch nicht verifiziert (nur Email-User)
+                // Social-User (Google/Apple) haben isEmailVerified == true
+                // also kommen sie hier nie rein
                 if user.isEmailVerified == false {
                     VerifyEmailView()
+
+                // ✅ FALL 2: Neuer Social-User → Success Screen
+                } else if userStore.showSocialSuccess {
+                    GoogleLoginSuccessfulView()
+                        .environmentObject(userStore)
+
+                // ✅ FALL 3: Onboarding noch nicht abgeschlossen
                 } else if user.onboarding != .complete {
                     NavigationStack {
                         OnboardingRootView()
                     }
+
+                // ✅ FALL 4: Alles fertig → Home
                 } else {
                     if let role = user.role {
                         switch role {
@@ -27,19 +37,23 @@ struct ContentView: View {
                         case .employer: EmployerHomeView()
                         }
                     } else {
-                        OnboardingRootView()
+                        NavigationStack {
+                            OnboardingRootView()
+                        }
                     }
                 }
 
             } else {
+                // Nicht eingeloggt
                 MainView()
             }
         }
+        // ✅ showLogin bleibt für Password-Reset-Flow
         .fullScreenCover(isPresented: $userStore.showLogin) {
             NavigationStack {
-                    LoginView(prefilledEmail: userStore.loginPrefillEmail)
-                        .environmentObject(userStore)
-                }
+                LoginView(prefilledEmail: userStore.loginPrefillEmail)
+                    .environmentObject(userStore)
+            }
         }
         .onAppear {
             print("👀 ContentView appeared")
@@ -54,20 +68,11 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             Task { await userStore.refreshMeIfPossible() }
         }
-        
-        /*if let user = userStore.currentUser, user.isEmailVerified == false {
-            EmailVerifyBanner()
-                .environmentObject(userStore)
-        }*/
-        
-        
     }
 }
-
 
 #Preview {
     ContentView()
         .environmentObject(UserStore())
         .environmentObject(JobStore())
 }
-

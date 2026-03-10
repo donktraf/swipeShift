@@ -280,7 +280,7 @@ final class APIClient {
     }
     
         // POST /auth/apple
-        func loginWithApple(idToken: String) async throws -> UserDTO {
+        func loginWithApple(idToken: String) async throws -> AuthResponseDTO {
             var request = URLRequest(url: baseURL.appendingPathComponent("auth/apple"))
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -293,11 +293,11 @@ final class APIClient {
 
             let decoded = try JSONDecoder().decode(AuthResponseDTO.self, from: data)
             self.token = decoded.token
-            return decoded.user
+            return decoded
         }
 
         // POST /auth/google
-        func loginWithGoogle(idToken: String) async throws -> UserDTO {
+        func loginWithGoogle(idToken: String) async throws -> AuthResponseDTO {
             var request = URLRequest(url: baseURL.appendingPathComponent("auth/google"))
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -310,7 +310,7 @@ final class APIClient {
 
             let decoded = try JSONDecoder().decode(AuthResponseDTO.self, from: data)
             self.token = decoded.token
-            return decoded.user
+            return decoded
         }
     
     func resendVerification(email: String) async throws {

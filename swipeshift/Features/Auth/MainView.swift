@@ -1,120 +1,153 @@
 //
 //  MainView.swift
-//  L1 Demo
-//
-//  Created by DON on 07.12.25.
+//  swipeShift
 //
 
 import SwiftUI
+import AuthenticationServices
 
-// MainView ist der Einstieg in die "eigentliche" App
-// Hier sitzt der NavigationStack, der die Navigation zwischen Screens regelt
 struct MainView: View {
     var body: some View {
-        // NavigationStack ermöglicht Navigation mit NavigationLink
-        NavigationStack {
-            // Erste Seite im Stack ist unsere LandingView
-            LandingView()
-        }
+        LandingView()
     }
 }
 
-// LandingView ist die erste sichtbare Seite nach dem Onboarding
-// Hier kann der Nutzer sich für Login oder Registrierung entscheiden
 struct LandingView: View {
     @EnvironmentObject var userStore: UserStore
-    
-    var body: some View {
-        VStack(spacing: 32) {
-            
-            // MARK: - Überschrift + Subheadline
-            VStack(spacing: 8) {
-                Text("SwipeShift") // Platzhalter-Titel (kann später App-Name sein)
-                    .font(.largeTitle)
-                    .fontWeight(.bold)
-                
-                //Text("Connect with employers who value your skills.")
-                Text("Flexible work, on your terms.")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center) // Text zentrieren
-            }
-            .padding(.top, 60)
-            .padding(.horizontal, 24)
-            
-            Spacer() // Schiebt den Content darunter nach unten
-            
-            // MARK: - Buttons für Login & Account-Erstellung
-            VStack(spacing: 16) {
-                
-                // NavigationLink: Beim Tippen → zur LoginView navigieren
-                NavigationLink {
-                    LoginView()
-                } label: {
-                    Text("Login")
-                        .frame(maxWidth: .infinity) // Button wird so breit wie möglich
-                        .padding()
-                        .background(Color.blue)
-                        .foregroundColor(.white)
-                        .fontWeight(.semibold)
-                        .cornerRadius(14)
-                }
-                
-                // NavigationLink: Beim Tippen → zur RegisterView navigieren
-                NavigationLink {
-                    RegisterView()
-                } label: {
-                    Text("Create Account")
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.gray.opacity(0.15))
-                        .foregroundColor(.blue)
-                        .fontWeight(.semibold)
-                        .cornerRadius(14)
-                }
-            }
-            .padding(.horizontal, 32)
-            
-            Spacer() // Schiebt den Footer nach unten
-            
-            // Anzeige wer grade eingeloggt ist
-            if let current = userStore.currentUser {
-                Text("You are logged in as \(current.email)")
-                    .font(.footnote)
-                    .foregroundColor(.green)
-            }
-            
-            // Kleiner Info-Text im Footer
-            Text("By continuing you agree to our terms.")
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .padding(.bottom, 24)
-            
-            //Test Button um zu reseten
-            /*Button("Reset Onboarding") {
-                UserDefaults.standard.set(false, forKey: "hasSeenOnboarding")
-            }*/
 
+    @State private var showLogin = false
+    @State private var showRegister = false
+    @State private var socialLoginError: String? = nil
+
+    var body: some View {
+        ZStack {
+            SS.background().ignoresSafeArea()
+
+            VStack {
+                Spacer()
+
+                SSCard {
+                    VStack(spacing: 18) {
+
+                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .fill(SS.primary.opacity(0.18))
+                            .frame(width: 86, height: 86)
+                            .overlay(
+                                Image(systemName: "briefcase")
+                                    .font(.system(size: 34, weight: .semibold))
+                                    .foregroundColor(SS.primary)
+                            )
+                            .padding(.top, 4)
+
+                        Text("SwipeShift")
+                            .font(.system(size: 36, weight: .bold))
+
+                        Text("Find jobs that match you")
+                            .font(.system(size: 16))
+                            .foregroundColor(.secondary)
+
+                        VStack(spacing: 12) {
+
+                            // Google
+                            Button {
+                                socialLoginError = nil
+                                Task {
+                                    do {
+                                        try await userStore.loginWithGoogle()
+                                    } catch {
+                                        socialLoginError = error.localizedDescription
+                                    }
+                                }
+                            } label: {
+                                SSOAuthPillButton(
+                                    title: "Continue with Google",
+                                    icon: Image("googleIcon"),
+                                    background: .black,
+                                    foreground: .white,
+                                    //border: Color.gray.opacity(0.20)
+                                    border: Color.clear
+                                )
+                            }
+                            .buttonStyle(.plain)
+
+                            // Apple
+                            SignInWithAppleButton(.continue) { request in
+                                userStore.prepareAppleRequest(request)
+                            } onCompletion: { result in
+                                Task { await userStore.handleAppleCompletion(result) }
+                            }
+                            .signInWithAppleButtonStyle(.black)
+                            .frame(height: 54)
+                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+
+                            // Divider
+                            HStack(spacing: 12) {
+                                Rectangle()
+                                    .frame(height: 1)
+                                    .foregroundColor(.gray.opacity(0.20))
+                                Text("or")
+                                    .font(.footnote)
+                                    .foregroundColor(.secondary)
+                                Rectangle()
+                                    .frame(height: 1)
+                                    .foregroundColor(.gray.opacity(0.20))
+                            }
+                            .padding(.vertical, 2)
+
+                            // ✅ Login per fullScreenCover statt NavigationLink
+                            Button {
+                                showLogin = true
+                            } label: {
+                                Text("Log in")
+                            }
+                            .buttonStyle(SSPrimaryButtonStyle())
+
+                            // ✅ Register per fullScreenCover statt NavigationLink
+                            Button {
+                                showRegister = true
+                            } label: {
+                                Text("Create account")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(SS.primary)
+                            }
+                            .buttonStyle(.plain)
+
+                            if let socialLoginError {
+                                Text(socialLoginError)
+                                    .font(.caption)
+                                    .foregroundColor(.red)
+                                    .multilineTextAlignment(.center)
+                            }
+
+                            Text("By continuing, you agree to our Terms & Privacy Policy")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                                .padding(.top, 4)
+                        }
+                    }
+
+                    Spacer()
+                }
+                .padding(.vertical, 14)
+            }
         }
-        // MARK: - Hintergrund mit leichtem Verlauf
-        .background(
-            LinearGradient(
-                colors: [
-                    Color.blue.opacity(0.05),
-                    Color.purple.opacity(0.08)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea() // Hintergrund geht über den ganzen Screen
-        )
+        // ✅ Login als fullScreenCover
+        .fullScreenCover(isPresented: $showLogin) {
+            NavigationStack {
+                LoginView()
+                    .environmentObject(userStore)
+            }
+        }
+        // ✅ Register als fullScreenCover
+        .fullScreenCover(isPresented: $showRegister) {
+            RegisterView()
+                .environmentObject(userStore)
+        }
     }
 }
 
 #Preview {
-    NavigationStack {
-        LandingView()
-            .environmentObject(UserStore())
-    }
+    LandingView()
+        .environmentObject(UserStore())
 }
-
