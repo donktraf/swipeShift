@@ -12,6 +12,7 @@ struct swipeShiftApp: App {
 
     @StateObject private var userStore = UserStore()
     @StateObject private var jobStore = JobStore()
+    @StateObject private var messageStore = MessageStore()
 
     // 🔑 Reset-State (global)
     @State private var resetToken: String?
@@ -22,6 +23,7 @@ struct swipeShiftApp: App {
             ContentView()
                 .environmentObject(userStore)
                 .environmentObject(jobStore)
+                .environmentObject(messageStore)
 
                 // ✅ Deep Link Entry Point
                 .onOpenURL { url in

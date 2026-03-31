@@ -22,8 +22,20 @@ final class JobStore: ObservableObject {
 
     // MARK: - State (für UI)
 
-    /// Jobs, die aktuell in der UI angezeigt werden.
+    /// Alle Jobs (für JobListView, Dashboard-Fallback).
     @Published var jobs: [Job] = []
+
+    /// Nur für den Swipe-Tab — wird beim apply/skip geleert.
+    /// Alle anderen Bereiche (Radar, Dashboard) teilen diesen Array NICHT.
+    @Published var swipeJobs: [Job] = []
+
+    @Published var nearbyJobs: [Job] = []
+
+    // Dashboard-Sektionen (gefiltert vom Backend)
+    @Published var recommendedJobs:  [Job] = []
+    @Published var quickMoneyJobs:   [Job] = []
+    @Published var startingSoonJobs: [Job] = []
+    @Published var popularJobs:      [Job] = []
 
     /// Fehlertext für UI (z. B. Banner oder Inline-Text).
     @Published var errorMessage: String?
@@ -80,19 +92,64 @@ final class JobStore: ObservableObject {
             print("loadJobsAll error:", error.localizedDescription)
         }
     }
+    
+    /// Lädt Jobs speziell für den Swipe-Tab (eigener Array, unabhängig vom Rest).
+    @MainActor
+    func loadSwipeJobs() async {
+        errorMessage = nil
+        do {
+            swipeJobs = try await APIClient.shared.fetchJobs()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Lädt alle 4 Dashboard-Sektionen parallel vom Backend.
+    @MainActor
+    func loadDashboardSections() async {
+        errorMessage = nil
+        async let recommended  = fetch(type: "recommended")
+        async let quickMoney   = fetch(type: "quickMoney")
+        async let startingSoon = fetch(type: "startingSoon")
+        async let popular      = fetch(type: "popular")
+
+        recommendedJobs  = (try? await recommended)  ?? []
+        quickMoneyJobs   = (try? await quickMoney)   ?? []
+        startingSoonJobs = (try? await startingSoon) ?? []
+        popularJobs      = (try? await popular)      ?? []
+    }
+
+    private func fetch(type: String) async throws -> [Job] {
+        try await APIClient.shared.fetchJobs(type: type)
+    }
+
+    @MainActor
+    func loadNearbyJobs(lat: Double, lng: Double, radius: Double = 100) async {
+        errorMessage = nil
+        do {
+            let result = try await APIClient.shared.fetchNearbyJobs(
+                lat: lat,
+                lng: lng,
+                radius: radius
+            )
+            nearbyJobs = result
+            print("Nearby jobs loaded:", nearbyJobs.count)
+        } catch {
+            errorMessage = error.localizedDescription
+            print("loadNearbyJobs error:", error.localizedDescription)
+        }
+    }
 
     // MARK: - Actions (Swipe)
 
     /// Skippt einen Job (nicht interessiert).
-    /// Backend wird informiert, Job wird lokal entfernt.
+    /// Entfernt nur aus swipeJobs — Radar, Dashboard und andere Bereiche bleiben unberührt.
     @MainActor
     func skip(_ job: Job) async {
         errorMessage = nil
-
         do {
             try await APIClient.shared.skip(jobId: job.id)
-            jobs.removeAll { $0.id == job.id }
-
+            swipeJobs.removeAll { $0.id == job.id }
         } catch {
             errorMessage = error.localizedDescription
             print("skip error:", error.localizedDescription)
@@ -100,15 +157,13 @@ final class JobStore: ObservableObject {
     }
 
     /// Bewirbt sich auf einen Job.
-    /// Backend wird informiert, Job wird lokal entfernt.
+    /// Entfernt nur aus swipeJobs — Radar, Dashboard und andere Bereiche bleiben unberührt.
     @MainActor
     func apply(to job: Job) async {
         errorMessage = nil
-
         do {
             try await APIClient.shared.apply(jobId: job.id)
-            jobs.removeAll { $0.id == job.id }
-
+            swipeJobs.removeAll { $0.id == job.id }
         } catch {
             errorMessage = error.localizedDescription
             print("apply error:", error.localizedDescription)

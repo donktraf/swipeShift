@@ -1,5 +1,4 @@
 // src/routes.auth.js
-console.log("AUTH Aufgerufen");
 const express = require("express");
 const bcrypt = require("bcrypt");
 const { z } = require("zod");
@@ -154,15 +153,10 @@ const mailLimiter = rateLimit({
 
 
 router.post("/register", registerLimiter, async (req, res) => {
-  console.log("Route register aufgerufen")
 
   const parsed = registerSchema.safeParse(req.body);
 
-  console.log("Empfangende Daten: ", parsed)
-  console.log("parsed Data success: ", parsed.success)
-
   if (!parsed.success) {
-    console.log("Invalid Input");
 
     return res.status(400).json({
       error: "Invalid input",
@@ -235,17 +229,17 @@ router.post("/register", registerLimiter, async (req, res) => {
 
   try {
     await sendVerificationEmail(user.email, verifyLink);
-    console.log("✅ Verification email sent to:", user.email);
-    console.log("🔗 Verify link:", verifyLink);
+
+    console.log("Verification email sent to:", user.email);
+    console.log("Verify link:", verifyLink);
   } catch (e) {
-    console.error("❌ Failed to send verification email:", e);
-    // Wichtig: nicht failen. User existiert schon. Soft-fail.
+    console.error("Failed to send verification email:", e);
   }
 
 
 
 
-  console.log("User der vom Backend zurückgeschickt wird(mit prisma erstellt): ", user)
+  console.log("User:  ", user)
 
 
 
@@ -253,7 +247,9 @@ router.post("/register", registerLimiter, async (req, res) => {
     id: user.id,
     email: user.email,
     role: user.role,
-  });
+  }); 
+
+  console.log("Token: ", token)
 
   return res.json({
     token,
@@ -520,12 +516,16 @@ router.post("/google", async (req, res) => {
       where: { email }
     });
 
-    // Google bestätigt die Email -> dann speichern wir das in unserer DB
+    // Google bestätigt die Email -> dann in  DB speichern
     const googleSaysVerified = payload.email_verified === true;
 
     const SOCIAL_LOGIN_PASSWORD_PLACEHOLDER = "SOCIAL_LOGIN";
 
+    //merken ob User gerade neu erstellt wird
+    let isNewUser = false;
+
     if (!user) {
+      isNewUser = true, // ✅
       user = await prisma.user.create({
         data: {
           email,
@@ -545,6 +545,7 @@ router.post("/google", async (req, res) => {
       console.log("User existiert. Email aber noch nicht verifiziert");
       // ✅ Falls User existiert und noch NICHT verified, aber Google sagt verified -> updaten
       if (googleSaysVerified && !user.emailVerifiedAt) {
+        console.log("Google hat Email verifiziert.", )
         user = await prisma.user.update({
           where: { id: user.id },
           data: { emailVerifiedAt: new Date() },
@@ -563,11 +564,13 @@ router.post("/google", async (req, res) => {
       location: user.location,
       firstName: user.firstName,
       lastName: user.lastName,
-      isEmailVerified: payload.email_verified
+      isEmailVerified: payload.email_verified,
+      isNewUser
     });
 
     return res.json({
       token,
+      isNewUser,
       user: {
         id: user.id,
         email: user.email,
@@ -612,7 +615,11 @@ router.post("/apple", async (req, res) => {
 
     let user = await prisma.user.findUnique({ where: { email: appleEmail } });
 
+    //merken ob User gerade neu erstellt wird
+    let isNewUser = false;
+
     if (!user) {
+      isNewUser = true;
       user = await prisma.user.create({
         data: {
           email: appleEmail,
@@ -630,6 +637,7 @@ router.post("/apple", async (req, res) => {
 
     return res.json({
       token,
+      isNewUser,
       user: {
         id: user.id,
         email: user.email,

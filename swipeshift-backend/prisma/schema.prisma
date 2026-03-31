@@ -102,3 +102,92 @@ model EmailVerificationToken {
   @@index([userId])
   @@index([expiresAt])
 }
+
+// ─── Jobs ────────────────────────────────────────────────────────────────────
+
+model Job {
+  id          String    @id @default(uuid())
+  title       String
+  company     String
+  location    String
+  lat         Float?
+  lng         Float?
+
+  payAmount   Float?
+  payText     String
+  startTime   DateTime?
+  endTime     DateTime?
+  shiftText   String    @default("")
+  duration    String?
+  shortInfo   String    @default("") @db.Text
+
+  // Detail fields (JobDetailView)
+  jobDescription  String?  @db.Text
+  tasks           String[]
+  openSpots       Int      @default(1)
+  dressCode       String?
+  languages       String[]
+  experienceLevel String?
+  minAge          Int?
+  paymentMethod   String?
+  contractType    String?
+  companyRating   Float?
+  replyTime       String?
+  isVerified      Boolean  @default(false)
+
+  // Categorisation
+  tags      String[]
+  logoEmoji String   @default("🏢")
+  category  String?
+
+  // Schichten als JSON (Array von {id,date,timeRange,duration,totalPay})
+  shifts    Json     @default("[]")
+
+  status    String   @default("published")
+  employerId String?
+
+  createdAt DateTime @default(now())
+
+  applies Apply[]
+  skips   Skip[]
+  saves   Save[]
+}
+
+model Apply {
+  id        String   @id @default(uuid())
+  userId    String
+  jobId     String
+  createdAt DateTime @default(now())
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, jobId])
+  @@index([userId])
+  @@index([jobId])
+}
+
+model Skip {
+  id        String   @id @default(uuid())
+  userId    String
+  jobId     String
+  createdAt DateTime @default(now())
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, jobId])
+  @@index([userId])
+  @@index([jobId])
+}
+
+model Save {
+  id        String   @id @default(uuid())
+  userId    String
+  jobId     String
+  createdAt DateTime @default(now())
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, jobId])
+  @@index([userId])
+  @@index([jobId])
+}

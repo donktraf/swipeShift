@@ -16,6 +16,7 @@ function createTransporter() {
 }
 
 async function sendMail({ to, subject, html, text }) {
+  console.log("Email verschickt.")
   const transporter = createTransporter();
 
   const from = process.env.MAIL_FROM || "SwipeShift <no-reply@swipeshift.local>";

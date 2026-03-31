@@ -2,327 +2,404 @@
 //  JobSwipeView.swift
 //  swipeShift
 //
-//  Created by DON on 15.12.25.
-//
 
 import SwiftUI
 
 struct JobSwipeView: View {
     @EnvironmentObject var jobStore: JobStore
+    @EnvironmentObject var userStore: UserStore
 
-    // Offset für das aktuell sichtbare Card-Dragging
     @State private var dragOffset: CGSize = .zero
-    @State private var isApplying: Bool = false   // für kleine Farbeffekte, optional
-    
-    private let bottomSafeArea: CGFloat = 120   // 👈 Platz für spätere Funktionen
+    @State private var isAnimatingOut = false
 
-    // Der aktuell erste Job im Feed
-    private var currentJob: Job? {
-        jobStore.jobs.first
-    }
+    // Wie weit gezogen wurde (0…1)
+    private var dragFraction: CGFloat { min(abs(dragOffset.width) / 130, 1.0) }
+    private var isDraggingRight: Bool { dragOffset.width > 20 }
+    private var isDraggingLeft:  Bool { dragOffset.width < -20 }
+    private var rotation: Double { Double(dragOffset.width / 22) }
+
+    // swipeJobs als Quelle — unabhängig von jobs/nearbyJobs
+    private var topJob:  Job? { jobStore.swipeJobs.first }
+    private var nextJob: Job? { jobStore.swipeJobs.dropFirst().first }
 
     var body: some View {
-        ZStack {
-            if let job = currentJob {
+        GeometryReader { geo in
+            ZStack(alignment: .bottom) {
+                SS.background().ignoresSafeArea()
 
-                ZStack {
-                    // Hauptinhalt
-                    VStack(spacing: 16) {
-
-                        // Filter-Leiste
-                        HStack {
-                            Button {
-                                print("Filter tapped")
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "slider.horizontal.3")
-                                    Text("Filter")
-                                }
-                            }
-
-                            Spacer()
-
-                            Button {
-                                print("Expand search area tapped")
-                            } label: {
-                                Text("Expand area")
-                            }
-                        }
-                        .padding(.horizontal)
-
-                        // Job Card (größer)
-                        jobCard(job)
-                            .padding(.horizontal, 16)
-                            .frame(maxHeight: .infinity)          // <-- macht die Karte "großer"
-                            .offset(x: dragOffset.width, y: dragOffset.height)
-                            .rotationEffect(.degrees(Double(dragOffset.width / 20)))
-                            .gesture(
-                                DragGesture()
-                                    .onChanged { value in
-                                        dragOffset = value.translation
-                                    }
-                                    .onEnded { value in
-                                        handleDragEnd(value: value, job: job)
-                                    }
-                            )
-                            .animation(.spring(), value: dragOffset)
-
-                        // Buttons
-                        actionButtons(for: job)
-
-                        Spacer(minLength: bottomSafeArea)         // Platz für bottom bar
-                    }
-
-                    // Fixe Bottom-Bar
-                    VStack {
-                        Spacer()
-                        bottomBar
-                    }
-                }
-
-            } else {
-                // Kein Job mehr im Feed
-                VStack(spacing: 16) {
-                    Text("No more jobs right now")
-                        .font(.title2)
-                        .fontWeight(.semibold)
-
-                    Text("Try expanding your search area or updating your filters.")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 32)
-
-                    Button {
-                        Task { await jobStore.loadJobs() }
-                    } label: {
-                        Text("Refresh")
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(Color.blue)
-                            .foregroundColor(.white)
-                            .cornerRadius(14)
-                    }
-                    .padding(.horizontal, 32)
+                VStack(spacing: 0) {
+                    header
+                    cardArea(geo: geo)
+                    actionBar
+                        .padding(.bottom, 24)
                 }
             }
         }
-        .navigationTitle("Jobs for you")
-        .navigationBarTitleDisplayMode(.inline)
-        
-        .onAppear {
-            Task {
-                print("Loading jobs for location:", jobStore.selectedLocation ?? "nil")
-                await jobStore.loadJobs()
+        .task {
+            if jobStore.swipeJobs.isEmpty {
+                await jobStore.loadSwipeJobs()
             }
         }
     }
-    // MARK: - Job Card View
 
-    private func jobCard(_ job: Job) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+    // MARK: - Header
 
-            // Top: Logo + Titel + Company
-            HStack(alignment: .center, spacing: 12) {
-                Text(job.logoEmoji)
-                    .font(.system(size: 32))
-                    .frame(width: 56, height: 56)
-                    .background(Color.gray.opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: 18))
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(job.title)
-                        .font(.headline)
-
-                    Text(job.company)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-
-                Spacer()
-            }
-
-            // Pay & Distance
-            HStack(spacing: 12) {
-                labelCapsule(text: job.payText, systemImage: "eurosign.circle")
-
-                labelCapsule(text: job.distanceText, systemImage: "mappin.and.ellipse")
-            }
-
-            // Shift time & info
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 4) {
-                    Image(systemName: "clock")
-                    Text(job.shiftText)
-                }
-                .font(.subheadline)
-
-                Text(job.shortInfo)
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-            }
-
-            // Tags
-            if !job.tags.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(job.tags, id: \.self) { tag in
-                            Text(tag)
-                                .font(.caption)
-                                .padding(.vertical, 4)
-                                .padding(.horizontal, 8)
-                                .background(Color.blue.opacity(0.08))
-                                .foregroundColor(.blue)
-                                .clipShape(Capsule())
-                        }
-                    }
-                }
-            }
-            
-            Spacer()
-        }
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 28)
-                .fill(Color(.systemBackground))
-                .shadow(color: Color.black.opacity(0.15), radius: 12, x: 0, y: 6)
-        )
-    }
-    
-    private var bottomBar: some View {
+    private var header: some View {
         HStack {
-            Text("Actions coming soon")
-                .font(.caption)
-                .foregroundColor(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .frame(height: bottomSafeArea)
-        .background(Color(.secondarySystemBackground))
-    }
-
-    // Kleine Helfer für Pills
-    private func labelCapsule(text: String, systemImage: String) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: systemImage)
-            Text(text)
-        }
-        .font(.caption)
-        .padding(.vertical, 4)
-        .padding(.horizontal, 8)
-        .background(Color.gray.opacity(0.1))
-        .clipShape(Capsule())
-    }
-
-    // MARK: - Actions unter der Card
-
-    private func actionButtons(for job: Job) -> some View {
-        HStack(spacing: 16) {
-            // Not interested (rechts-Swipe)
-            Button {
-                withAnimation {
-                    dragOffset = .zero
-                }
-                Task {
-                    await jobStore.skip(job)
-                }
-            } label: {
-                VStack {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 32))
-                    Text("Not interested")
-                        .font(.caption)
-                }
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Swipe")
+                    .font(.system(size: 28, weight: .bold))
+                    .foregroundColor(.white)
+                Text("\(jobStore.swipeJobs.count) jobs available")
+                    .font(.system(size: 13))
+                    .foregroundColor(.white.opacity(0.7))
             }
-
             Spacer()
-
-            // Save
-            /*Button {
-                jobStore.save(job) //-- Später schauen was damit ist
-            } label: {
-                VStack {
-                    Image(systemName: "bookmark")
-                        .font(.system(size: 24))
-                    Text("Save")
-                        .font(.caption)
-                }
-            }*/
-
-            Spacer()
-
-            // Share
-            Button {
-                print("Share job:", job.title)
-                // Später: ShareSheet
-            } label: {
-                VStack {
-                    Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 24))
-                    Text("Share")
-                        .font(.caption)
-                }
-            }
-
-            Spacer()
-
-            // Apply (links-Swipe)
-            Button {
-                withAnimation {
-                    dragOffset = .zero
-                }
-                Task {
-                    await jobStore.apply(to: job)
-                }
-            } label: {
-                VStack {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 32))
-                    Text("Apply")
-                        .font(.caption)
-                }
+            Button { /* TODO: Filter */ } label: {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundColor(SS.primary)
+                    .padding(10)
+                    .background(Color.white)
+                    .clipShape(Circle())
+                    .shadow(color: .black.opacity(0.08), radius: 4, x: 0, y: 2)
             }
         }
-        .padding(.horizontal, 32)
+        .padding(.horizontal, 16)
         .padding(.top, 8)
-        
-        
+        .padding(.bottom, 14)
+    }
+
+    // MARK: - Card Area
+
+    private func cardArea(geo: GeometryProxy) -> some View {
+        let cardH = geo.size.height * 0.63
+
+        return ZStack {
+            if jobStore.swipeJobs.isEmpty {
+                emptyState
+            } else {
+                // Karte 3 (ganz hinten, kaum sichtbar)
+                if jobStore.swipeJobs.count >= 3 {
+                    SwipeJobCard(job: jobStore.swipeJobs[2])
+                        .frame(height: cardH)
+                        .scaleEffect(0.91)
+                        .offset(y: -10)
+                        .zIndex(1)
+                }
+                // Karte 2 (mittig)
+                if jobStore.swipeJobs.count >= 2 {
+                    SwipeJobCard(job: jobStore.swipeJobs[1])
+                        .frame(height: cardH)
+                        .scaleEffect(0.96)
+                        .offset(y: -5)
+                        .zIndex(2)
+                }
+                // Top-Karte (ziehbar)
+                if let job = jobStore.swipeJobs.first {
+                    SwipeJobCard(
+                        job: job,
+                        dragFraction: dragFraction,
+                        isDraggingRight: isDraggingRight,
+                        isDraggingLeft: isDraggingLeft
+                    )
+                    .frame(height: cardH)
+                    .offset(x: dragOffset.width, y: dragOffset.height * 0.25)
+                    .rotationEffect(.degrees(rotation))
+                    .zIndex(3)
+                    .gesture(
+                        DragGesture()
+                            .onChanged { dragOffset = $0.translation }
+                            .onEnded   { handleDragEnd($0, job: job) }
+                    )
+                    .animation(.interactiveSpring(response: 0.35, dampingFraction: 0.72), value: dragOffset)
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: - Action Bar
+
+    private var actionBar: some View {
+        HStack(spacing: 36) {
+            // Skip (links)
+            circleButton(icon: "xmark", color: .red, size: 58) {
+                if let job = jobStore.swipeJobs.first { animateSwipe(direction: -1, job: job) }
+            }
+
+            // Bookmark (speichern)
+            circleButton(icon: "bookmark", color: SS.primary, size: 44) {
+                // TODO: POST /jobs/:id/save
+            }
+
+            // Apply (rechts)
+            circleButton(icon: "checkmark", color: .green, size: 58) {
+                if let job = jobStore.swipeJobs.first { animateSwipe(direction: 1, job: job) }
+            }
+        }
+        .padding(.top, 22)
+    }
+
+    private func circleButton(icon: String, color: Color, size: CGFloat, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: size * 0.38, weight: .bold))
+                .foregroundColor(color)
+                .frame(width: size, height: size)
+                .background(Color.white)
+                .clipShape(Circle())
+                .shadow(color: color.opacity(0.22), radius: 10, x: 0, y: 4)
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Empty State
+
+    private var emptyState: some View {
+        VStack(spacing: 18) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 52))
+                .foregroundColor(.white.opacity(0.35))
+            Text("Keine Jobs mehr")
+                .font(.system(size: 20, weight: .bold))
+                .foregroundColor(.white.opacity(0.8))
+            Text("Expand your search or\ncheck back later.")
+                .font(.system(size: 14))
+                .foregroundColor(.white.opacity(0.5))
+                .multilineTextAlignment(.center)
+            Button {
+                Task { await jobStore.loadJobsAll() }
+            } label: {
+                Text("Refresh")
+            }
+            .buttonStyle(SSPrimaryButtonStyle())
+            .padding(.horizontal, 60)
+        }
     }
 
     // MARK: - Swipe-Logik
 
-    private func handleDragEnd(value: DragGesture.Value, job: Job) {
-        let threshold: CGFloat = 120  // wie weit man wischen muss
-
-        if value.translation.width <= -threshold {
-            // 👉 Links-Swipe = interessiert / apply
-            withAnimation {
-                dragOffset = .zero
-            }
-            Task {
-                await jobStore.apply(to: job)
-            }
-
-        } else if value.translation.width >= threshold {
-            // 👉 Rechts-Swipe = nicht interessiert / entfernen
-            withAnimation {
-                dragOffset = .zero
-            }
-            Task {
-                await jobStore.skip(job)
-            }
-
+    private func handleDragEnd(_ value: DragGesture.Value, job: Job) {
+        let threshold: CGFloat = 110
+        if value.translation.width >= threshold {
+            animateSwipe(direction: 1, job: job)   // rechts = apply
+        } else if value.translation.width <= -threshold {
+            animateSwipe(direction: -1, job: job)  // links = skip
         } else {
-            // Zu wenig gewischt → Karte zurückspringen
-            withAnimation {
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.75)) {
                 dragOffset = .zero
+            }
+        }
+    }
+
+    private func animateSwipe(direction: CGFloat, job: Job) {
+        withAnimation(.easeIn(duration: 0.28)) {
+            dragOffset = CGSize(width: direction * 700, height: 0)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
+            dragOffset = .zero
+            Task {
+                if direction > 0 { await jobStore.apply(to: job) }
+                else             { await jobStore.skip(job) }
             }
         }
     }
 }
 
-#Preview {
-    NavigationStack {
-        JobSwipeView()
-            .environmentObject(JobStore())
+// MARK: - SwipeJobCard
+
+private struct SwipeJobCard: View {
+    let job: Job
+    var dragFraction: CGFloat = 0
+    var isDraggingRight: Bool = false
+    var isDraggingLeft:  Bool = false
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            VStack(alignment: .leading, spacing: 0) {
+                cardHeader
+                Divider().padding(.horizontal, 16)
+                quickInfoRow
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                Divider().padding(.horizontal, 16)
+                descriptionBlock
+                tagsBlock
+                Spacer(minLength: 0)
+                cardFooter
+            }
+            .background(Color(uiColor: .systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+            .shadow(color: .black.opacity(0.13), radius: 20, x: 0, y: 8)
+
+            // APPLY Badge
+            if isDraggingRight && dragFraction > 0.08 {
+                badgeView(text: "APPLY ✓", color: .green, rotation: -14)
+                    .opacity(Double(dragFraction))
+            }
+
+            // SKIP Badge
+            if isDraggingLeft && dragFraction > 0.08 {
+                badgeView(text: "SKIP ✗", color: .red, rotation: 14)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .padding(.horizontal, 16)
+                    .opacity(Double(dragFraction))
+            }
+        }
     }
+
+    // MARK: Card sections
+
+    private var cardHeader: some View {
+        HStack(spacing: 14) {
+            Text(job.logoEmoji)
+                .font(.system(size: 36))
+                .frame(width: 64, height: 64)
+                .background(Color.gray.opacity(0.07))
+                .clipShape(RoundedRectangle(cornerRadius: 18))
+
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 6) {
+                    Text(job.title)
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundColor(.primary)
+                        .lineLimit(1)
+                    if job.isVerified == true {
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(.system(size: 13))
+                            .foregroundColor(SS.primary)
+                    }
+                }
+                Text(job.company)
+                    .font(.system(size: 13))
+                    .foregroundColor(.secondary)
+
+                if let cat = job.category {
+                    Text(cat)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(SS.primary)
+                        .clipShape(Capsule())
+                }
+            }
+            Spacer()
+        }
+        .padding(16)
+    }
+
+    private var quickInfoRow: some View {
+        HStack(spacing: 10) {
+            SwipePill(icon: "mappin",    text: job.location)
+            SwipePill(icon: "banknote",  text: job.payText)
+            if let dur = job.duration {
+                SwipePill(icon: "clock", text: dur)
+            }
+        }
+    }
+
+    private var descriptionBlock: some View {
+        Text(job.shortInfo)
+            .font(.system(size: 13))
+            .foregroundColor(.secondary)
+            .lineLimit(3)
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
+            .padding(.bottom, 4)
+    }
+
+    private var tagsBlock: some View {
+        Group {
+            if !job.tags.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(job.tags, id: \.self) { tag in
+                            Text(tag)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(SS.primary)
+                                .padding(.vertical, 5)
+                                .padding(.horizontal, 10)
+                                .background(SS.primary.opacity(0.1))
+                                .clipShape(Capsule())
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                }
+                .padding(.vertical, 8)
+            }
+        }
+    }
+
+    private var cardFooter: some View {
+        HStack {
+            Label(job.shiftText, systemImage: "calendar")
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+                .lineLimit(1)
+            Spacer()
+            if let spots = job.openSpots {
+                Label("\(spots) offen", systemImage: "person.2")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.green)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(Color.gray.opacity(0.04))
+        .clipShape(
+            .rect(
+                bottomLeadingRadius: 28,
+                bottomTrailingRadius: 28,
+                style: .continuous
+            )
+        )
+    }
+
+    // MARK: Badge
+
+    private func badgeView(text: String, color: Color, rotation: Double) -> some View {
+        Text(text)
+            .font(.system(size: 18, weight: .black))
+            .foregroundColor(color)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(color, lineWidth: 2.5)
+            )
+            .rotationEffect(.degrees(rotation))
+            .padding(.horizontal, 16)
+            .padding(.top, 20)
+    }
+}
+
+// MARK: - SwipePill
+
+private struct SwipePill: View {
+    let icon: String
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 11))
+            Text(text)
+                .font(.system(size: 12))
+                .lineLimit(1)
+        }
+        .foregroundColor(.secondary)
+        .padding(.vertical, 5)
+        .padding(.horizontal, 9)
+        .background(Color.gray.opacity(0.08))
+        .clipShape(Capsule())
+    }
+}
+
+#Preview {
+    JobSwipeView()
+        .environmentObject(JobStore())
+        .environmentObject(UserStore())
 }

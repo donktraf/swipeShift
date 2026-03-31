@@ -9,16 +9,49 @@
 
 import Foundation
 
-// Einfaches Job-Modell für das Swipe-UI
+/// Eine einzelne Schicht innerhalb eines Jobs (für Mehrfach-Schicht-Auswahl im Apply Flow)
+struct JobShift: Identifiable, Equatable {
+    let id: String
+    let date: String        // z.B. "Mo, 12. Mai"
+    let timeRange: String   // z.B. "18:00–23:00"
+    let duration: String    // z.B. "5 Stunden"
+    let totalPay: String    // z.B. "€75 gesamt"
+}
+
 struct Job: Identifiable, Equatable {
-    let id: String              // kommt als UUID-String vom Backend
-    let title: String           // Job Title
-    let company: String         // Company Name
-    let location: String        // z.B. "Berlin"
-    let payText: String         // z.B. "€15 / hour"
-    let distanceText: String    // z.B. "1.8 miles away"
-    let shiftText: String       // z.B. "Today, 18:00–22:00"
-    let shortInfo: String       // Short Shift Info
-    let tags: [String]          // z.B. ["Flexible", "Same-day Pay"]
-    let logoEmoji: String       // Einfaches Placeholder-"Logo" (Emoji)
+    let id: String
+    let title: String
+    let company: String
+    let location: String
+    let payText: String
+    let distanceText: String
+    let shiftText: String
+    let shortInfo: String
+    let tags: [String]
+    let logoEmoji: String
+
+    // Koordinaten für Radar/Map
+    let lat: Double?
+    let lng: Double?
+
+    // Für Pin-Farben im Radar + Detail
+    let payAmount: Double?      // Stundenlohn als Zahl (z.B. 15.0)
+    let startTime: Date?        // Schichtbeginn als Date
+    let category: String?
+
+    // Detail-View Felder
+    let jobDescription: String?
+    let tasks: [String]?
+    let openSpots: Int?
+    let duration: String?           // z.B. "5 Stunden"
+    let dressCode: String?
+    let languages: [String]?
+    let experienceLevel: String?    // z.B. "Keine Erfahrung nötig"
+    let minAge: Int?
+    let paymentMethod: String?      // z.B. "Same-day Pay"
+    let contractType: String?       // z.B. "Freelance"
+    let companyRating: Double?      // z.B. 4.7
+    let replyTime: String?          // z.B. "Antwortet meist innerhalb von 2 Stunden"
+    let isVerified: Bool?
+    let shifts: [JobShift]?     // nil oder 1 Eintrag = single-shift, 2+ = multi-shift
 }

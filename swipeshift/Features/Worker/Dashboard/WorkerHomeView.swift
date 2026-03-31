@@ -8,6 +8,7 @@ import SwiftUI
 struct WorkerHomeView: View {
     @EnvironmentObject var userStore: UserStore
     @EnvironmentObject var jobStore: JobStore
+    @EnvironmentObject var messageStore: MessageStore
 
     @State private var selectedTab: WorkerTab = .home
 
@@ -39,8 +40,8 @@ struct WorkerHomeView: View {
                         RadarView()
 
                     case .messages:
-                        // TODO: MessagesView implementieren
-                        PlaceholderTabView(title: "Messages", icon: "envelope.fill")
+                        MessagesView()
+                            .environmentObject(messageStore)
 
                     case .swipe:
                         JobSwipeView()
@@ -52,8 +53,8 @@ struct WorkerHomeView: View {
                             }
 
                     case .profile:
-                        // TODO: WorkerProfileView implementieren
-                        ProfilePlaceholderView()
+                        WorkerProfileView()
+                            .environmentObject(userStore)
                     }
                 }
                 // Genug Platz für TabBar lassen
@@ -62,8 +63,11 @@ struct WorkerHomeView: View {
                 // MARK: - Tab Bar
                 VStack(spacing: 0) {
                     Spacer()
-                    AppTabBar(selectedTab: $selectedTab)
-                        .padding(.bottom, 8)
+                    AppTabBar(
+                        selectedTab: $selectedTab,
+                        unreadMessageCount: messageStore.unreadCount
+                    )
+                    .padding(.bottom, 8)
                 }
                 .ignoresSafeArea(edges: .bottom)
             }
@@ -149,4 +153,5 @@ struct ProfilePlaceholderView: View {
     WorkerHomeView()
         .environmentObject(UserStore())
         .environmentObject(JobStore())
+        .environmentObject(MessageStore())
 }

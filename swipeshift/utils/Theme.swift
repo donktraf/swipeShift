@@ -8,10 +8,10 @@
 import SwiftUI
 
 enum SS {
-    // Primary from Hex: #5B5CE6
-    static let primary = Color(red: 91/255, green: 92/255, blue: 230/255)
-    static let bgTop = Color(red: 91/255, green: 92/255, blue: 230/255).opacity(0.95)
-    static let bgBottom = Color(red: 124/255, green: 58/255, blue: 237/255).opacity(0.95)
+    // Primary from Hex: #2563EB — Electric Blue
+    static let primary = Color(red: 37/255, green: 99/255, blue: 235/255)
+    static let bgTop    = Color(red: 29/255, green: 78/255, blue: 216/255).opacity(0.97)
+    static let bgBottom = Color(red: 30/255, green: 58/255, blue: 138/255).opacity(0.97)
 
     static let cardRadius: CGFloat = 34
     static let controlRadius: CGFloat = 16

@@ -7,6 +7,7 @@
 
 import Foundation
 import UIKit
+import Combine
 
 // Einfacher API-Client fürs MVP (später: Error-Typen, Refresh-Token, etc.)
 final class APIClient {
@@ -56,7 +57,7 @@ final class APIClient {
         _ = try await URLSession.shared.data(for: req)
     }
 
-    func fetchJobs(location: String? = nil) async throws -> [Job] {
+    func fetchJobs(location: String? = nil, type: String? = nil, category: String? = nil) async throws -> [Job] {
 
         // 1) URL: /jobs
         var components = URLComponents(
@@ -64,14 +65,19 @@ final class APIClient {
             resolvingAgainstBaseURL: false
         )!
 
-        // 2) Optionaler Filter: ?location=Berlin
+        // 2) Optionale Query-Parameter
+        var queryItems: [URLQueryItem] = []
         if let location, !location.isEmpty {
-            components.queryItems = [
-                URLQueryItem(
-                    name: "location",
-                    value: location.trimmingCharacters(in: .whitespacesAndNewlines)
-                )
-            ]
+            queryItems.append(URLQueryItem(name: "location", value: location.trimmingCharacters(in: .whitespacesAndNewlines)))
+        }
+        if let type, !type.isEmpty {
+            queryItems.append(URLQueryItem(name: "type", value: type))
+        }
+        if let category, !category.isEmpty {
+            queryItems.append(URLQueryItem(name: "category", value: category))
+        }
+        if !queryItems.isEmpty {
+            components.queryItems = queryItems
         }
 
         // 3) HTTP Request bauen
@@ -440,6 +446,94 @@ final class APIClient {
             return try JSONDecoder().decode(UserDTO.self, from: data)
         }
     
+    func fetchNearbyJobs(lat: Double, lng: Double, radius: Double = 100) async throws -> [Job] {
+        var components = URLComponents(
+            url: baseURL.appendingPathComponent("jobs/nearby"),
+            resolvingAgainstBaseURL: false
+        )!
+
+        components.queryItems = [
+            URLQueryItem(name: "lat",    value: String(lat)),
+            URLQueryItem(name: "lng",    value: String(lng)),
+            URLQueryItem(name: "radius", value: String(radius)),
+        ]
+
+        var request = URLRequest(url: components.url!)
+        request.httpMethod = "GET"
+
+        if let token {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+
+        print("Requesting nearby jobs:", request.url?.absoluteString ?? "nil")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let http = response as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+
+        guard (200...299).contains(http.statusCode) else {
+            let body = String(data: data, encoding: .utf8) ?? ""
+            throw NSError(
+                domain: "APIError",
+                code: http.statusCode,
+                userInfo: [NSLocalizedDescriptionKey: "HTTP \(http.statusCode): \(body)"]
+            )
+        }
+
+        struct JobsResponse: Decodable { let jobs: [JobDTO] }
+        let decoded = try JSONDecoder().decode(JobsResponse.self, from: data)
+        return decoded.jobs.map { $0.toDomain() }
+    }
+
+    // POST /jobs — Job erstellen (Arbeitgeber)
+    func postJob(_ request: PostJobRequest) async throws {
+        var req = try makeRequest(path: "/jobs", method: "POST")
+        req.httpBody = try JSONEncoder().encode(request)
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try validate(response: response, data: data)
+    }
+
+    // GET /jobs/mine — eigene Jobs des Arbeitgebers
+    func fetchMyJobs() async throws -> [EmployerJob] {
+        let req = try makeRequest(path: "/jobs/mine", method: "GET")
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try validate(response: response, data: data)
+        struct Resp: Decodable { let jobs: [EmployerJob] }
+        return try JSONDecoder().decode(Resp.self, from: data).jobs
+    }
+
+    // PATCH /jobs/:id/status
+    func updateJobStatus(jobId: String, status: String) async throws {
+        var req = try makeRequest(path: "/jobs/\(jobId)/status", method: "PATCH")
+        req.httpBody = try JSONSerialization.data(withJSONObject: ["status": status])
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try validate(response: response, data: data)
+    }
+
+    // GET /employer/applicants
+    func fetchApplicants() async throws -> [Applicant] {
+        let req = try makeRequest(path: "/employer/applicants", method: "GET")
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try validate(response: response, data: data)
+        struct Resp: Decodable { let applicants: [Applicant] }
+        return try JSONDecoder().decode(Resp.self, from: data).applicants
+    }
+
+    // POST /employer/applicants/:applyId/accept
+    func acceptApplicant(applyId: String) async throws {
+        let req = try makeRequest(path: "/employer/applicants/\(applyId)/accept", method: "POST")
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try validate(response: response, data: data)
+    }
+
+    // POST /employer/applicants/:applyId/decline
+    func declineApplicant(applyId: String) async throws {
+        let req = try makeRequest(path: "/employer/applicants/\(applyId)/decline", method: "POST")
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try validate(response: response, data: data)
+    }
 }
 
 func validate(response: URLResponse, data: Data) throws {

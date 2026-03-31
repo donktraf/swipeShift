@@ -7,6 +7,7 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject var userStore: UserStore
+    @EnvironmentObject var messageStore: MessageStore
 
     var body: some View {
         Group {
@@ -33,8 +34,12 @@ struct ContentView: View {
                 } else {
                     if let role = user.role {
                         switch role {
-                        case .worker: WorkerHomeView()
-                        case .employer: EmployerHomeView()
+                        case .worker:
+                            WorkerHomeView()
+                                .environmentObject(messageStore)
+                        case .employer:
+                            EmployerHomeView()
+                                .environmentObject(messageStore)
                         }
                     } else {
                         NavigationStack {
@@ -75,4 +80,5 @@ struct ContentView: View {
     ContentView()
         .environmentObject(UserStore())
         .environmentObject(JobStore())
+        .environmentObject(MessageStore())
 }

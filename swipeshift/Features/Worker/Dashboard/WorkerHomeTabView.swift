@@ -35,8 +35,8 @@ struct WorkerHomeTabView: View {
                     Spacer()
 
                     // Notification Bell
-                    Button {
-                        // TODO: Notifications
+                    NavigationLink {
+                        NotificationsView()
                     } label: {
                         Image(systemName: "bell")
                             .font(.system(size: 20, weight: .semibold))
@@ -45,6 +45,7 @@ struct WorkerHomeTabView: View {
                             .background(Color.gray.opacity(0.08))
                             .clipShape(Circle())
                     }
+                    .buttonStyle(.plain)
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
@@ -80,43 +81,40 @@ struct WorkerHomeTabView: View {
                     CategoryScrollView(onSelect: onCategorySelected)
                 }
 
-                // MARK: - Job Sections
-                // Jede Sektion zeigt aktuell alle Jobs (prefix 2).
-                // TODO: Backend soll später spezifische Endpunkte liefern:
-                //   GET /jobs?type=recommended
-                //   GET /jobs?type=quickMoney   (unter 4h, bald, gute Bezahlung)
-                //   GET /jobs?type=startingSoon (heute/morgen)
-                //   GET /jobs?type=popular      (10+ Bewerbungen)
+                // MARK: - Job Sections (echte Backend-Filter)
 
                 JobSectionView(
-                    title: "Here are jobs you might like today",
-                    jobs: jobStore.jobs,
+                    title: "Recommended for You",
+                    jobs: jobStore.recommendedJobs,
                     onViewAll: onViewAllJobs
                 )
 
                 JobSectionView(
                     title: "Quick Money Jobs",
-                    jobs: jobStore.jobs, // TODO: GET /jobs?type=quickMoney
-                    onViewAll: onViewAllJobs
-                )
-
-                JobSectionView(
-                    title: "Recommended for You",
-                    jobs: jobStore.jobs, // TODO: GET /jobs?type=recommended
+                    jobs: jobStore.quickMoneyJobs,
                     onViewAll: onViewAllJobs
                 )
 
                 JobSectionView(
                     title: "Starting Soon",
-                    jobs: jobStore.jobs, // TODO: GET /jobs?type=startingSoon
+                    jobs: jobStore.startingSoonJobs,
                     onViewAll: onViewAllJobs
                 )
 
                 JobSectionView(
                     title: "Popular This Week",
-                    jobs: jobStore.jobs, // TODO: GET /jobs?type=popular
+                    jobs: jobStore.popularJobs,
                     onViewAll: onViewAllJobs
                 )
+
+                // Alle Jobs als Fallback-Sektion wenn andere leer sind
+                if jobStore.recommendedJobs.isEmpty && jobStore.quickMoneyJobs.isEmpty {
+                    JobSectionView(
+                        title: "Here are jobs you might like today",
+                        jobs: jobStore.jobs,
+                        onViewAll: onViewAllJobs
+                    )
+                }
 
                 // MARK: - Bottom CTAs
                 VStack(spacing: 8) {
@@ -144,11 +142,13 @@ struct WorkerHomeTabView: View {
             }
         }
         .task {
-            // Jobs laden wenn Tab erscheint
             if let location = userStore.currentUser?.location {
                 jobStore.selectedLocation = location
             }
-            await jobStore.loadJobs()
+            // Basis-Jobs + alle Dashboard-Sektionen parallel laden
+            async let base     = jobStore.loadJobs()
+            async let sections = jobStore.loadDashboardSections()
+            _ = await (base, sections)
         }
     }
 }
