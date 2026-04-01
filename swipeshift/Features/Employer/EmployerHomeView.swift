@@ -128,8 +128,9 @@ private struct EmployerPlaceholderTab: View {
 // MARK: - Employer Profile Tab
 private struct EmployerProfileTab: View {
     @EnvironmentObject var userStore: UserStore
-    @State private var showFinancial = false
-    @State private var showCalendar  = false
+    @State private var showEditProfile = false
+    @State private var showFinancial   = false
+    @State private var showCalendar    = false
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -171,7 +172,7 @@ private struct EmployerProfileTab: View {
 
                     // Edit Profile Button
                     Button {
-                        // TODO: → EditEmployerProfileView
+                        showEditProfile = true
                     } label: {
                         Text("Edit Profile")
                             .font(.system(size: 14, weight: .semibold))
@@ -226,6 +227,10 @@ private struct EmployerProfileTab: View {
 
                 Spacer().frame(height: 100)
             }
+        }
+        .navigationDestination(isPresented: $showEditProfile) {
+            EditEmployerProfileView()
+                .environmentObject(userStore)
         }
         .navigationDestination(isPresented: $showFinancial) {
             EmployerFinancialView()
