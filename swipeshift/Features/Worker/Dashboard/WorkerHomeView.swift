@@ -37,7 +37,10 @@ struct WorkerHomeView: View {
                         )
 
                     case .radar:
-                        RadarView()
+                        RadarView(
+                            lat: userStore.currentUser?.lat ?? 48.7758,
+                            lng: userStore.currentUser?.lng ?? 9.1829
+                        )
 
                     case .messages:
                         MessagesView()

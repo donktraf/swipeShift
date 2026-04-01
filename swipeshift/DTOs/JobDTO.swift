@@ -26,7 +26,7 @@ struct JobDTO: Decodable, Identifiable {
     let company: String
     let location: String
     let payText: String
-    let distanceText: String
+    let distanceText: String?
     let shiftText: String
     let shortInfo: String
     let tags: [String]
@@ -61,7 +61,7 @@ extension JobDTO {
         }
         return Job(
             id: id, title: title, company: company, location: location,
-            payText: payText, distanceText: distanceText, shiftText: shiftText,
+            payText: payText, distanceText: distanceText ?? "", shiftText: shiftText,
             shortInfo: shortInfo, tags: tags, logoEmoji: logoEmoji,
             lat: lat, lng: lng, payAmount: payAmount, startTime: parsedStartTime,
             category: category, jobDescription: jobDescription, tasks: tasks,

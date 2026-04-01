@@ -7,6 +7,7 @@ import SwiftUI
 import MapKit
 
 // MARK: - ScrollOffset PreferenceKey
+
 private struct ScrollOffsetKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
@@ -15,17 +16,27 @@ private struct ScrollOffsetKey: PreferenceKey {
 }
 
 // MARK: - RadarView
+
 struct RadarView: View {
     @EnvironmentObject var userStore: UserStore
     @EnvironmentObject var jobStore: JobStore
 
+    // Initiale Region kommt direkt vom User — kein Berlin-Flash
+    @State private var mapRegion: MKCoordinateRegion
     @State private var isLoading = false
     @State private var selectedJobId: String? = nil
-    @State private var mapRegion: MKCoordinateRegion = MKCoordinateRegion(
-        center: CLLocationCoordinate2D(latitude: 52.52, longitude: 13.405), // Berlin Fallback
-        span: MKCoordinateSpan(latitudeDelta: 0.8, longitudeDelta: 0.8)
-    )
-    @State private var mapHeightFraction: CGFloat = 0.45  // 45% initial, 25% beim Scrollen
+    @State private var mapHeightFraction: CGFloat = 0.45
+    @State private var showRadiusSheet = false
+    @State private var selectedRadius: Double = 100
+
+    private let radiusOptions: [Double] = [5, 10, 25, 50, 100]
+
+    init(lat: Double = 48.7758, lng: Double = 9.1829) {
+        _mapRegion = State(initialValue: MKCoordinateRegion(
+            center: CLLocationCoordinate2D(latitude: lat, longitude: lng),
+            span: MKCoordinateSpan(latitudeDelta: 0.8, longitudeDelta: 0.8)
+        ))
+    }
 
     var body: some View {
         GeometryReader { geo in
@@ -50,7 +61,6 @@ struct RadarView: View {
 
                         Spacer()
 
-                        // Refresh Button
                         Button {
                             Task { await loadJobs() }
                         } label: {
@@ -75,7 +85,7 @@ struct RadarView: View {
                     .padding(.top, 8)
                     .padding(.bottom, 10)
 
-                    // MARK: - Map (UIViewRepresentable mit Clustering)
+                    // MARK: - Map
                     ClusterMapView(
                         jobs: jobsWithCoords,
                         pinColor: { pinColor(for: $0) },
@@ -83,7 +93,6 @@ struct RadarView: View {
                         onJobTapped: { job in
                             withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                                 selectedJobId = job.id
-                                // Kamera auf Pin zentrieren
                                 mapRegion = MKCoordinateRegion(
                                     center: CLLocationCoordinate2D(latitude: job.lat!, longitude: job.lng!),
                                     span: MKCoordinateSpan(latitudeDelta: 0.05, longitudeDelta: 0.05)
@@ -96,7 +105,6 @@ struct RadarView: View {
                     .animation(.spring(response: 0.4, dampingFraction: 0.8), value: mapHeightFraction)
                     .clipShape(RoundedRectangle(cornerRadius: mapHeightFraction < 0.40 ? 16 : 0))
                     .overlay(alignment: .bottomLeading) {
-                        // Legende
                         HStack(spacing: 10) {
                             LegendDot(color: SS.primary, label: "Standard")
                             LegendDot(color: .orange, label: "Starting soon")
@@ -108,7 +116,7 @@ struct RadarView: View {
                         .padding(10)
                     }
 
-                    // MARK: - Zähler + Filter
+                    // MARK: - Counter + Radius Filter
                     HStack {
                         Text("Showing \(jobsWithCoords.count) jobs near you")
                             .font(.system(size: 13, weight: .medium))
@@ -116,13 +124,12 @@ struct RadarView: View {
 
                         Spacer()
 
-                        // TODO: Radius-Filter implementieren
                         Button {
-                            // Placeholder
+                            showRadiusSheet = true
                         } label: {
                             HStack(spacing: 4) {
                                 Image(systemName: "slider.horizontal.3")
-                                Text("Filter")
+                                Text("\(Int(selectedRadius)) km")
                             }
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundColor(SS.primary)
@@ -136,10 +143,10 @@ struct RadarView: View {
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
 
-                    // MARK: - Job-Liste
+                    // MARK: - Job List
                     if isLoading {
                         Spacer()
-                        ProgressView("Lade Jobs...")
+                        ProgressView("Loading jobs...")
                             .foregroundColor(.white)
                         Spacer()
 
@@ -149,7 +156,6 @@ struct RadarView: View {
                     } else {
                         ScrollViewReader { scrollProxy in
                             ScrollView(showsIndicators: false) {
-                                // Anchor oben für Scroll-Offset-Messung
                                 GeometryReader { inner in
                                     Color.clear.preference(
                                         key: ScrollOffsetKey.self,
@@ -174,7 +180,6 @@ struct RadarView: View {
                             }
                             .coordinateSpace(name: "radarScroll")
                             .onPreferenceChange(ScrollOffsetKey.self) { offset in
-                                // offset < -20 → Scrollen → Map verkleinern
                                 let collapsed = offset < -20
                                 let target: CGFloat = collapsed ? 0.25 : 0.45
                                 if abs(target - mapHeightFraction) > 0.01 {
@@ -183,7 +188,6 @@ struct RadarView: View {
                                     }
                                 }
                             }
-                            // Wenn selectedJobId sich ändert (durch Pin-Tap), scrolle zur Karte
                             .onChange(of: selectedJobId) { _, newId in
                                 if let id = newId {
                                     withAnimation(.easeInOut(duration: 0.35)) {
@@ -197,34 +201,91 @@ struct RadarView: View {
             }
         }
         .task {
-            // Nur beim ersten Erscheinen laden, nicht nach jedem dismiss von JobDetailView.
-            // Dadurch bleiben Pins sichtbar auch wenn ein Job bereits beworben wurde.
             if jobStore.nearbyJobs.isEmpty {
                 await loadJobs()
             }
         }
+        // Nach Rückkehr von JobDetailView: Map auf highlighted Pin zentrieren
+        .onAppear {
+            if let id = selectedJobId,
+               let job = jobStore.nearbyJobs.first(where: { $0.id == id }),
+               let lat = job.lat, let lng = job.lng {
+                withAnimation(.easeInOut(duration: 0.4)) {
+                    mapRegion = MKCoordinateRegion(
+                        center: CLLocationCoordinate2D(latitude: lat, longitude: lng),
+                        span: MKCoordinateSpan(latitudeDelta: 0.05, longitudeDelta: 0.05)
+                    )
+                }
+            }
+        }
+        .sheet(isPresented: $showRadiusSheet) {
+            radiusSheet
+        }
     }
 
-    // MARK: - Helper
+    // MARK: - Radius Sheet
 
-    /// Nur Jobs mit gültigen Koordinaten für die Map
+    private var radiusSheet: some View {
+        VStack(spacing: 0) {
+            // Handle
+            Capsule()
+                .fill(Color.gray.opacity(0.3))
+                .frame(width: 40, height: 4)
+                .padding(.top, 12)
+                .padding(.bottom, 20)
+
+            Text("Search Radius")
+                .font(.system(size: 18, weight: .bold))
+                .padding(.bottom, 20)
+
+            VStack(spacing: 0) {
+                ForEach(radiusOptions, id: \.self) { option in
+                    Button {
+                        selectedRadius = option
+                        showRadiusSheet = false
+                        Task { await loadJobs() }
+                    } label: {
+                        HStack {
+                            Text("\(Int(option)) km")
+                                .font(.system(size: 16))
+                                .foregroundColor(.primary)
+                            Spacer()
+                            if selectedRadius == option {
+                                Image(systemName: "checkmark")
+                                    .foregroundColor(SS.primary)
+                                    .font(.system(size: 14, weight: .semibold))
+                            }
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 16)
+                    }
+                    if option != radiusOptions.last {
+                        Divider().padding(.leading, 20)
+                    }
+                }
+            }
+            .background(Color(uiColor: .systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .padding(.horizontal, 16)
+
+            Spacer()
+        }
+        .presentationDetents([.fraction(0.42)])
+        .presentationDragIndicator(.hidden)
+    }
+
+    // MARK: - Helpers
+
     private var jobsWithCoords: [Job] {
         jobStore.nearbyJobs.filter { $0.lat != nil && $0.lng != nil }
     }
 
-    /// Pin-Farbe basierend auf startTime und payAmount
     private func pinColor(for job: Job) -> Color {
-        // Orange: startet innerhalb von 5 Stunden
         if let start = job.startTime {
             let hoursUntilStart = start.timeIntervalSinceNow / 3600
-            if hoursUntilStart > 0 && hoursUntilStart <= 5 {
-                return .orange
-            }
+            if hoursUntilStart > 0 && hoursUntilStart <= 5 { return .orange }
         }
-        // Grün: Stundenlohn >= 18 EUR
-        if let pay = job.payAmount, pay >= 18 {
-            return .green
-        }
+        if let pay = job.payAmount, pay >= 18 { return .green }
         return SS.primary
     }
 
@@ -237,7 +298,7 @@ struct RadarView: View {
             Text("No jobs nearby")
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundColor(.white.opacity(0.7))
-            Text("No jobs found within a 100 km radius.")
+            Text("No jobs found within \(Int(selectedRadius)) km.")
                 .font(.system(size: 14))
                 .foregroundColor(.white.opacity(0.5))
                 .multilineTextAlignment(.center)
@@ -263,9 +324,8 @@ struct RadarView: View {
         }
 
         isLoading = true
-        await jobStore.loadNearbyJobs(lat: lat, lng: lng)
+        await jobStore.loadNearbyJobs(lat: lat, lng: lng, radius: selectedRadius)
 
-        // Kamera auf Nutzer-Position setzen
         withAnimation {
             mapRegion = MKCoordinateRegion(
                 center: CLLocationCoordinate2D(latitude: lat, longitude: lng),
@@ -278,6 +338,7 @@ struct RadarView: View {
 }
 
 // MARK: - LegendDot
+
 private struct LegendDot: View {
     let color: Color
     let label: String
@@ -295,14 +356,13 @@ private struct LegendDot: View {
 }
 
 // MARK: - RadarJobCard
-/// Job-Karte für die Radar-Liste — hebt die ausgewählte Karte hervor
+
 private struct RadarJobCard: View {
     let job: Job
     let isHighlighted: Bool
 
     var body: some View {
         HStack(spacing: 12) {
-            // Logo
             Text(job.logoEmoji)
                 .font(.system(size: 26))
                 .frame(width: 48, height: 48)
@@ -318,9 +378,11 @@ private struct RadarJobCard: View {
                     .foregroundColor(.secondary)
 
                 HStack(spacing: 12) {
-                    Label(job.distanceText, systemImage: "location")
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
+                    if !job.distanceText.isEmpty {
+                        Label(job.distanceText, systemImage: "location")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                    }
                     Label(job.payText, systemImage: "banknote")
                         .font(.system(size: 12))
                         .foregroundColor(.secondary)
