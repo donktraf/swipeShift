@@ -121,10 +121,11 @@ struct DashboardJobCard: View {
             // Details
             HStack(spacing: 16) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Label(job.distanceText, systemImage: "location")
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
-
+                    if !job.distanceText.isEmpty {
+                        Label(job.distanceText, systemImage: "location")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                    }
                     Label(job.shiftText, systemImage: "calendar")
                         .font(.system(size: 12))
                         .foregroundColor(.secondary)
