@@ -499,12 +499,6 @@ struct RegisterView: View {
                     .cornerRadius(12)
                 }
 
-                if let lat = workerLat, let lng = workerLng {
-                    Text("Saved coordinates: \(lat), \(lng)")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                }
-
                 if let msg = fieldErrors[.locationText] {
                     Text(msg)
                         .font(.caption)
@@ -789,12 +783,6 @@ struct RegisterView: View {
                     }
                     .background(Color.gray.opacity(0.06))
                     .cornerRadius(12)
-                }
-
-                if let lat = employerLat, let lng = employerLng {
-                    Text("Saved coordinates: \(lat), \(lng)")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
                 }
 
                 if let msg = fieldErrors[.employerLocation] {
