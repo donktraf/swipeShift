@@ -25,5 +25,7 @@
 	</array>
 	<key>GIDClientID</key>
 	<string>426389454990-f15heflrjh0bv6iuvs65jbh44chau2ca.apps.googleusercontent.com</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>SwipeShift verwendet deinen Standort, um Jobs in deiner Nähe anzuzeigen.</string>
 </dict>
 </plist>
