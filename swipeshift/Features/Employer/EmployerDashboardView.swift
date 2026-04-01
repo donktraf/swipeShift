@@ -13,6 +13,7 @@ private struct AttentionItem: Identifiable {
     let title: String
     let subtitle: String
     let actionLabel: String
+    let action: () -> Void
 }
 
 // MARK: - Trend Item
@@ -41,20 +42,23 @@ struct EmployerDashboardView: View {
     private let activeJobs = 3
     private let newApplicants = 7
     private let monthlySpend = 1240.0
-    private let attentionItems: [AttentionItem] = [
+    private var attentionItems: [AttentionItem] {[
         AttentionItem(icon: "person.crop.circle.badge.clock", iconColor: .orange,
                       title: "7 pending applications",
                       subtitle: "Applicants are waiting for your response.",
-                      actionLabel: "View Now"),
+                      actionLabel: "View Now",
+                      action: { onViewApplicants?() }),
         AttentionItem(icon: "calendar.badge.exclamationmark", iconColor: .red,
                       title: "2 shifts without workers",
                       subtitle: "These shifts start in less than 24h.",
-                      actionLabel: "Assign"),
+                      actionLabel: "Assign",
+                      action: { showAssignWorkers = true }),
         AttentionItem(icon: "creditcard.trianglebadge.exclamationmark", iconColor: .orange,
                       title: "€360 pending payments",
                       subtitle: "3 completed jobs are awaiting payout.",
-                      actionLabel: "Pay"),
-    ]
+                      actionLabel: "Pay",
+                      action: { showFinancial = true }),
+    ]}
     private let trends: [TrendItem] = [
         TrendItem(value: "8",    label: "Jobs Filled",        delta: "+3 this week", deltaPositive: true,  icon: "checkmark.circle"),
         TrendItem(value: "24",   label: "New Applications",   delta: "+11 this week", deltaPositive: true, icon: "person.crop.circle.badge.plus"),
@@ -311,37 +315,40 @@ private struct AttentionCard: View {
     let item: AttentionItem
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: item.icon)
-                .font(.system(size: 20))
-                .foregroundColor(item.iconColor)
-                .frame(width: 40, height: 40)
-                .background(item.iconColor.opacity(0.1))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+        Button(action: item.action) {
+            HStack(spacing: 12) {
+                Image(systemName: item.icon)
+                    .font(.system(size: 20))
+                    .foregroundColor(item.iconColor)
+                    .frame(width: 40, height: 40)
+                    .background(item.iconColor.opacity(0.1))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(item.title)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.primary)
-                Text(item.subtitle)
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.title)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.primary)
+                    Text(item.subtitle)
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                }
+
+                Spacer()
+
+                Text(item.actionLabel)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(item.iconColor)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(item.iconColor.opacity(0.1))
+                    .clipShape(Capsule())
             }
-
-            Spacer()
-
-            Text(item.actionLabel)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(item.iconColor)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(item.iconColor.opacity(0.1))
-                .clipShape(Capsule())
+            .padding(12)
+            .background(Color(uiColor: .systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
         }
-        .padding(12)
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
+        .buttonStyle(.plain)
     }
 }
 
