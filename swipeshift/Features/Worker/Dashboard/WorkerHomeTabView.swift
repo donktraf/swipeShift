@@ -14,6 +14,9 @@ struct WorkerHomeTabView: View {
     let onCategorySelected: (JobCategory) -> Void
     // Callback wenn User "View All" in einer Sektion tippt
     let onViewAllJobs: () -> Void
+    // Callbacks für Bottom CTAs
+    let onGoToRadar: () -> Void
+    let onGoToSwipe: () -> Void
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -117,26 +120,47 @@ struct WorkerHomeTabView: View {
                 }
 
                 // MARK: - Bottom CTAs
-                VStack(spacing: 8) {
-                    HStack {
-                        Text("Looking for nearby jobs?")
-                            .font(.system(size: 14))
-                            .foregroundColor(.secondary)
-                        Text("→ Go to Radar")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(SS.primary)
+                VStack(spacing: 10) {
+                    Button(action: onGoToRadar) {
+                        HStack {
+                            Image(systemName: "location.circle.fill")
+                                .foregroundColor(SS.primary)
+                            Text("Looking for nearby jobs?")
+                                .font(.system(size: 14))
+                                .foregroundColor(.primary)
+                            Spacer()
+                            Text("Go to Radar →")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(SS.primary)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 14)
+                        .background(Color(uiColor: .systemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
                     }
+                    .buttonStyle(.plain)
 
-                    HStack {
-                        Text("Want to decide fast?")
-                            .font(.system(size: 14))
-                            .foregroundColor(.secondary)
-                        Text("→ Try Swipe")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(SS.primary)
+                    Button(action: onGoToSwipe) {
+                        HStack {
+                            Image(systemName: "hand.draw.fill")
+                                .foregroundColor(SS.primary)
+                            Text("Want to decide fast?")
+                                .font(.system(size: 14))
+                                .foregroundColor(.primary)
+                            Spacer()
+                            Text("Try Swipe →")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(SS.primary)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 14)
+                        .background(Color(uiColor: .systemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
                     }
+                    .buttonStyle(.plain)
                 }
-                .frame(maxWidth: .infinity)
                 .padding(.horizontal, 16)
                 .padding(.bottom, 24)
             }

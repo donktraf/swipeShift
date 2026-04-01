@@ -32,7 +32,13 @@ struct WorkerHomeView: View {
                                 navigateToCategoryList = true
                             },
                             onViewAllJobs: {
-                                // TODO: navigiere zu JobListView mit Filter
+                                selectedTab = .swipe
+                            },
+                            onGoToRadar: {
+                                selectedTab = .radar
+                            },
+                            onGoToSwipe: {
+                                selectedTab = .swipe
                             }
                         )
 
