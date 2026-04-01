@@ -61,9 +61,20 @@ struct JobListView: View {
         }
 
         // 3) Sortierung
-        // TODO: Wenn Backend strukturierte Felder liefert (payAmount, distanceKm, createdAt)
-        // kann hier sauber sortiert werden. Aktuell keine Sortierung möglich
-        // da die Felder nur als Text vorliegen (payText, distanceText).
+        switch sortOption {
+        case .newest:
+            result.sort { a, b in
+                let aTime = a.startTime ?? .distantFuture
+                let bTime = b.startTime ?? .distantFuture
+                return aTime < bTime
+            }
+        case .pay:
+            result.sort { a, b in
+                (a.payAmount ?? 0) > (b.payAmount ?? 0)
+            }
+        case .distance:
+            break // distanceText from nearby endpoint only; no-op for general list
+        }
 
         return result
     }
