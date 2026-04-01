@@ -44,7 +44,8 @@ private enum BreakdownMode: String, CaseIterable {
 
 struct EmployerFinancialView: View {
     @State private var selectedPeriod: FinancialPeriod = .thisMonth
-    @State private var showBreakdown = false
+    @State private var showBreakdown   = false
+    @State private var showJobPayment  = false
 
     // TODO: aus Backend laden (GET /employer/financials)
     private let totalSpending:    Double = 3_840
@@ -81,6 +82,9 @@ struct EmployerFinancialView: View {
         }
         .sheet(isPresented: $showBreakdown) {
             BreakdownSheet()
+        }
+        .navigationDestination(isPresented: $showJobPayment) {
+            JobPaymentView.mock()
         }
     }
 
@@ -221,7 +225,9 @@ struct EmployerFinancialView: View {
 
             VStack(spacing: 8) {
                 ForEach(paymentRows) { row in
-                    PaymentRowCard(row: row)
+                    PaymentRowCard(row: row) {
+                        showJobPayment = true
+                    }
                 }
             }
             .padding(.horizontal, 16)
@@ -247,8 +253,10 @@ struct EmployerFinancialView: View {
 
 private struct PaymentRowCard: View {
     let row: PaymentRow
+    let onTap: () -> Void
 
     var body: some View {
+        Button(action: onTap) {
         HStack(spacing: 12) {
             Text(row.logoEmoji)
                 .font(.system(size: 18))
@@ -291,11 +299,17 @@ private struct PaymentRowCard: View {
                         .clipShape(Capsule())
                 }
             }
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.secondary.opacity(0.4))
         }
         .padding(12)
         .background(Color(uiColor: .systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
+        } // Button
+        .buttonStyle(.plain)
     }
 }
 

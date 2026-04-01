@@ -69,6 +69,10 @@ struct AllPostedJobsView: View {
     @State private var jobToCancel: EmployerJob? = nil
     @State private var jobToPublish: EmployerJob? = nil
 
+    // Payment Navigation
+    @State private var jobForPayment: EmployerJob? = nil
+    @State private var showPayments = false
+
     enum PostedJobTab: String, CaseIterable {
         case active    = "Active"
         case draft     = "Draft"
@@ -111,8 +115,12 @@ struct AllPostedJobsView: View {
                         ForEach(filtered) { job in
                             PostedJobCard(
                                 job: job,
-                                onCancel:  { jobToCancel  = job },
-                                onPublish: { jobToPublish = job }
+                                onCancel:       { jobToCancel  = job },
+                                onPublish:      { jobToPublish = job },
+                                onViewPayments: {
+                                    jobForPayment = job
+                                    showPayments  = true
+                                }
                             )
                         }
                     }
@@ -121,6 +129,15 @@ struct AllPostedJobsView: View {
             }
         }
         .task { await load() }
+        .navigationDestination(isPresented: $showPayments) {
+            if let job = jobForPayment {
+                JobPaymentView.mock(
+                    jobTitle:    job.title,
+                    jobEmoji:    job.logoEmoji,
+                    jobLocation: job.location
+                )
+            }
+        }
         // Cancel confirmation
         .alert("Cancel job?", isPresented: Binding(
             get: { jobToCancel != nil },
@@ -251,8 +268,9 @@ struct AllPostedJobsView: View {
 
 private struct PostedJobCard: View {
     let job: EmployerJob
-    let onCancel:  () -> Void
-    let onPublish: () -> Void
+    let onCancel:       () -> Void
+    let onPublish:      () -> Void
+    let onViewPayments: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -303,7 +321,9 @@ private struct PostedJobCard: View {
             .padding(.vertical, 10)
 
             // Action Buttons (nur bei relevanten Status)
-            if job.status == "draft" || job.status == "published" || job.status == "inProgress" {
+            let showPayBtn = job.status == "inProgress" || job.status == "completed"
+            let showActionRow = job.status == "draft" || job.status == "published" || job.status == "inProgress" || showPayBtn
+            if showActionRow {
                 Divider().padding(.horizontal, 14)
                 HStack(spacing: 8) {
                     if job.status == "draft" {
@@ -311,6 +331,9 @@ private struct PostedJobCard: View {
                     }
                     if job.status != "cancelled" && job.status != "completed" {
                         actionButton(label: "Cancel", color: .red, action: onCancel)
+                    }
+                    if showPayBtn {
+                        actionButton(label: "View Payments", color: .teal, action: onViewPayments)
                     }
                 }
                 .padding(.horizontal, 14)
