@@ -53,7 +53,7 @@ struct EditProfileView: View {
                                   "Customer Service", "Warehouse", "Office", "Cleaning"]
 
     var body: some View {
-        SubScreenShell(title: "Profil bearbeiten") {
+        SubScreenShell(title: "Edit Profile") {
             VStack(spacing: 20) {
                 photoBanner
                 basicInfoSection

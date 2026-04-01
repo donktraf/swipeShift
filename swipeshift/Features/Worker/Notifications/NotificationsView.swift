@@ -318,7 +318,7 @@ private extension Date {
             return "vor \(Int(diff / 86400)) Tag(en)"
         } else {
             let f = DateFormatter()
-            f.locale = Locale(identifier: "de_DE")
+            f.locale = Locale(identifier: "en_US")
             f.dateFormat = "dd. MMM"
             return f.string(from: self)
         }

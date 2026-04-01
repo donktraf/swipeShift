@@ -134,8 +134,8 @@ struct ChatView: View {
                     .foregroundColor(conversation.status == .completed ? .green : .red)
                     .font(.system(size: 16))
                 Text(conversation.status == .completed
-                    ? "Diese Unterhaltung ist abgeschlossen."
-                    : "Diese Schicht wurde abgesagt.")
+                    ? "This conversation is closed."
+                    : "This shift was cancelled.")
                     .font(.system(size: 13))
                     .foregroundColor(.secondary)
 
@@ -161,7 +161,7 @@ struct ChatView: View {
         VStack(spacing: 0) {
             Divider()
             HStack(spacing: 10) {
-                TextField("Nachricht...", text: $inputText, axis: .vertical)
+                TextField("Message...", text: $inputText, axis: .vertical)
                     .font(.system(size: 15))
                     .lineLimit(1...5)
                     .padding(.horizontal, 12)

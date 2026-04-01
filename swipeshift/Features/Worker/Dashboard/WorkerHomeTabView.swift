@@ -170,7 +170,10 @@ struct WorkerHomeTabView: View {
                 jobStore.selectedLocation = location
             }
             // Basis-Jobs + alle Dashboard-Sektionen parallel laden
-            async let base     = jobStore.loadJobs()
+            // Wenn kein Standort gesetzt → alle Jobs laden als Fallback
+            async let base     = jobStore.selectedLocation != nil
+                                    ? jobStore.loadJobs()
+                                    : jobStore.loadJobsAll()
             async let sections = jobStore.loadDashboardSections()
             _ = await (base, sections)
         }

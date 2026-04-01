@@ -204,7 +204,7 @@ struct WorkerCalendarView: View {
 
     private func monthLabel(for date: Date) -> String {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "de_DE")
+        formatter.locale = Locale(identifier: "en_US")
         formatter.dateFormat = "MMMM yyyy"
         return formatter.string(from: date)
     }
@@ -238,7 +238,7 @@ struct WorkerCalendarView: View {
     private func weekRangeLabel(days: [Date]) -> String {
         guard let first = days.first, let last = days.last else { return "" }
         let f = DateFormatter()
-        f.locale = Locale(identifier: "de_DE")
+        f.locale = Locale(identifier: "en_US")
         f.dateFormat = "dd. MMM"
         return "\(f.string(from: first)) – \(f.string(from: last))"
     }
@@ -324,7 +324,7 @@ private struct WeekDayColumn: View {
 
     private var dayLabel: String {
         let f = DateFormatter()
-        f.locale = Locale(identifier: "de_DE")
+        f.locale = Locale(identifier: "en_US")
         f.dateFormat = "EEE"
         return f.string(from: date)
     }

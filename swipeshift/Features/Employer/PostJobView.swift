@@ -21,7 +21,7 @@ struct DraftShift: Identifiable {
     }
 
     var dateLabel: String {
-        let f = DateFormatter(); f.dateFormat = "EE, dd. MMM"; f.locale = Locale(identifier: "de_DE")
+        let f = DateFormatter(); f.dateFormat = "EE, MMM dd"; f.locale = Locale(identifier: "en_US")
         return f.string(from: date)
     }
 
