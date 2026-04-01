@@ -24,8 +24,14 @@ struct WorkerHomeTabView: View {
 
                 // MARK: - Header
                 HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Hey \(userStore.currentUser?.firstName ?? "") 👋")
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Your Personal Job Dashboard")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.secondary)
+                            .textCase(.uppercase)
+                            .tracking(0.5)
+
+                        Text("Hey \(userStore.currentUser?.firstName ?? "there")!")
                             .font(.system(size: 26, weight: .bold))
 
                         if let location = userStore.currentUser?.location {
