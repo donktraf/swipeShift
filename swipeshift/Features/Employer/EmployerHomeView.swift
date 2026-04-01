@@ -22,8 +22,12 @@ struct EmployerHomeView: View {
                 Group {
                     switch selectedTab {
                     case .dashboard:
-                        EmployerDashboardView(onPostJob: { showPostJob = true })
-                            .environmentObject(userStore)
+                        EmployerDashboardView(
+                            onPostJob:        { showPostJob = true },
+                            onViewJobs:       { selectedTab = .jobs },
+                            onViewApplicants: { selectedTab = .applicants }
+                        )
+                        .environmentObject(userStore)
 
                     case .jobs:
                         AllPostedJobsView()

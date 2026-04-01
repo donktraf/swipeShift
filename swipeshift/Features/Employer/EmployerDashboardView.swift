@@ -28,7 +28,9 @@ private struct TrendItem: Identifiable {
 // MARK: - EmployerDashboardView
 struct EmployerDashboardView: View {
     @EnvironmentObject var userStore: UserStore
-    var onPostJob: (() -> Void)? = nil
+    var onPostJob:       (() -> Void)? = nil
+    var onViewJobs:      (() -> Void)? = nil
+    var onViewApplicants:(() -> Void)? = nil
 
     @State private var showLeaveReviews   = false
     @State private var showAssignWorkers  = false
@@ -136,7 +138,7 @@ struct EmployerDashboardView: View {
                 icon: "briefcase.fill",
                 color: SS.primary,
                 actionLabel: "View All"
-            ) { /* TODO: → Posted Jobs */ }
+            ) { onViewJobs?() }
 
             StatCard(
                 value: "\(newApplicants)",
@@ -144,7 +146,7 @@ struct EmployerDashboardView: View {
                 icon: "person.crop.circle.badge.plus",
                 color: .green,
                 actionLabel: "View All"
-            ) { /* TODO: → Applicants */ }
+            ) { onViewApplicants?() }
 
             StatCard(
                 value: "€\(Int(monthlySpend))",
@@ -195,7 +197,7 @@ struct EmployerDashboardView: View {
 
                 // View All Posted Jobs
                 Button {
-                    // TODO: → AllPostedJobsView
+                    onViewJobs?()
                 } label: {
                     QuickActionCard(
                         icon: "list.bullet.rectangle.portrait",
@@ -218,17 +220,17 @@ struct EmployerDashboardView: View {
 
             VStack(spacing: 0) {
                 NavGroup(title: "Job Management") {
-                    NavRow(icon: "doc.text", label: "Posted Jobs", badge: "\(activeJobs)") {}
+                    NavRow(icon: "doc.text", label: "Posted Jobs", badge: "\(activeJobs)") { onViewJobs?() }
                     Divider().padding(.leading, 52)
-                    NavRow(icon: "pencil.and.list.clipboard", label: "Drafts", badge: nil) {}
+                    NavRow(icon: "pencil.and.list.clipboard", label: "Drafts", badge: nil) { onViewJobs?() }
                     Divider().padding(.leading, 52)
-                    NavRow(icon: "checkmark.circle", label: "Completed Jobs", badge: nil) {}
+                    NavRow(icon: "checkmark.circle", label: "Completed Jobs", badge: nil) { onViewJobs?() }
                 }
 
                 Spacer().frame(height: 10)
 
                 NavGroup(title: "Worker Management") {
-                    NavRow(icon: "person.crop.circle.badge.questionmark", label: "Applicants", badge: "\(newApplicants)") {}
+                    NavRow(icon: "person.crop.circle.badge.questionmark", label: "Applicants", badge: "\(newApplicants)") { onViewApplicants?() }
                     Divider().padding(.leading, 52)
                     NavRow(icon: "person.2.badge.gearshape", label: "Assign Workers", badge: "2") { showAssignWorkers = true }
                     Divider().padding(.leading, 52)
