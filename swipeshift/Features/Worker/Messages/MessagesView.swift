@@ -95,8 +95,7 @@ struct MessagesView: View {
             }
 
             NavigationLink {
-                // TODO: JobListView navigieren
-                Text("Jobs")
+                JobListView()
             } label: {
                 Text("Browse Jobs")
                     .font(.system(size: 16, weight: .semibold))
@@ -206,7 +205,7 @@ private extension Date {
         let days = Int(diff / 86400)
         if days < 7 { return "\(days)d" }
         let formatter = DateFormatter()
-        formatter.dateFormat = "dd.MM"
+        formatter.dateFormat = "MM/dd"
         return formatter.string(from: self)
     }
 }

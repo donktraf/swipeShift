@@ -12,9 +12,10 @@ struct WorkerHomeView: View {
 
     @State private var selectedTab: WorkerTab = .home
 
-    // Für Navigation zu Kategorie-JobListe
+    // Für Navigation zu Kategorie-JobListe und allen Jobs
     @State private var selectedCategory: JobCategory? = nil
     @State private var navigateToCategoryList = false
+    @State private var navigateToAllJobs = false
 
     var body: some View {
         NavigationStack {
@@ -32,7 +33,7 @@ struct WorkerHomeView: View {
                                 navigateToCategoryList = true
                             },
                             onViewAllJobs: {
-                                selectedTab = .swipe
+                                navigateToAllJobs = true
                             },
                             onGoToRadar: {
                                 selectedTab = .radar
@@ -87,6 +88,11 @@ struct WorkerHomeView: View {
                     CategoryJobListView(category: category)
                         .environmentObject(jobStore)
                 }
+            }
+            .navigationDestination(isPresented: $navigateToAllJobs) {
+                JobListView()
+                    .environmentObject(jobStore)
+                    .environmentObject(userStore)
             }
         }
     }

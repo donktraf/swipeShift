@@ -162,7 +162,7 @@ struct JobSwipeView: View {
             Image(systemName: "sparkles")
                 .font(.system(size: 52))
                 .foregroundColor(.white.opacity(0.35))
-            Text("Keine Jobs mehr")
+            Text("No more jobs")
                 .font(.system(size: 20, weight: .bold))
                 .foregroundColor(.white.opacity(0.8))
             Text("Expand your search or\ncheck back later.")
@@ -341,7 +341,7 @@ private struct SwipeJobCard: View {
                 .lineLimit(1)
             Spacer()
             if let spots = job.openSpots {
-                Label("\(spots) offen", systemImage: "person.2")
+                Label("\(spots) open", systemImage: "person.2")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(.green)
             }
