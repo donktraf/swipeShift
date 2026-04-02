@@ -29,6 +29,10 @@ final class UserStore: ObservableObject {
     @Published var loginPrefillEmail: String = ""
     
     @Published var showSocialSuccess: Bool = false
+
+    // Token + Email die via Deep Link ankommen — warten auf "I have a token" Tap
+    @Published var pendingResetToken: String? = nil
+    @Published var pendingResetEmail: String? = nil
     
     @MainActor
     func presentLoginAfterReset() {

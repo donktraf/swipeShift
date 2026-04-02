@@ -14,6 +14,7 @@ struct ForgotPasswordView: View {
     @State private var email: String
     @State private var isSubmitting = false
     @State private var emailSent = false
+    @State private var showReset = false
 
     init(prefilledEmail: String = "") {
         _email = State(initialValue: prefilledEmail)
@@ -31,6 +32,13 @@ struct ForgotPasswordView: View {
         .padding(24)
         .navigationTitle("Forgot Password")
         .navigationBarTitleDisplayMode(.inline)
+        .navigationDestination(isPresented: $showReset) {
+            ResetPasswordView(
+                prefilledEmail: userStore.pendingResetEmail ?? email,
+                prefilledToken: userStore.pendingResetToken ?? ""
+            )
+            .environmentObject(userStore)
+        }
     }
 
     // MARK: - Input State
@@ -100,7 +108,7 @@ struct ForgotPasswordView: View {
                     .font(.title2)
                     .fontWeight(.bold)
 
-                Text("We sent a reset link to **\(email)**.\nTap the link in the email to set a new password.")
+                Text("We sent a reset link to **\(email)**.\nTap the link in the email — the app will open automatically.")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
@@ -111,15 +119,32 @@ struct ForgotPasswordView: View {
                 .foregroundColor(.secondary.opacity(0.7))
                 .multilineTextAlignment(.center)
 
+            // Wird aktiv sobald Deep Link den Token im Hintergrund gespeichert hat
+            Button {
+                showReset = true
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: userStore.pendingResetToken != nil ? "checkmark.circle.fill" : "lock.open")
+                        .foregroundColor(userStore.pendingResetToken != nil ? .green : .secondary)
+                    Text("I have a token")
+                        .fontWeight(.semibold)
+                }
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(userStore.pendingResetToken != nil ? SS.primary : Color.gray.opacity(0.15))
+                .foregroundColor(userStore.pendingResetToken != nil ? .white : .secondary)
+                .cornerRadius(14)
+            }
+            .disabled(userStore.pendingResetToken == nil)
+
             Button {
                 emailSent = false
                 userStore.errorMessage = nil
             } label: {
                 Text("Resend email")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: 14))
                     .foregroundColor(SS.primary)
             }
-            .padding(.top, 8)
         }
     }
 }
