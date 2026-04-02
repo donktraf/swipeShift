@@ -13,37 +13,46 @@ struct ForgotPasswordView: View {
 
     @State private var email: String
     @State private var isSubmitting = false
-    @State private var infoText: String? = nil
+    @State private var emailSent = false
 
     init(prefilledEmail: String = "") {
         _email = State(initialValue: prefilledEmail)
     }
 
     var body: some View {
+        VStack(spacing: 24) {
+            if emailSent {
+                emailSentState
+            } else {
+                inputState
+            }
+            Spacer()
+        }
+        .padding(24)
+        .navigationTitle("Forgot Password")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    // MARK: - Input State
+
+    private var inputState: some View {
         VStack(spacing: 16) {
             Text("Reset password")
                 .font(.title2)
                 .fontWeight(.bold)
 
-            Text("Enter your email. If it exists, we’ll send a reset link/token.")
+            Text("Enter your email address and we’ll send you a link to reset your password.")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
 
-            TextField("Email", text: $email)
+            TextField("Email address", text: $email)
                 .keyboardType(.emailAddress)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .padding()
                 .background(Color.gray.opacity(0.1))
                 .cornerRadius(12)
-
-            if let infoText {
-                Text(infoText)
-                    .font(.footnote)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-            }
 
             if let error = userStore.errorMessage {
                 Text(error)
@@ -57,34 +66,60 @@ struct ForgotPasswordView: View {
                     isSubmitting = true
                     await userStore.forgotPasswordRemote(email: email)
                     isSubmitting = false
-
-                    // ✅ Immer gleiche Info (Security)
-                    infoText = "If that email exists, you’ll receive instructions shortly."
+                    // Always show sent state (no enumeration)
+                    emailSent = true
                 }
             } label: {
-                Text(isSubmitting ? "Sending..." : "Send reset email")
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(email.isEmpty ? Color.gray.opacity(0.5) : Color.blue)
-                    .foregroundColor(.white)
-                    .fontWeight(.semibold)
-                    .cornerRadius(14)
+                HStack(spacing: 8) {
+                    if isSubmitting {
+                        ProgressView().tint(.white)
+                    }
+                    Text(isSubmitting ? "Sending..." : "Send reset link")
+                }
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(email.isEmpty ? Color.gray.opacity(0.4) : SS.primary)
+                .foregroundColor(.white)
+                .fontWeight(.semibold)
+                .cornerRadius(14)
             }
             .disabled(email.isEmpty || isSubmitting)
-
-            NavigationLink {
-                ResetPasswordView(prefilledEmail: email)
-            } label: {
-                Text("I already have a token")
-                    .font(.footnote)
-                    .foregroundColor(.blue)
-            }
-            .padding(.top, 4)
-
-            Spacer()
         }
-        .padding(24)
-        .navigationTitle("Forgot Password")
-        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    // MARK: - Email Sent State
+
+    private var emailSentState: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "envelope.badge.checkmark")
+                .font(.system(size: 56))
+                .foregroundColor(SS.primary)
+
+            VStack(spacing: 8) {
+                Text("Check your email")
+                    .font(.title2)
+                    .fontWeight(.bold)
+
+                Text("We sent a reset link to **\(email)**.\nTap the link in the email to set a new password.")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+
+            Text("The link expires in 30 minutes.\nIf you don’t see it, check your spam folder.")
+                .font(.footnote)
+                .foregroundColor(.secondary.opacity(0.7))
+                .multilineTextAlignment(.center)
+
+            Button {
+                emailSent = false
+                userStore.errorMessage = nil
+            } label: {
+                Text("Resend email")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(SS.primary)
+            }
+            .padding(.top, 8)
+        }
     }
 }

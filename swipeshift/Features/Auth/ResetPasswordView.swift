@@ -38,14 +38,6 @@ struct ResetPasswordView: View {
                 .background(Color.gray.opacity(0.1))
                 .cornerRadius(12)
 
-            // Token aus E-Mail eintragen (wird bei Deep-Link automatisch befüllt)
-            TextField("Reset token (from your email)", text: $token)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .padding()
-                .background(Color.gray.opacity(0.1))
-                .cornerRadius(12)
-
             SecureField("New password", text: $newPassword)
                 .padding()
                 .background(Color.gray.opacity(0.1))
