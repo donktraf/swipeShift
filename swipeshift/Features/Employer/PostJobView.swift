@@ -33,7 +33,27 @@ struct DraftShift: Identifiable {
     func toRequest(payAmount: Double) -> PostJobShiftRequest {
         let hours = max(0, endTime.timeIntervalSince(startTime) / 3600)
         let total = String(format: "€%.0f total", hours * payAmount)
-        return PostJobShiftRequest(date: dateLabel, timeRange: timeRangeLabel, duration: durationText, totalPay: total)
+
+        // Combine date + start/end time into full DateTime for the backend
+        let cal = Calendar.current
+        let startComponents = cal.dateComponents([.hour, .minute], from: startTime)
+        let endComponents   = cal.dateComponents([.hour, .minute], from: endTime)
+        let startFull = cal.date(bySettingHour: startComponents.hour ?? 0,
+                                 minute: startComponents.minute ?? 0,
+                                 second: 0, of: date)
+        let endFull = cal.date(bySettingHour: endComponents.hour ?? 0,
+                               minute: endComponents.minute ?? 0,
+                               second: 0, of: date)
+
+        let iso = ISO8601DateFormatter()
+        return PostJobShiftRequest(
+            date: dateLabel,
+            timeRange: timeRangeLabel,
+            duration: durationText,
+            totalPay: total,
+            startTimeISO: startFull.map { iso.string(from: $0) },
+            endTimeISO:   endFull.map   { iso.string(from: $0) }
+        )
     }
 }
 
