@@ -37,34 +37,36 @@ struct EmployerDashboardView: View {
     @State private var showAssignWorkers  = false
     @State private var showFinancial      = false
     @State private var showCalendar       = false
+    @State private var stats: EmployerStatsDTO? = nil
 
-    // TODO: Aus EmployerStore laden wenn Backend-Endpunkte vorhanden
-    private let activeJobs = 3
-    private let newApplicants = 7
-    private let monthlySpend = 1240.0
-    private var attentionItems: [AttentionItem] {[
-        AttentionItem(icon: "person.crop.circle.badge.clock", iconColor: .orange,
-                      title: "7 pending applications",
-                      subtitle: "Applicants are waiting for your response.",
-                      actionLabel: "View Now",
-                      action: { onViewApplicants?() }),
-        AttentionItem(icon: "calendar.badge.exclamationmark", iconColor: .red,
-                      title: "2 shifts without workers",
-                      subtitle: "These shifts start in less than 24h.",
-                      actionLabel: "Assign",
-                      action: { showAssignWorkers = true }),
-        AttentionItem(icon: "creditcard.trianglebadge.exclamationmark", iconColor: .orange,
-                      title: "€360 pending payments",
-                      subtitle: "3 completed jobs are awaiting payout.",
-                      actionLabel: "Pay",
-                      action: { showFinancial = true }),
+    private var activeJobs:    Int    { stats?.activeJobs    ?? 0 }
+    private var newApplicants: Int    { stats?.newApplicants ?? 0 }
+    private var monthlySpend:  Double { stats?.monthlySpend  ?? 0 }
+
+    private var attentionItems: [AttentionItem] {
+        var items: [AttentionItem] = []
+        if newApplicants > 0 {
+            items.append(AttentionItem(
+                icon: "person.crop.circle.badge.clock", iconColor: .orange,
+                title: "\(newApplicants) pending application\(newApplicants == 1 ? "" : "s")",
+                subtitle: "Applicants are waiting for your response.",
+                actionLabel: "View Now",
+                action: { onViewApplicants?() }
+            ))
+        }
+        return items
+    }
+
+    private var trends: [TrendItem] {[
+        TrendItem(value: "\(stats?.jobsFilledThisWeek ?? 0)", label: "Jobs Filled",
+                  delta: "this week", deltaPositive: true, icon: "checkmark.circle"),
+        TrendItem(value: "\(stats?.applicationsThisWeek ?? 0)", label: "New Applications",
+                  delta: "this week", deltaPositive: true, icon: "person.crop.circle.badge.plus"),
+        TrendItem(value: "—", label: "Avg. Worker Rating",
+                  delta: "no data yet", deltaPositive: true, icon: "star"),
+        TrendItem(value: stats?.topCategory ?? "—", label: "Top Category",
+                  delta: "\(activeJobs) active jobs", deltaPositive: true, icon: "trophy"),
     ]}
-    private let trends: [TrendItem] = [
-        TrendItem(value: "8",    label: "Jobs Filled",        delta: "+3 this week", deltaPositive: true,  icon: "checkmark.circle"),
-        TrendItem(value: "24",   label: "New Applications",   delta: "+11 this week", deltaPositive: true, icon: "person.crop.circle.badge.plus"),
-        TrendItem(value: "4.7",  label: "Avg. Worker Rating", delta: "±0 this week", deltaPositive: true, icon: "star"),
-        TrendItem(value: "Events", label: "Top Category",     delta: "4 active jobs", deltaPositive: true, icon: "trophy"),
-    ]
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -72,7 +74,9 @@ struct EmployerDashboardView: View {
 
                 dashboardHeader
                 statsRow
-                needsAttentionSection
+                if !attentionItems.isEmpty {
+                    needsAttentionSection
+                }
                 quickActionsSection
                 navigationSection
                 trendsSection
@@ -80,6 +84,7 @@ struct EmployerDashboardView: View {
                 Spacer().frame(height: 100)
             }
         }
+        .task { await loadStats() }
         .navigationDestination(isPresented: $showLeaveReviews) {
             LeaveReviewsView()
         }
@@ -92,6 +97,11 @@ struct EmployerDashboardView: View {
         .navigationDestination(isPresented: $showCalendar) {
             EmployerCalendarView()
         }
+    }
+
+    @MainActor
+    private func loadStats() async {
+        stats = try? await APIClient.shared.fetchEmployerStats()
     }
 
     // MARK: - Header
@@ -224,7 +234,7 @@ struct EmployerDashboardView: View {
 
             VStack(spacing: 0) {
                 NavGroup(title: "Job Management") {
-                    NavRow(icon: "doc.text", label: "Posted Jobs", badge: "\(activeJobs)") { onViewJobs?() }
+                    NavRow(icon: "doc.text", label: "Posted Jobs", badge: activeJobs > 0 ? "\(activeJobs)" : nil) { onViewJobs?() }
                     Divider().padding(.leading, 52)
                     NavRow(icon: "pencil.and.list.clipboard", label: "Drafts", badge: nil) { onViewJobs?() }
                     Divider().padding(.leading, 52)
@@ -234,7 +244,7 @@ struct EmployerDashboardView: View {
                 Spacer().frame(height: 10)
 
                 NavGroup(title: "Worker Management") {
-                    NavRow(icon: "person.crop.circle.badge.questionmark", label: "Applicants", badge: "\(newApplicants)") { onViewApplicants?() }
+                    NavRow(icon: "person.crop.circle.badge.questionmark", label: "Applicants", badge: newApplicants > 0 ? "\(newApplicants)" : nil) { onViewApplicants?() }
                     Divider().padding(.leading, 52)
                     NavRow(icon: "person.2.badge.gearshape", label: "Assign Workers", badge: "2") { showAssignWorkers = true }
                     Divider().padding(.leading, 52)

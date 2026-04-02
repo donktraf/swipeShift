@@ -352,6 +352,14 @@ final class APIClient {
             return try JSONDecoder().decode(UserDTO.self, from: data)
         }
     
+    // GET /employer/stats
+    func fetchEmployerStats() async throws -> EmployerStatsDTO {
+        let req = try makeRequest(path: "/employer/stats", method: "GET")
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(EmployerStatsDTO.self, from: data)
+    }
+
     // PATCH /auth/me/role
     func setRole(role: String) async throws -> UserDTO {
         var req = try makeRequest(path: "/auth/me/role", method: "PATCH")

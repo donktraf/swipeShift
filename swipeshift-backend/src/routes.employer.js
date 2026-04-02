@@ -122,4 +122,62 @@ router.post("/applicants/:applyId/decline", requireAuth, requireVerifiedEmail, a
   }
 });
 
+// ─────────────────────────────────────────────
+// GET /employer/stats
+// Dashboard-Kennzahlen für den eingeloggten Arbeitgeber
+// ─────────────────────────────────────────────
+router.get("/stats", requireAuth, requireVerifiedEmail, async (req, res) => {
+  try {
+    const employerId = req.auth.sub;
+    const now        = new Date();
+    const weekAgo    = new Date(now.getTime() - 7 * 24 * 3_600_000);
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    const myJobs = await prisma.job.findMany({
+      where:  { employerId },
+      select: { id: true, status: true, payAmount: true, openSpots: true, category: true, startTime: true },
+    });
+    const myJobIds = myJobs.map((j) => j.id);
+
+    const activeJobs = myJobs.filter((j) => j.status === "published").length;
+
+    const allApplies = myJobIds.length
+      ? await prisma.apply.findMany({
+          where:  { jobId: { in: myJobIds } },
+          select: { id: true, createdAt: true },
+        })
+      : [];
+
+    const newApplicants    = allApplies.length;
+    const applicationsWeek = allApplies.filter((a) => a.createdAt >= weekAgo).length;
+
+    const completedThisMonth = myJobs.filter(
+      (j) => j.status === "completed" && j.startTime && new Date(j.startTime) >= monthStart
+    );
+    const monthlySpend = completedThisMonth.reduce(
+      (sum, j) => sum + (j.payAmount ?? 0) * (j.openSpots ?? 1), 0
+    );
+
+    const jobsFilledWeek = myJobs.filter(
+      (j) => j.status === "completed" && j.startTime && new Date(j.startTime) >= weekAgo
+    ).length;
+
+    const catCount = {};
+    myJobs.forEach((j) => { if (j.category) catCount[j.category] = (catCount[j.category] ?? 0) + 1; });
+    const topCategory = Object.entries(catCount).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "—";
+
+    return res.json({
+      activeJobs,
+      newApplicants,
+      monthlySpend,
+      applicationsThisWeek: applicationsWeek,
+      jobsFilledThisWeek:   jobsFilledWeek,
+      topCategory,
+    });
+  } catch (err) {
+    console.error("GET /employer/stats error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 module.exports = router;

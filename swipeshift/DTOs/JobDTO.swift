@@ -73,3 +73,12 @@ extension JobDTO {
         )
     }
 }
+
+struct EmployerStatsDTO: Decodable {
+    let activeJobs: Int
+    let newApplicants: Int
+    let monthlySpend: Double
+    let applicationsThisWeek: Int
+    let jobsFilledThisWeek: Int
+    let topCategory: String
+}
