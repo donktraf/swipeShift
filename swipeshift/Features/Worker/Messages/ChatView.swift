@@ -51,12 +51,19 @@ struct ChatView: View {
                     .foregroundColor(.primary)
             }
 
-            // Logo (tippbar → TODO: Company Profile)
-            Text(conversation.logoEmoji)
-                .font(.system(size: 22))
-                .frame(width: 40, height: 40)
-                .background(Color(uiColor: .secondarySystemGroupedBackground))
-                .clipShape(Circle())
+            // Logo (tippbar → Company Profile)
+            NavigationLink {
+                CompanyProfileView(
+                    company: .mock(name: conversation.company, logoEmoji: conversation.logoEmoji, rating: nil)
+                )
+            } label: {
+                Text(conversation.logoEmoji)
+                    .font(.system(size: 22))
+                    .frame(width: 40, height: 40)
+                    .background(Color(uiColor: .secondarySystemGroupedBackground))
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
 
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 6) {
