@@ -38,6 +38,17 @@ struct ResetPasswordView: View {
                 .background(Color.gray.opacity(0.1))
                 .cornerRadius(12)
 
+            #if DEBUG
+            TextField("Token (debug only)", text: $token)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .font(.system(size: 13))
+                .padding(10)
+                .background(Color.yellow.opacity(0.15))
+                .cornerRadius(10)
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.orange.opacity(0.4), lineWidth: 1))
+            #endif
+
             SecureField("New password", text: $newPassword)
                 .padding()
                 .background(Color.gray.opacity(0.1))
