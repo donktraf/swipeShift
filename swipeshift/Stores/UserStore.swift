@@ -164,7 +164,16 @@ final class UserStore: ObservableObject {
     func forgotPasswordRemote(email: String) async {
         errorMessage = nil
         do {
-            try await APIClient.shared.forgotPassword(email: email)
+            let result = try await APIClient.shared.forgotPassword(email: email)
+            #if DEBUG
+            // Dev shortcut: backend returns raw token so the simulator doesn't
+            // need xcrun simctl openurl — token is applied automatically.
+            if let token = result.devToken, let devEmail = result.devEmail {
+                pendingResetToken = token
+                pendingResetEmail = devEmail
+                print("🔧 DEV: Reset token auto-applied for \(devEmail)")
+            }
+            #endif
         } catch {
             errorMessage = error.localizedDescription
         }

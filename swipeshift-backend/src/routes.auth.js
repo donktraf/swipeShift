@@ -423,7 +423,13 @@ router.post("/forgot-password", async (req, res) => {
 
   console.log("Password reset link:", resetLink);
 
-  return res.json(okResponse);
+  // In non-production: include raw token so the iOS simulator can auto-apply it
+  // without needing xcrun simctl openurl
+  const isDev = process.env.NODE_ENV !== "production";
+  return res.json({
+    ...okResponse,
+    ...(isDev ? { _devToken: rawToken, _devEmail: email, _devLink: resetLink } : {}),
+  });
 });
 
 const resetPasswordSchema = z.object({

@@ -205,7 +205,18 @@ final class APIClient {
         return decoded.user
     }
     
-    func forgotPassword(email: String) async throws {
+    struct ForgotPasswordResult: Decodable {
+        let ok: Bool
+        let devToken: String?
+        let devEmail: String?
+        enum CodingKeys: String, CodingKey {
+            case ok
+            case devToken = "_devToken"
+            case devEmail = "_devEmail"
+        }
+    }
+
+    func forgotPassword(email: String) async throws -> ForgotPasswordResult {
         var request = URLRequest(url: baseURL.appendingPathComponent("auth/forgot-password"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -213,6 +224,8 @@ final class APIClient {
 
         let (data, response) = try await URLSession.shared.data(for: request)
         try validate(response: response, data: data)
+        return (try? JSONDecoder().decode(ForgotPasswordResult.self, from: data))
+            ?? ForgotPasswordResult(ok: true, devToken: nil, devEmail: nil)
     }
 
     func resetPassword(email: String, token: String, newPassword: String) async throws {
