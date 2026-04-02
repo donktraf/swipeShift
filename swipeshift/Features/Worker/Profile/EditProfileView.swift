@@ -46,6 +46,9 @@ struct EditProfileView: View {
 
     @State private var isSaving: Bool = false
 
+    @State private var showImagePicker = false
+    @State private var selectedImage: UIImage? = nil
+
     private let dayOrder = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     private let distanceOptions = [5, 10, 15, 20, 25]
     private let transportOptions = ["Public Transport", "Car", "Bicycle", "On foot"]
@@ -77,16 +80,27 @@ struct EditProfileView: View {
                 Circle()
                     .fill(Color.white.opacity(0.2))
                     .frame(width: 80, height: 80)
-                Image(systemName: "person.fill")
-                    .font(.system(size: 34))
-                    .foregroundColor(.white.opacity(0.6))
+                if let img = selectedImage {
+                    Image(uiImage: img)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 80, height: 80)
+                        .clipShape(Circle())
+                } else {
+                    Image(systemName: "person.fill")
+                        .font(.system(size: 34))
+                        .foregroundColor(.white.opacity(0.6))
+                }
             }
-            Button("Change Photo") { /* TODO: ImagePicker */ }
+            Button("Change Photo") { showImagePicker = true }
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(.white)
         }
         .frame(maxWidth: .infinity)
         .padding(.bottom, 4)
+        .sheet(isPresented: $showImagePicker) {
+            ImagePicker(image: $selectedImage)
+        }
     }
 
     // MARK: - Basic Info

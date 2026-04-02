@@ -69,6 +69,8 @@ private struct CompanyInfoTab: View {
     @State private var locations: [String] = []
     @State private var newLocationText: String = ""
     @State private var showAddLocation = false
+    @State private var showLogoPicker = false
+    @State private var selectedLogo: UIImage? = nil
 
     @State private var termsAccepted = false
     @State private var ratingSystemAccepted = false
@@ -89,15 +91,26 @@ private struct CompanyInfoTab: View {
                     Circle()
                         .fill(Color.white.opacity(0.15))
                         .frame(width: 80, height: 80)
-                    Text("🏢")
-                        .font(.system(size: 36))
+                    if let img = selectedLogo {
+                        Image(uiImage: img)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 80, height: 80)
+                            .clipShape(Circle())
+                    } else {
+                        Text("🏢")
+                            .font(.system(size: 36))
+                    }
                 }
-                Button("Change Logo") { /* TODO: ImagePicker */ }
+                Button("Change Logo") { showLogoPicker = true }
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(.white)
             }
             .frame(maxWidth: .infinity)
             .padding(.bottom, 4)
+            .sheet(isPresented: $showLogoPicker) {
+                ImagePicker(image: $selectedLogo)
+            }
 
             // Basic Info
             empSection(title: "Company Details") {
