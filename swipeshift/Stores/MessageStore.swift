@@ -12,9 +12,11 @@ import Combine
 final class MessageStore: ObservableObject {
 
     @Published var conversations: [Conversation] = []
+    @Published var employerConversations: [Conversation] = []
 
     init() {
-        conversations = Self.makeMockConversations()
+        conversations         = Self.makeMockConversations()
+        employerConversations = Self.makeMockEmployerConversations()
     }
 
     // MARK: - Sortierung (laut Wireframe)
@@ -60,6 +62,110 @@ final class MessageStore: ObservableObject {
 
     var unreadCount: Int {
         conversations.filter { !$0.isRead }.count
+    }
+
+    var sortedEmployerConversations: [Conversation] {
+        employerConversations.sorted { a, b in
+            if a.status.sortWeight != b.status.sortWeight {
+                return a.status.sortWeight < b.status.sortWeight
+            }
+            if a.status == .today || a.status == .upcoming {
+                if a.isRead != b.isRead { return !a.isRead }
+            }
+            return a.jobDate < b.jobDate
+        }
+    }
+
+    var employerUnreadCount: Int {
+        employerConversations.filter { !$0.isRead }.count
+    }
+
+    func markEmployerConversationAsRead(conversationId: String) {
+        guard let idx = employerConversations.firstIndex(where: { $0.id == conversationId }) else { return }
+        employerConversations[idx].isRead = true
+    }
+
+    func sendEmployerMessage(conversationId: String, text: String) {
+        guard let idx = employerConversations.firstIndex(where: { $0.id == conversationId }) else { return }
+        let msg = ChatMessage(
+            id: UUID().uuidString,
+            text: text,
+            isFromUser: true,
+            timestamp: Date(),
+            isSystemMessage: false
+        )
+        employerConversations[idx].messages.append(msg)
+        employerConversations[idx].lastMessage = text
+        employerConversations[idx].lastMessageTime = Date()
+    }
+
+    // MARK: - Mock-Daten (Employer-Perspektive: company = Worker-Name, isFromUser = Employer)
+    private static func makeMockEmployerConversations() -> [Conversation] {
+        let now          = Date()
+        let inFourHours  = now.addingTimeInterval(4 * 3600)
+        let inTwoDays    = now.addingTimeInterval(2 * 24 * 3600)
+        let twoDaysAgo   = now.addingTimeInterval(-2 * 24 * 3600)
+
+        return [
+            // 1) Today – ungelesen
+            Conversation(
+                id: "emp-conv-1",
+                jobTitle: "Event Staff",
+                company: "Anna Schmidt",
+                logoEmoji: "👩",
+                status: .today,
+                jobDate: inFourHours,
+                lastMessage: "Perfect, see you tonight!",
+                lastMessageTime: now.addingTimeInterval(-300),
+                isRead: false,
+                messages: [
+                    ChatMessage(id: UUID().uuidString, text: "Anna has applied for your Event Staff shift tonight.", isFromUser: false, timestamp: now.addingTimeInterval(-7200), isSystemMessage: true),
+                    ChatMessage(id: UUID().uuidString, text: "Hi Anna, your application looks great. You're in!", isFromUser: true, timestamp: now.addingTimeInterval(-7000), isSystemMessage: false),
+                    ChatMessage(id: UUID().uuidString, text: "Thank you so much! What should I wear?", isFromUser: false, timestamp: now.addingTimeInterval(-6800), isSystemMessage: false),
+                    ChatMessage(id: UUID().uuidString, text: "Smart casual please — dark trousers and a white shirt. Doors open at 18:00.", isFromUser: true, timestamp: now.addingTimeInterval(-6600), isSystemMessage: false),
+                    ChatMessage(id: UUID().uuidString, text: "Perfect, see you tonight!", isFromUser: false, timestamp: now.addingTimeInterval(-300), isSystemMessage: false),
+                ]
+            ),
+
+            // 2) Upcoming – gelesen
+            Conversation(
+                id: "emp-conv-2",
+                jobTitle: "Warehouse Packer",
+                company: "Max Meier",
+                logoEmoji: "👨",
+                status: .upcoming,
+                jobDate: inTwoDays,
+                lastMessage: "No problem, I'll be there on time.",
+                lastMessageTime: now.addingTimeInterval(-3600),
+                isRead: true,
+                messages: [
+                    ChatMessage(id: UUID().uuidString, text: "Max has applied for your Warehouse Packer shift.", isFromUser: false, timestamp: now.addingTimeInterval(-86400), isSystemMessage: true),
+                    ChatMessage(id: UUID().uuidString, text: "Hi Max, welcome to the team! Shift starts at 20:00. Safety boots are mandatory.", isFromUser: true, timestamp: now.addingTimeInterval(-85000), isSystemMessage: false),
+                    ChatMessage(id: UUID().uuidString, text: "Understood. Do I need to bring anything else?", isFromUser: false, timestamp: now.addingTimeInterval(-84000), isSystemMessage: false),
+                    ChatMessage(id: UUID().uuidString, text: "Just your ID and boots. Everything else is provided.", isFromUser: true, timestamp: now.addingTimeInterval(-83000), isSystemMessage: false),
+                    ChatMessage(id: UUID().uuidString, text: "No problem, I'll be there on time.", isFromUser: false, timestamp: now.addingTimeInterval(-3600), isSystemMessage: false),
+                ]
+            ),
+
+            // 3) Completed – read-only
+            Conversation(
+                id: "emp-conv-3",
+                jobTitle: "Retail Assistant",
+                company: "Lisa Weber",
+                logoEmoji: "👩",
+                status: .completed,
+                jobDate: twoDaysAgo,
+                lastMessage: "Shift completed successfully.",
+                lastMessageTime: twoDaysAgo,
+                isRead: true,
+                messages: [
+                    ChatMessage(id: UUID().uuidString, text: "Lisa has applied for your Retail Assistant shift.", isFromUser: false, timestamp: twoDaysAgo.addingTimeInterval(-172800), isSystemMessage: true),
+                    ChatMessage(id: UUID().uuidString, text: "Hi Lisa, you're confirmed for Saturday 10:00–18:00.", isFromUser: true, timestamp: twoDaysAgo.addingTimeInterval(-86400), isSystemMessage: false),
+                    ChatMessage(id: UUID().uuidString, text: "Great, looking forward to it!", isFromUser: false, timestamp: twoDaysAgo.addingTimeInterval(-85000), isSystemMessage: false),
+                    ChatMessage(id: UUID().uuidString, text: "Shift completed successfully.", isFromUser: false, timestamp: twoDaysAgo, isSystemMessage: true),
+                ]
+            ),
+        ]
     }
 
     // MARK: - Mock-Daten

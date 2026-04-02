@@ -7,6 +7,7 @@ import SwiftUI
 
 struct ChatView: View {
     let conversation: Conversation
+    var isEmployerMode: Bool = false
 
     @EnvironmentObject var messageStore: MessageStore
     @Environment(\.dismiss) private var dismiss
@@ -18,11 +19,9 @@ struct ChatView: View {
         conversation.status == .completed || conversation.status == .cancelled
     }
 
-    // Aktuell immer aus dem Store holen damit sendMessage live aktualisiert
     private var currentMessages: [ChatMessage] {
-        messageStore.conversations
-            .first(where: { $0.id == conversation.id })?
-            .messages ?? conversation.messages
+        let pool = isEmployerMode ? messageStore.employerConversations : messageStore.conversations
+        return pool.first(where: { $0.id == conversation.id })?.messages ?? conversation.messages
     }
 
     var body: some View {
@@ -38,7 +37,11 @@ struct ChatView: View {
         }
         .navigationBarHidden(true)
         .onAppear {
-            messageStore.markAsRead(conversationId: conversation.id)
+            if isEmployerMode {
+                messageStore.markEmployerConversationAsRead(conversationId: conversation.id)
+            } else {
+                messageStore.markAsRead(conversationId: conversation.id)
+            }
         }
     }
 
@@ -51,23 +54,32 @@ struct ChatView: View {
                     .foregroundColor(.primary)
             }
 
-            // Logo (tippbar → Company Profile)
-            NavigationLink {
-                CompanyProfileView(
-                    company: .mock(name: conversation.company, logoEmoji: conversation.logoEmoji, rating: nil)
-                )
-            } label: {
+            // Avatar: Employer → worker emoji; Worker → company logo (tippbar)
+            if isEmployerMode {
                 Text(conversation.logoEmoji)
                     .font(.system(size: 22))
                     .frame(width: 40, height: 40)
                     .background(Color(uiColor: .secondarySystemGroupedBackground))
                     .clipShape(Circle())
+            } else {
+                NavigationLink {
+                    CompanyProfileView(
+                        company: .mock(name: conversation.company, logoEmoji: conversation.logoEmoji, rating: nil)
+                    )
+                } label: {
+                    Text(conversation.logoEmoji)
+                        .font(.system(size: 22))
+                        .frame(width: 40, height: 40)
+                        .background(Color(uiColor: .secondarySystemGroupedBackground))
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
 
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 6) {
-                    Text(conversation.company)
+                    // Employer: worker name; Worker: company name
+                    Text(isEmployerMode ? conversation.company : conversation.company)
                         .font(.system(size: 16, weight: .semibold))
                     StatusBadge(status: conversation.status)
                 }
@@ -198,7 +210,11 @@ struct ChatView: View {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         inputText = ""
-        messageStore.sendMessage(conversationId: conversation.id, text: text)
+        if isEmployerMode {
+            messageStore.sendEmployerMessage(conversationId: conversation.id, text: text)
+        } else {
+            messageStore.sendMessage(conversationId: conversation.id, text: text)
+        }
     }
 }
 

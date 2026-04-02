@@ -36,9 +36,7 @@ struct EmployerHomeView: View {
                         AllApplicantsView()
 
                     case .messages:
-                        // Employer-Nachrichten — teilt den MessageStore mit Worker-Seite
-                        // TODO: Employer-spezifische Konversationen filtern
-                        MessagesView()
+                        MessagesView(isEmployerMode: true)
                             .environmentObject(messageStore)
 
                     case .profile:
@@ -53,7 +51,7 @@ struct EmployerHomeView: View {
                     Spacer()
                     EmployerTabBar(
                         selectedTab: $selectedTab,
-                        unreadMessageCount: messageStore.unreadCount
+                        unreadMessageCount: messageStore.employerUnreadCount
                     )
                     .padding(.bottom, 8)
                 }

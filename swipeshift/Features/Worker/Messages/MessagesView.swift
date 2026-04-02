@@ -7,6 +7,14 @@ import SwiftUI
 
 struct MessagesView: View {
     @EnvironmentObject var messageStore: MessageStore
+    var isEmployerMode: Bool = false
+
+    private var activeConversations: [Conversation] {
+        isEmployerMode ? messageStore.sortedEmployerConversations : messageStore.sortedConversations
+    }
+    private var unread: Int {
+        isEmployerMode ? messageStore.employerUnreadCount : messageStore.unreadCount
+    }
 
     var body: some View {
         ZStack {
@@ -20,8 +28,8 @@ struct MessagesView: View {
                         Text("Messages")
                             .font(.system(size: 28, weight: .bold))
                             .foregroundColor(.white)
-                        if messageStore.unreadCount > 0 {
-                            Text("\(messageStore.unreadCount) unread message\(messageStore.unreadCount == 1 ? "" : "s")")
+                        if unread > 0 {
+                            Text("\(unread) unread message\(unread == 1 ? "" : "s")")
                                 .font(.system(size: 14))
                                 .foregroundColor(.white.opacity(0.7))
                         } else {
@@ -37,7 +45,7 @@ struct MessagesView: View {
                 .padding(.bottom, 14)
 
                 // MARK: - Liste oder Leerzustand
-                if messageStore.conversations.isEmpty {
+                if activeConversations.isEmpty {
                     emptyView
                 } else {
                     conversationList
@@ -50,16 +58,20 @@ struct MessagesView: View {
     private var conversationList: some View {
         ScrollView(showsIndicators: false) {
             LazyVStack(spacing: 0) {
-                ForEach(messageStore.sortedConversations) { conversation in
+                ForEach(activeConversations) { conversation in
                     NavigationLink {
-                        ChatView(conversation: conversation)
+                        ChatView(conversation: conversation, isEmployerMode: isEmployerMode)
                             .environmentObject(messageStore)
                     } label: {
-                        ConversationRow(conversation: conversation)
+                        ConversationRow(conversation: conversation, isEmployerMode: isEmployerMode)
                     }
                     .buttonStyle(.plain)
                     .simultaneousGesture(TapGesture().onEnded {
-                        messageStore.markAsRead(conversationId: conversation.id)
+                        if isEmployerMode {
+                            messageStore.markEmployerConversationAsRead(conversationId: conversation.id)
+                        } else {
+                            messageStore.markAsRead(conversationId: conversation.id)
+                        }
                     })
 
                     Divider()
@@ -87,24 +99,31 @@ struct MessagesView: View {
                 Text("No conversations yet")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundColor(.white.opacity(0.8))
-                Text("Once an employer accepts your application, your chat will appear here.")
-                    .font(.system(size: 14))
-                    .foregroundColor(.white.opacity(0.55))
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 40)
-            }
-
-            NavigationLink {
-                JobListView()
-            } label: {
-                Text("Browse Jobs")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(SS.primary)
-                    .padding(.horizontal, 28)
-                    .padding(.vertical, 13)
-                    .background(Color.white)
-                    .clipShape(Capsule())
-                    .shadow(color: .black.opacity(0.08), radius: 8, x: 0, y: 4)
+                if isEmployerMode {
+                    Text("Once you accept an applicant, your chat with them will appear here.")
+                        .font(.system(size: 14))
+                        .foregroundColor(.white.opacity(0.55))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 40)
+                } else {
+                    Text("Once an employer accepts your application, your chat will appear here.")
+                        .font(.system(size: 14))
+                        .foregroundColor(.white.opacity(0.55))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 40)
+                    NavigationLink {
+                        JobListView()
+                    } label: {
+                        Text("Browse Jobs")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(SS.primary)
+                            .padding(.horizontal, 28)
+                            .padding(.vertical, 13)
+                            .background(Color.white)
+                            .clipShape(Capsule())
+                            .shadow(color: .black.opacity(0.08), radius: 8, x: 0, y: 4)
+                    }
+                }
             }
 
             Spacer()
@@ -115,6 +134,7 @@ struct MessagesView: View {
 // MARK: - ConversationRow
 private struct ConversationRow: View {
     let conversation: Conversation
+    var isEmployerMode: Bool = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -140,7 +160,8 @@ private struct ConversationRow: View {
             // Text
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
-                    Text(conversation.jobTitle)
+                    // Employer: worker name as title; Worker: job title as title
+                    Text(isEmployerMode ? conversation.company : conversation.jobTitle)
                         .font(.system(size: 15, weight: conversation.isRead ? .semibold : .bold))
                         .foregroundColor(.primary)
                         .lineLimit(1)
@@ -154,7 +175,7 @@ private struct ConversationRow: View {
                         .foregroundColor(.secondary)
                 }
 
-                Text(conversation.company)
+                Text(isEmployerMode ? conversation.jobTitle : conversation.company)
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
 
