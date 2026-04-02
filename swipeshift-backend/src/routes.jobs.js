@@ -181,13 +181,13 @@ router.post("/", requireAuth, requireVerifiedEmail, async (req, res) => {
     const newJob = await prisma.job.create({
       data: {
         title,
-        company:     company || "Unbekannt",
+        company:     company || "Unknown",
         location:    location || "",
         lat,
         lng,
         category:    category || null,
         tags:        tags || [],
-        payText:     payText || (payAmount ? `€${payAmount} / hour` : "Auf Anfrage"),
+        payText:     payText || (payAmount ? `€${payAmount} / hour` : "On request"),
         payAmount:   payAmount ? parseFloat(payAmount) : null,
         shiftText:   shifts?.[0] ? `${shifts[0].date}, ${shifts[0].timeRange}` : "",
         startTime:   shifts?.[0]?.startTimeISO ? new Date(shifts[0].startTimeISO) : null,
