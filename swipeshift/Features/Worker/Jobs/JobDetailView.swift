@@ -374,7 +374,7 @@ struct JobDetailView: View {
                 Button {
                     showApplySheet = true
                 } label: {
-                    Text("Jetzt bewerben")
+                    Text("Apply Now")
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
