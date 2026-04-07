@@ -52,8 +52,7 @@ router.get("/applicants", requireAuth, requireVerifiedEmail, async (req, res) =>
       applyId:       a.id,
       userId:        a.userId,
       appliedAt:     a.createdAt,
-      // Status: kein separates accepted/declined-Feld im MVP → immer "pending"
-      status:        "pending",
+      status:        a.status,
       job:           jobMap[a.jobId] ?? null,
       user:          userMap[a.userId]
         ? {
@@ -86,8 +85,7 @@ router.post("/applicants/:applyId/accept", requireAuth, requireVerifiedEmail, as
     if (!apply)                              return res.status(404).json({ error: "Application not found" });
     if (apply.job.employerId !== employerId) return res.status(403).json({ error: "Forbidden" });
 
-    // MVP: Status-Feld auf Apply-Ebene noch nicht im Schema → Antwort reicht fürs MVP
-    // TODO: Apply-Modell um status-Feld erweitern wenn Accept/Decline persistent gespeichert werden soll
+    await prisma.apply.update({ where: { id: applyId }, data: { status: "accepted" } });
     console.log(`ACCEPT apply ${applyId} by employer ${employerId}`);
     return res.json({ ok: true, applyId, action: "accepted" });
   } catch (err) {
@@ -112,8 +110,7 @@ router.post("/applicants/:applyId/decline", requireAuth, requireVerifiedEmail, a
     if (!apply)                              return res.status(404).json({ error: "Application not found" });
     if (apply.job.employerId !== employerId) return res.status(403).json({ error: "Forbidden" });
 
-    // MVP: Apply löschen = ablehnen
-    await prisma.apply.delete({ where: { id: applyId } });
+    await prisma.apply.update({ where: { id: applyId }, data: { status: "declined" } });
     console.log(`DECLINE apply ${applyId} by employer ${employerId}`);
     return res.json({ ok: true, applyId, action: "declined" });
   } catch (err) {
@@ -176,6 +173,170 @@ router.get("/stats", requireAuth, requireVerifiedEmail, async (req, res) => {
     });
   } catch (err) {
     console.error("GET /employer/stats error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─────────────────────────────────────────────
+// GET /employer/financials
+// Finanzübersicht: Gesamtausgaben, Upcoming Payments, abgeschlossene Jobs
+// ─────────────────────────────────────────────
+router.get("/financials", requireAuth, requireVerifiedEmail, async (req, res) => {
+  try {
+    const employerId = req.auth.sub;
+    const now        = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    const myJobs = await prisma.job.findMany({
+      where:  { employerId },
+      select: {
+        id: true, title: true, status: true, payAmount: true,
+        openSpots: true, startTime: true, endTime: true,
+        shiftText: true, logoEmoji: true, category: true,
+      },
+    });
+
+    const completedJobs = myJobs.filter(j => j.status === "completed");
+    const upcomingJobs  = myJobs.filter(j => j.status === "published" && j.startTime && new Date(j.startTime) > now);
+
+    const calcCost = (j) => (j.payAmount ?? 0) * (j.openSpots ?? 1);
+
+    const totalSpending     = completedJobs.reduce((s, j) => s + calcCost(j), 0);
+    const upcomingPayments  = upcomingJobs.reduce((s, j) => s + calcCost(j), 0);
+    const monthlySpend      = completedJobs
+      .filter(j => j.startTime && new Date(j.startTime) >= monthStart)
+      .reduce((s, j) => s + calcCost(j), 0);
+
+    // Letzte 7 Tage für Chart
+    const days = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(now);
+      d.setDate(d.getDate() - (6 - i));
+      d.setHours(0, 0, 0, 0);
+      return d;
+    });
+
+    const chartData = days.map(day => {
+      const dayEnd = new Date(day); dayEnd.setHours(23, 59, 59, 999);
+      const label  = day.toLocaleDateString("en-US", { weekday: "short" });
+      const dayJobs = myJobs.filter(j => j.startTime && new Date(j.startTime) >= day && new Date(j.startTime) <= dayEnd);
+      return {
+        day:       label,
+        upcoming:  dayJobs.filter(j => j.status === "published").reduce((s, j) => s + calcCost(j), 0),
+        completed: dayJobs.filter(j => j.status === "completed").reduce((s, j) => s + calcCost(j), 0),
+        paidOut:   0, // Kein echtes Zahlungsmodell im MVP
+      };
+    });
+
+    // Kategorien-Aufschlüsselung
+    const byCategory = {};
+    completedJobs.forEach(j => {
+      const cat = j.category ?? "Other";
+      byCategory[cat] = (byCategory[cat] ?? 0) + calcCost(j);
+    });
+
+    return res.json({
+      totalSpending,
+      upcomingPayments,
+      completedJobsCount: completedJobs.length,
+      paidOut:            0,
+      monthlySpend,
+      chartData,
+      byCategory,
+      upcomingJobs: upcomingJobs.slice(0, 10).map(j => ({
+        id:        j.id,
+        title:     j.title,
+        logoEmoji: j.logoEmoji,
+        shiftText: j.shiftText,
+        amount:    calcCost(j),
+        status:    "upcoming",
+      })),
+      completedJobsList: completedJobs.slice(0, 10).map(j => ({
+        id:        j.id,
+        title:     j.title,
+        logoEmoji: j.logoEmoji,
+        shiftText: j.shiftText,
+        amount:    calcCost(j),
+        status:    "completed",
+      })),
+    });
+  } catch (err) {
+    console.error("GET /employer/financials error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─────────────────────────────────────────────
+// POST /employer/applicants/:applyId/unassign
+// Accepted Worker wieder auf "pending" zurücksetzen
+// ─────────────────────────────────────────────
+router.post("/applicants/:applyId/unassign", requireAuth, requireVerifiedEmail, async (req, res) => {
+  try {
+    const employerId = req.auth.sub;
+    const { applyId } = req.params;
+
+    const apply = await prisma.apply.findUnique({
+      where:   { id: applyId },
+      include: { job: { select: { employerId: true } } },
+    });
+
+    if (!apply)                              return res.status(404).json({ error: "Application not found" });
+    if (apply.job.employerId !== employerId) return res.status(403).json({ error: "Forbidden" });
+
+    await prisma.apply.update({ where: { id: applyId }, data: { status: "pending" } });
+    return res.json({ ok: true, applyId, action: "unassigned" });
+  } catch (err) {
+    console.error("POST /employer/applicants/:id/unassign error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─────────────────────────────────────────────
+// GET /employer/assigned-workers
+// Jobs des Arbeitgebers mit ihren akzeptierten Bewerbern
+// ─────────────────────────────────────────────
+router.get("/assigned-workers", requireAuth, requireVerifiedEmail, async (req, res) => {
+  try {
+    const employerId = req.auth.sub;
+
+    const jobs = await prisma.job.findMany({
+      where:   { employerId, status: { in: ["published", "inProgress"] } },
+      orderBy: { startTime: "asc" },
+      select: {
+        id: true, title: true, logoEmoji: true, category: true,
+        location: true, openSpots: true, shifts: true,
+        applies: {
+          where:  { status: "accepted" },
+          select: {
+            id:     true,
+            userId: true,
+            user: {
+              select: { id: true, firstName: true, lastName: true },
+            },
+          },
+        },
+      },
+    });
+
+    const result = jobs.map((job) => ({
+      id:          job.id,
+      title:       job.title,
+      logoEmoji:   job.logoEmoji,
+      category:    job.category ?? "",
+      location:    job.location,
+      openSpots:   job.openSpots,
+      shifts:      Array.isArray(job.shifts) ? job.shifts : [],
+      assignedWorkers: job.applies.map((a) => ({
+        applyId:     a.id,
+        userId:      a.userId,
+        name:        `${a.user?.firstName ?? ""} ${a.user?.lastName ?? ""}`.trim(),
+        photoEmoji:  "👤",
+        rating:      0.0,
+      })),
+    }));
+
+    return res.json({ jobs: result });
+  } catch (err) {
+    console.error("GET /employer/assigned-workers error:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
 });

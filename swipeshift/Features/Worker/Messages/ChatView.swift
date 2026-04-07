@@ -64,7 +64,8 @@ struct ChatView: View {
             } else {
                 NavigationLink {
                     CompanyProfileView(
-                        company: .mock(name: conversation.company, logoEmoji: conversation.logoEmoji, rating: nil)
+                        companyName: conversation.company,
+                        logoEmoji:   conversation.logoEmoji
                     )
                 } label: {
                     Text(conversation.logoEmoji)

@@ -42,6 +42,7 @@ struct UserDTO: Decodable {
     let companyDescription: String?
     
     let isEmailVerified: Bool
+    let hasSocialLogin: Bool?
 }
 
 // Login/Register Response

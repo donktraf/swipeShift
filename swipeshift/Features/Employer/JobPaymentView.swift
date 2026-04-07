@@ -312,23 +312,4 @@ struct JobPaymentView: View {
     }
 }
 
-// MARK: - Mock extension
-
-extension JobPaymentView {
-    static func mock(jobTitle: String = "Event Staff — Sommerfest",
-                     jobEmoji: String = "🎪",
-                     jobLocation: String = "Stuttgart Mitte") -> JobPaymentView {
-        JobPaymentView(
-            jobTitle: jobTitle,
-            jobEmoji: jobEmoji,
-            jobLocation: jobLocation,
-            workers: [
-                PayableWorker(id: "w1", name: "Jonas Weber",   avatarEmoji: "👨‍💼", jobTitle: jobTitle, shiftDate: "Apr 1",  hoursWorked: 6, hourlyRate: 14, isPaid: true),
-                PayableWorker(id: "w2", name: "Maria Schulz",  avatarEmoji: "👩‍💼", jobTitle: jobTitle, shiftDate: "Apr 1",  hoursWorked: 5, hourlyRate: 14, isPaid: false),
-                PayableWorker(id: "w3", name: "Lukas Bauer",   avatarEmoji: "👷",   jobTitle: jobTitle, shiftDate: "Apr 2",  hoursWorked: 7, hourlyRate: 14, isPaid: false),
-                PayableWorker(id: "w4", name: "Anna Müller",   avatarEmoji: "👩‍🔧",  jobTitle: jobTitle, shiftDate: "Apr 2",  hoursWorked: 6, hourlyRate: 14, isPaid: false),
-                PayableWorker(id: "w5", name: "Tim Fischer",   avatarEmoji: "🧑‍💼",  jobTitle: jobTitle, shiftDate: "Apr 3",  hoursWorked: 8, hourlyRate: 14, isPaid: true),
-            ]
-        )
-    }
-}
+// TODO: GET /employer/jobs/:id/payments — Payment-Modell benötigt Backend-Erweiterung

@@ -131,10 +131,11 @@ struct AllPostedJobsView: View {
         .task { await load() }
         .navigationDestination(isPresented: $showPayments) {
             if let job = jobForPayment {
-                JobPaymentView.mock(
+                JobPaymentView(
                     jobTitle:    job.title,
                     jobEmoji:    job.logoEmoji,
-                    jobLocation: job.location
+                    jobLocation: job.location,
+                    workers:     [] // TODO: GET /employer/jobs/:id/payments
                 )
             }
         }

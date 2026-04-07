@@ -328,7 +328,8 @@ struct JobDetailView: View {
                 // NavigationLink unsichtbar über die gesamte Karte
                 NavigationLink {
                     CompanyProfileView(
-                        company: .mock(name: job.company, logoEmoji: job.logoEmoji, rating: job.companyRating)
+                        companyName: job.company,
+                        logoEmoji:   job.logoEmoji
                     )
                 } label: {
                     Color.clear

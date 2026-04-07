@@ -31,6 +31,7 @@ router.get("/me", requireAuth, async (req, res) => {
         lat: true,
         lng: true,
         emailVerifiedAt: true,
+        passwordHash: true,
         createdAt: true,
       },
     });
@@ -50,6 +51,7 @@ router.get("/me", requireAuth, async (req, res) => {
       lng: user.lng,
       onboarding: user.onboarding,
       isEmailVerified: !!user.emailVerifiedAt,
+      hasSocialLogin: user.passwordHash === "SOCIAL_LOGIN",
       createdAt: user.createdAt,
     });
 

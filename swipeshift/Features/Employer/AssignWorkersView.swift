@@ -5,65 +5,59 @@
 
 import SwiftUI
 
-// MARK: - Models
+// MARK: - DTOs (API Response)
 
-struct AssignableJob: Identifiable {
+struct AssignableJobDTO: Identifiable, Decodable {
     let id: String
     let title: String
     let logoEmoji: String
     let category: String
     let location: String
-    var shifts: [AssignableShift]
+    let openSpots: Int
+    let shifts: [ShiftSlotDTO]
+    var assignedWorkers: [AssignedWorkerDTO]
+
+    var isFullyStaffed: Bool { assignedWorkers.count >= openSpots }
+    var openCount: Int { max(0, openSpots - assignedWorkers.count) }
 }
 
-struct AssignableShift: Identifiable {
-    let id: String
-    let date: Date
-    let startTime: String
-    let endTime: String
-    let totalSpots: Int
-    var assignedWorkers: [AssignedWorker]
-
-    var openSpots: Int { totalSpots - assignedWorkers.count }
-    var isFullyStaffed: Bool { openSpots <= 0 }
-
-    var dateLabel: String {
-        let cal = Calendar.current
-        if cal.isDateInToday(date) { return "Today" }
-        if cal.isDateInTomorrow(date) { return "Tomorrow" }
-        return date.formatted(.dateTime.weekday(.wide).day(.defaultDigits).month(.abbreviated))
-    }
+struct ShiftSlotDTO: Decodable {
+    let date: String
+    let timeRange: String
+    let duration: String
+    let totalPay: String
 }
 
-struct AssignedWorker: Identifiable {
-    let id: String
+struct AssignedWorkerDTO: Identifiable, Decodable {
+    let applyId: String
+    let userId: String
     let name: String
     let photoEmoji: String
     let rating: Double
+    var id: String { applyId }
 }
 
 // MARK: - AssignWorkersView
 
 struct AssignWorkersView: View {
-    @State private var jobs: [AssignableJob] = mockAssignableJobs
+    @State private var jobs: [AssignableJobDTO] = []
+    @State private var isLoading = true
+    @State private var errorMessage: String? = nil
     @State private var expandedJobIds: Set<String> = []
-    @State private var expandedShiftIds: Set<String> = []
     @State private var selectedFilter: StaffingFilter = .all
 
     enum StaffingFilter: String, CaseIterable {
-        case all           = "All"
-        case needsWorkers  = "Open"
-        case fullyStaffed  = "Staffed"
+        case all          = "All"
+        case needsWorkers = "Open"
+        case fullyStaffed = "Staffed"
     }
 
-    private var filteredJobs: [AssignableJob] {
+    private var filteredJobs: [AssignableJobDTO] {
         jobs.filter { job in
             switch selectedFilter {
-            case .all: return true
-            case .needsWorkers:
-                return job.shifts.contains { !$0.isFullyStaffed }
-            case .fullyStaffed:
-                return job.shifts.allSatisfy { $0.isFullyStaffed }
+            case .all:          return true
+            case .needsWorkers: return !job.isFullyStaffed
+            case .fullyStaffed: return job.isFullyStaffed
             }
         }
     }
@@ -82,7 +76,12 @@ struct AssignWorkersView: View {
                 }
                 .padding(.bottom, 12)
 
-                if filteredJobs.isEmpty {
+                if isLoading {
+                    ProgressView()
+                        .padding(.top, 60)
+                } else if let err = errorMessage {
+                    errorView(err)
+                } else if filteredJobs.isEmpty {
                     emptyView
                 } else {
                     ScrollView(showsIndicators: false) {
@@ -91,12 +90,8 @@ struct AssignWorkersView: View {
                                 JobAssignCard(
                                     job: job,
                                     isExpanded: expandedJobIds.contains(job.id),
-                                    expandedShifts: expandedShiftIds,
                                     onToggleJob: { toggleJob(job.id) },
-                                    onToggleShift: { toggleShift($0) },
-                                    onUnassign: { jobId, shiftId, workerId in
-                                        unassign(jobId: jobId, shiftId: shiftId, workerId: workerId)
-                                    }
+                                    onUnassign: { applyId in unassign(jobId: job.id, applyId: applyId) }
                                 )
                             }
                         }
@@ -106,6 +101,7 @@ struct AssignWorkersView: View {
                 }
             }
         }
+        .task { await load() }
     }
 
     // MARK: - Filter Chip
@@ -124,7 +120,7 @@ struct AssignWorkersView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: - Empty View
+    // MARK: - Empty / Error
 
     private var emptyView: some View {
         VStack(spacing: 14) {
@@ -144,6 +140,23 @@ struct AssignWorkersView: View {
         .padding(.top, 60)
     }
 
+    private func errorView(_ msg: String) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 36))
+                .foregroundColor(.orange.opacity(0.7))
+            Text(msg)
+                .font(.system(size: 14))
+                .foregroundColor(.white.opacity(0.6))
+                .multilineTextAlignment(.center)
+            Button("Try Again") { Task { await load() } }
+                .buttonStyle(SSPrimaryButtonStyle())
+                .padding(.horizontal, 60)
+        }
+        .padding(.top, 40)
+        .padding(.horizontal, 24)
+    }
+
     // MARK: - Helpers
 
     private func toggleJob(_ id: String) {
@@ -153,18 +166,30 @@ struct AssignWorkersView: View {
         }
     }
 
-    private func toggleShift(_ id: String) {
-        withAnimation(.easeInOut(duration: 0.2)) {
-            if expandedShiftIds.contains(id) { expandedShiftIds.remove(id) }
-            else { expandedShiftIds.insert(id) }
+    @MainActor
+    private func load() async {
+        isLoading = true
+        errorMessage = nil
+        do {
+            jobs = try await APIClient.shared.fetchAssignedWorkers()
+        } catch {
+            errorMessage = error.localizedDescription
         }
+        isLoading = false
     }
 
-    private func unassign(jobId: String, shiftId: String, workerId: String) {
-        guard let ji = jobs.firstIndex(where: { $0.id == jobId }),
-              let si = jobs[ji].shifts.firstIndex(where: { $0.id == shiftId }) else { return }
-        withAnimation {
-            jobs[ji].shifts[si].assignedWorkers.removeAll { $0.id == workerId }
+    private func unassign(jobId: String, applyId: String) {
+        Task {
+            do {
+                try await APIClient.shared.unassignWorker(applyId: applyId)
+                withAnimation {
+                    if let ji = jobs.firstIndex(where: { $0.id == jobId }) {
+                        jobs[ji].assignedWorkers.removeAll { $0.applyId == applyId }
+                    }
+                }
+            } catch {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 }
@@ -172,20 +197,14 @@ struct AssignWorkersView: View {
 // MARK: - JobAssignCard
 
 private struct JobAssignCard: View {
-    let job: AssignableJob
+    let job: AssignableJobDTO
     let isExpanded: Bool
-    let expandedShifts: Set<String>
     let onToggleJob: () -> Void
-    let onToggleShift: (String) -> Void
-    let onUnassign: (String, String, String) -> Void
-
-    private var totalOpen: Int { job.shifts.reduce(0) { $0 + $1.openSpots } }
-    private var totalStaffed: Int { job.shifts.reduce(0) { $0 + $1.assignedWorkers.count } }
-    private var totalSpots: Int { job.shifts.reduce(0) { $0 + $1.totalSpots } }
+    let onUnassign: (String) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
-            // Job Header — tippbar zum Ausklappen
+            // Job Header
             Button(action: onToggleJob) {
                 HStack(spacing: 12) {
                     Text(job.logoEmoji)
@@ -205,17 +224,16 @@ private struct JobAssignCard: View {
 
                     Spacer()
 
-                    // Staffing-Badge
                     VStack(alignment: .trailing, spacing: 2) {
                         HStack(spacing: 4) {
                             Circle()
-                                .fill(totalOpen > 0 ? Color.orange : Color.green)
+                                .fill(job.openCount > 0 ? Color.orange : Color.green)
                                 .frame(width: 7, height: 7)
-                            Text(totalOpen > 0 ? "\(totalOpen) open" : "Staffed")
+                            Text(job.openCount > 0 ? "\(job.openCount) open" : "Staffed")
                                 .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(totalOpen > 0 ? .orange : .green)
+                                .foregroundColor(job.openCount > 0 ? .orange : .green)
                         }
-                        Text("\(totalStaffed)/\(totalSpots) workers")
+                        Text("\(job.assignedWorkers.count)/\(job.openSpots) workers")
                             .font(.system(size: 11))
                             .foregroundColor(.secondary)
                     }
@@ -228,72 +246,53 @@ private struct JobAssignCard: View {
             }
             .buttonStyle(.plain)
 
-            // Schichten (expandiert)
+            // Expandiert
             if isExpanded {
                 Divider().padding(.horizontal, 14)
 
                 VStack(spacing: 0) {
-                    ForEach(job.shifts) { shift in
-                        shiftRow(shift)
-                        if shift.id != job.shifts.last?.id {
-                            Divider().padding(.leading, 14)
-                        }
-                    }
-                }
-            }
-        }
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: .black.opacity(0.05), radius: 5, x: 0, y: 2)
-    }
-
-    @ViewBuilder
-    private func shiftRow(_ shift: AssignableShift) -> some View {
-        let isShiftExpanded = expandedShifts.contains(shift.id)
-
-        VStack(spacing: 0) {
-            // Schicht-Header
-            Button { onToggleShift(shift.id) } label: {
-                HStack(spacing: 10) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(shift.dateLabel)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(.primary)
-                        Text("\(shift.startTime) – \(shift.endTime)")
-                            .font(.system(size: 12))
-                            .foregroundColor(.secondary)
-                    }
-
-                    Spacer()
-
-                    // Staffing Progress
-                    HStack(spacing: 6) {
-                        staffingPills(shift)
-
-                        if !shift.isFullyStaffed {
-                            Text("\(shift.openSpots) open")
+                    // Schichten (read-only)
+                    if !job.shifts.isEmpty {
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text("Shifts")
                                 .font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(.orange)
-                        } else {
-                            Text("Fully Staffed")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(.green)
+                                .foregroundColor(.secondary)
+                                .padding(.horizontal, 14)
+                                .padding(.top, 10)
+                                .padding(.bottom, 4)
+
+                            ForEach(Array(job.shifts.enumerated()), id: \.offset) { _, s in
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(s.date)
+                                            .font(.system(size: 13, weight: .semibold))
+                                            .foregroundColor(.primary)
+                                        Text("\(s.timeRange) · \(s.duration)")
+                                            .font(.system(size: 12))
+                                            .foregroundColor(.secondary)
+                                    }
+                                    Spacer()
+                                    Text(s.totalPay)
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundColor(SS.primary)
+                                }
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                Divider().padding(.leading, 14)
+                            }
                         }
                     }
 
-                    Image(systemName: isShiftExpanded ? "chevron.up" : "chevron.down")
+                    // Zugewiesene Mitarbeiter
+                    Text("Assigned Workers")
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(.secondary.opacity(0.5))
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-            }
-            .buttonStyle(.plain)
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14)
+                        .padding(.top, 10)
+                        .padding(.bottom, 4)
 
-            // Zugewiesene Mitarbeiter (expandiert)
-            if isShiftExpanded {
-                VStack(spacing: 0) {
-                    if shift.assignedWorkers.isEmpty {
+                    if job.assignedWorkers.isEmpty {
                         Text("No workers assigned yet.")
                             .font(.system(size: 12))
                             .foregroundColor(.secondary)
@@ -301,14 +300,14 @@ private struct JobAssignCard: View {
                             .padding(.horizontal, 14)
                             .padding(.vertical, 10)
                     } else {
-                        ForEach(shift.assignedWorkers) { worker in
-                            workerRow(worker, shift: shift)
+                        ForEach(job.assignedWorkers) { worker in
+                            workerRow(worker)
                         }
                     }
 
-                    // Mitarbeiter hinzufügen (TODO: Bewerber-Liste öffnen)
+                    // Add Worker — TODO: Bewerber-Liste öffnen
                     Button {
-                        // TODO: Bewerber-Liste für diese Schicht öffnen
+                        // TODO: Bewerber-Liste für diesen Job öffnen
                     } label: {
                         Label("Add Worker", systemImage: "plus")
                             .font(.system(size: 13, weight: .semibold))
@@ -325,11 +324,13 @@ private struct JobAssignCard: View {
                 .background(Color.gray.opacity(0.03))
             }
         }
+        .background(Color(uiColor: .systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: .black.opacity(0.05), radius: 5, x: 0, y: 2)
     }
 
-    private func workerRow(_ worker: AssignedWorker, shift: AssignableShift) -> some View {
+    private func workerRow(_ worker: AssignedWorkerDTO) -> some View {
         HStack(spacing: 10) {
-            // Avatar
             ZStack {
                 Circle()
                     .fill(Color.gray.opacity(0.12))
@@ -337,117 +338,36 @@ private struct JobAssignCard: View {
                 Text(worker.photoEmoji)
                     .font(.system(size: 16))
             }
+            .padding(.leading, 14)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(worker.name)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(.primary)
-                HStack(spacing: 2) {
-                    Image(systemName: "star.fill")
-                        .font(.system(size: 10))
-                        .foregroundColor(.yellow)
-                    Text(String(format: "%.1f", worker.rating))
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
+                if worker.rating > 0 {
+                    HStack(spacing: 2) {
+                        Image(systemName: "star.fill")
+                            .font(.system(size: 10))
+                            .foregroundColor(.yellow)
+                        Text(String(format: "%.1f", worker.rating))
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                    }
                 }
             }
 
             Spacer()
 
             Button {
-                onUnassign(job.id, shift.id, worker.id)
+                onUnassign(worker.applyId)
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 18))
                     .foregroundColor(.red.opacity(0.7))
             }
             .buttonStyle(.plain)
+            .padding(.trailing, 14)
         }
-        .padding(.horizontal, 14)
         .padding(.vertical, 8)
     }
-
-    private func staffingPills(_ shift: AssignableShift) -> some View {
-        HStack(spacing: 3) {
-            ForEach(0..<shift.totalSpots, id: \.self) { i in
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(i < shift.assignedWorkers.count ? Color.green : Color.gray.opacity(0.2))
-                    .frame(width: 14, height: 6)
-            }
-        }
-    }
 }
-
-// MARK: - Mock Data
-
-private let mockAssignableJobs: [AssignableJob] = [
-    AssignableJob(
-        id: "j1",
-        title: "Event Staff — Sommerfest",
-        logoEmoji: "🎪",
-        category: "Events",
-        location: "Munich City Center",
-        shifts: [
-            AssignableShift(
-                id: "s1",
-                date: Calendar.current.date(byAdding: .day, value: 1, to: .now)!,
-                startTime: "18:00",
-                endTime: "23:00",
-                totalSpots: 3,
-                assignedWorkers: [
-                    AssignedWorker(id: "w1", name: "Jonas Weber",  photoEmoji: "👨‍💼", rating: 4.8),
-                    AssignedWorker(id: "w2", name: "Maria Schulz", photoEmoji: "👩‍💼", rating: 4.6),
-                ]
-            ),
-            AssignableShift(
-                id: "s2",
-                date: Calendar.current.date(byAdding: .day, value: 2, to: .now)!,
-                startTime: "16:00",
-                endTime: "22:00",
-                totalSpots: 2,
-                assignedWorkers: []
-            ),
-        ]
-    ),
-    AssignableJob(
-        id: "j2",
-        title: "Warehouse — Night Shift",
-        logoEmoji: "📦",
-        category: "Logistics",
-        location: "Munich North",
-        shifts: [
-            AssignableShift(
-                id: "s3",
-                date: .now,
-                startTime: "22:00",
-                endTime: "06:00",
-                totalSpots: 4,
-                assignedWorkers: [
-                    AssignedWorker(id: "w3", name: "Lukas Bauer",  photoEmoji: "👷", rating: 4.5),
-                    AssignedWorker(id: "w4", name: "Anna Müller",  photoEmoji: "👩‍🔧", rating: 4.9),
-                    AssignedWorker(id: "w5", name: "Tim Fischer",  photoEmoji: "🧑‍💼", rating: 4.2),
-                    AssignedWorker(id: "w6", name: "Lena Braun",   photoEmoji: "👩‍💼", rating: 4.7),
-                ]
-            ),
-        ]
-    ),
-    AssignableJob(
-        id: "j3",
-        title: "Bartender — Pool Bar",
-        logoEmoji: "🍹",
-        category: "Hospitality",
-        location: "Munich Schwabing",
-        shifts: [
-            AssignableShift(
-                id: "s4",
-                date: Calendar.current.date(byAdding: .day, value: 3, to: .now)!,
-                startTime: "19:00",
-                endTime: "02:00",
-                totalSpots: 2,
-                assignedWorkers: [
-                    AssignedWorker(id: "w7", name: "Max Hoffmann", photoEmoji: "🧑‍🍳", rating: 4.8),
-                ]
-            ),
-        ]
-    ),
-]

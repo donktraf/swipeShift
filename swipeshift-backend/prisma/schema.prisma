@@ -40,8 +40,8 @@ model User {
   employer Employer?
 
   passwordResetTokens PasswordResetToken[]
-
   emailVerificationTokens EmailVerificationToken[]
+  applies Apply[]
 }
 
 model Worker {
@@ -148,22 +148,60 @@ model Job {
 
   createdAt DateTime @default(now())
 
-  applies Apply[]
-  skips   Skip[]
-  saves   Save[]
+  applies       Apply[]
+  skips         Skip[]
+  saves         Save[]
+  conversations Conversation[]
 }
 
 model Apply {
   id        String   @id @default(uuid())
   userId    String
   jobId     String
+  status    String   @default("pending") // pending, accepted, declined
   createdAt DateTime @default(now())
 
-  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  job          Job           @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  conversation Conversation?
 
   @@unique([userId, jobId])
   @@index([userId])
   @@index([jobId])
+}
+
+model Conversation {
+  id         String   @id @default(uuid())
+  applyId    String   @unique
+  jobId      String
+  workerId   String
+  employerId String?
+  status     String   @default("active") // active, completed, cancelled
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  apply    Apply     @relation(fields: [applyId], references: [id], onDelete: Cascade)
+  job      Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  messages Message[]
+
+  @@index([workerId])
+  @@index([employerId])
+  @@index([jobId])
+}
+
+model Message {
+  id             String   @id @default(uuid())
+  conversationId String
+  senderId       String
+  text           String   @db.Text
+  isSystem       Boolean  @default(false)
+  isRead         Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@index([senderId])
 }
 
 model Skip {

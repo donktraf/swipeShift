@@ -41,21 +41,31 @@ struct AccountSettingsView: View {
 // MARK: - Account & Security
 
 struct AccountSecurityView: View {
+    @EnvironmentObject var userStore: UserStore
     @State private var showChangeEmail    = false
     @State private var showChangePhone    = false
     @State private var showChangePassword = false
+    @State private var showSetPassword    = false
     @State private var twoFAEnabled       = false
+
+    private var isSocialUser: Bool {
+        userStore.currentUser?.hasSocialLogin == true
+    }
 
     var body: some View {
         SubScreenShell(title: "Account & Security") {
             VStack(spacing: 16) {
                 // Zugangsdaten
                 sectionCard("Credentials") {
-                    SettingsActionRow(icon: "envelope.fill",    label: "Change Email")    { showChangeEmail = true }
+                    SettingsActionRow(icon: "envelope.fill", label: "Change Email") { showChangeEmail = true }
                     Divider().padding(.leading, 52)
-                    SettingsActionRow(icon: "phone.fill",        label: "Change Phone")   { showChangePhone = true }
+                    SettingsActionRow(icon: "phone.fill", label: "Change Phone") { showChangePhone = true }
                     Divider().padding(.leading, 52)
-                    SettingsActionRow(icon: "lock.fill",         label: "Change Password")  { showChangePassword = true }
+                    if isSocialUser {
+                        SettingsActionRow(icon: "lock.badge.plus", label: "Set Password") { showSetPassword = true }
+                    } else {
+                        SettingsActionRow(icon: "lock.fill", label: "Change Password") { showChangePassword = true }
+                    }
                 }
 
                 // Sicherheit
@@ -89,6 +99,7 @@ struct AccountSecurityView: View {
         .sheet(isPresented: $showChangeEmail)    { ChangeEmailSheet() }
         .sheet(isPresented: $showChangePhone)    { ChangePhoneSheet() }
         .sheet(isPresented: $showChangePassword) { ChangePasswordSheet() }
+        .sheet(isPresented: $showSetPassword)    { SetPasswordSheet().environmentObject(userStore) }
     }
 }
 
@@ -748,6 +759,87 @@ private struct ChangePasswordSheet: View {
                     .disabled(!isValid)
                 }
             }
+        }
+    }
+}
+
+private struct SetPasswordSheet: View {
+    @EnvironmentObject var userStore: UserStore
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var newPass  = ""
+    @State private var confirm  = ""
+    @State private var isLoading = false
+    @State private var errorMessage: String? = nil
+    @State private var success = false
+
+    private var isValid: Bool {
+        newPass.count >= 8 && newPass == confirm
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text("You signed in with Google or Apple. Set a password to also log in with your email address.")
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary)
+                }
+                Section("New Password (min. 8 characters)") {
+                    SecureField("New password", text: $newPass)
+                    SecureField("Repeat password", text: $confirm)
+                }
+                if !newPass.isEmpty && newPass != confirm {
+                    Section {
+                        Text("Passwords do not match.")
+                            .font(.system(size: 13))
+                            .foregroundColor(.red)
+                    }
+                }
+                if let errorMessage {
+                    Section {
+                        Text(errorMessage)
+                            .font(.system(size: 13))
+                            .foregroundColor(.red)
+                    }
+                }
+            }
+            .navigationTitle("Set Password")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    if isLoading {
+                        ProgressView()
+                    } else {
+                        Button("Save") { save() }
+                            .disabled(!isValid)
+                    }
+                }
+            }
+            .alert("Password Set", isPresented: $success) {
+                Button("OK") { dismiss() }
+            } message: {
+                Text("You can now log in with your email and this password.")
+            }
+        }
+    }
+
+    private func save() {
+        isLoading = true
+        errorMessage = nil
+        Task {
+            do {
+                try await APIClient.shared.setPassword(newPassword: newPass)
+                // hasSocialLogin im lokalen User aktualisieren
+                await userStore.refreshMe()
+                success = true
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            isLoading = false
         }
     }
 }

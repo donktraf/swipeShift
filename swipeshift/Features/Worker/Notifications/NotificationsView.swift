@@ -308,18 +308,24 @@ private struct NotificationRow: View {
 private extension Date {
     var relativeLabel: String {
         let diff = Date().timeIntervalSince(self)
+        
         if diff < 60 {
+            
             return "Gerade eben"
         } else if diff < 3600 {
+            
             return "vor \(Int(diff / 60)) Min."
         } else if diff < 86400 {
+            
             return "vor \(Int(diff / 3600)) Std."
         } else if diff < 86400 * 7 {
+            
             return "vor \(Int(diff / 86400)) Tag(en)"
         } else {
             let f = DateFormatter()
             f.locale = Locale(identifier: "en_US")
             f.dateFormat = "dd. MMM"
+            
             return f.string(from: self)
         }
     }

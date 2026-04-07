@@ -226,13 +226,52 @@ router.post("/:id/apply", requireAuth, requireVerifiedEmail, async (req, res) =>
     const userId = req.auth.sub;
     const jobId  = req.params.id;
 
-    await prisma.apply.upsert({
-      where:  { userId_jobId: { userId, jobId } },
-      create: { userId, jobId },
-      update: {},
+    const job = await prisma.job.findUnique({
+      where: { id: jobId },
+      select: { id: true, title: true, employerId: true },
+    });
+    if (!job) return res.status(404).json({ error: "Job not found" });
+
+    // Apply + Conversation in einer Transaktion
+    const result = await prisma.$transaction(async (tx) => {
+      const apply = await tx.apply.upsert({
+        where:  { userId_jobId: { userId, jobId } },
+        create: { userId, jobId },
+        update: {},
+      });
+
+      // Conversation nur anlegen wenn noch keine existiert
+      const existing = await tx.conversation.findUnique({
+        where: { applyId: apply.id },
+      });
+      if (existing) return { apply, conversation: existing, isNew: false };
+
+      const employerId = job.employerId ?? null;
+
+      const conversation = await tx.conversation.create({
+        data: {
+          applyId:    apply.id,
+          jobId,
+          workerId:   userId,
+          employerId,
+        },
+      });
+
+      // System-Message: Bewerbung eingegangen
+      await tx.message.create({
+        data: {
+          conversationId: conversation.id,
+          senderId:       userId,
+          text:           `Your application for "${job.title}" has been submitted. The employer will review your profile and get back to you.`,
+          isSystem:       true,
+          isRead:         true,
+        },
+      });
+
+      return { apply, conversation, isNew: true };
     });
 
-    return res.json({ ok: true });
+    return res.json({ ok: true, conversationId: result.conversation.id });
   } catch (err) {
     console.error("POST /jobs/:id/apply error:", err);
     return res.status(500).json({ error: "Internal server error" });

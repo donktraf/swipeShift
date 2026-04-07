@@ -35,7 +35,7 @@ struct ReviewDraft: Identifiable {
 
 struct LeaveReviewsView: View {
     @State private var selectedTab: ReviewTab = .pending
-    @State private var pendingReviews: [PendingReview] = mockPendingReviews
+    @State private var pendingReviews: [PendingReview] = [] // TODO: GET /employer/reviews/pending
     @State private var showSortSheet  = false
     @State private var showFilterSheet = false
     @State private var selectedSort: ReviewSort = .mostRecent
@@ -733,34 +733,4 @@ extension ReviewDraft {
     }
 }
 
-// MARK: - Mock Data
-
-private let mockPendingReviews: [PendingReview] = [
-    PendingReview(
-        id: "r1",
-        workerName: "Jonas Weber",
-        workerPhoto: nil,
-        jobTitle: "Eventhelfer",
-        jobCategory: "Events",
-        shiftDate: Calendar.current.date(byAdding: .day, value: -2, to: .now)!,
-        logoEmoji: "🎪"
-    ),
-    PendingReview(
-        id: "r2",
-        workerName: "Maria Schulz",
-        workerPhoto: nil,
-        jobTitle: "Barkeeper",
-        jobCategory: "Hospitality",
-        shiftDate: Calendar.current.date(byAdding: .day, value: -5, to: .now)!,
-        logoEmoji: "🍹"
-    ),
-    PendingReview(
-        id: "r3",
-        workerName: "Lukas Bauer",
-        workerPhoto: nil,
-        jobTitle: "Lagerist",
-        jobCategory: "Logistics",
-        shiftDate: Calendar.current.date(byAdding: .day, value: -1, to: .now)!,
-        logoEmoji: "📦"
-    ),
-]
+// TODO: GET /employer/reviews/pending — Review-Modell benötigt Backend-Erweiterung

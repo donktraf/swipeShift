@@ -82,6 +82,7 @@ struct WorkerHomeView: View {
                 .ignoresSafeArea(edges: .bottom)
             }
             .navigationBarHidden(true)
+            .task { await messageStore.loadConversations() }
             // Navigation zu Kategorie-Liste
             .navigationDestination(isPresented: $navigateToCategoryList) {
                 if let category = selectedCategory {

@@ -243,7 +243,16 @@ final class APIClient {
         let (data, response) = try await URLSession.shared.data(for: request)
         try validate(response: response, data: data)
     }
-    
+
+    func setPassword(newPassword: String) async throws {
+        var req = try makeRequest(path: "/auth/set-password", method: "POST")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONEncoder().encode(["newPassword": newPassword])
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try validate(response: response, data: data)
+    }
+
+
         /// Zentrale Upload-Funktion für alle Bilder
         func uploadImage(_ image: UIImage, target: UploadTarget) async throws -> String {
 
@@ -554,6 +563,68 @@ final class APIClient {
         let req = try makeRequest(path: "/employer/applicants/\(applyId)/decline", method: "POST")
         let (data, response) = try await URLSession.shared.data(for: req)
         try validate(response: response, data: data)
+    }
+
+    // POST /employer/applicants/:applyId/unassign
+    func unassignWorker(applyId: String) async throws {
+        let req = try makeRequest(path: "/employer/applicants/\(applyId)/unassign", method: "POST")
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try validate(response: response, data: data)
+    }
+
+    // GET /employer/assigned-workers
+    func fetchAssignedWorkers() async throws -> [AssignableJobDTO] {
+        let req = try makeRequest(path: "/employer/assigned-workers", method: "GET")
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try validate(response: response, data: data)
+        struct Resp: Decodable { let jobs: [AssignableJobDTO] }
+        return try JSONDecoder().decode(Resp.self, from: data).jobs
+    }
+
+    // MARK: - Messages
+
+    func fetchConversations() async throws -> [ConversationDTO] {
+        let req = try makeRequest(path: "/messages", method: "GET")
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try validate(response: response, data: data)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode([ConversationDTO].self, from: data)
+    }
+
+    func sendMessage(conversationId: String, text: String) async throws -> ChatMessageDTO {
+        var req = try makeRequest(path: "/messages/\(conversationId)", method: "POST")
+        req.httpBody = try JSONEncoder().encode(["text": text])
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try validate(response: response, data: data)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(ChatMessageDTO.self, from: data)
+    }
+
+    func markConversationRead(conversationId: String) async throws {
+        let req = try makeRequest(path: "/messages/\(conversationId)/read", method: "PATCH")
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try validate(response: response, data: data)
+    }
+
+    // MARK: - Companies
+
+    func fetchCompany(name: String) async throws -> CompanyProfileDTO {
+        let encoded = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
+        let req = try makeRequest(path: "/companies/\(encoded)", method: "GET")
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(CompanyProfileDTO.self, from: data)
+    }
+
+    // MARK: - Employer Financials
+
+    func fetchEmployerFinancials() async throws -> EmployerFinancialsDTO {
+        let req = try makeRequest(path: "/employer/financials", method: "GET")
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(EmployerFinancialsDTO.self, from: data)
     }
 }
 

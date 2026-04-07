@@ -24,8 +24,9 @@ struct JobListView: View {
     @EnvironmentObject var jobStore: JobStore
     @EnvironmentObject var userStore: UserStore
 
-    // Optional: vorgefilterter Start (z.B. von CategoryJobListView)
+    // Optional: vorgefilterter Start (z.B. von CategoryJobListView oder CompanyProfileView)
     var preselectedCategory: String? = nil
+    var companyFilter: String? = nil
 
     @State private var searchText: String = ""
     @State private var sortOption: JobSortOption = .newest
@@ -58,6 +59,11 @@ struct JobListView: View {
                 $0.tags.contains(where: { $0.lowercased() == category.lowercased() })
                 || $0.title.lowercased().contains(category.lowercased())
             }
+        }
+
+        // 3) Company-Filter (von CompanyProfileView)
+        if let company = companyFilter {
+            result = result.filter { $0.company.lowercased() == company.lowercased() }
         }
 
         // 3) Sortierung

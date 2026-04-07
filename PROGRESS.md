@@ -1,6 +1,6 @@
 # SwipeShift — iOS Frontend Progress
 
-_Zuletzt aktualisiert: 2026-03-30 (Detailed Worker View + Leave Reviews Screen)_
+_Zuletzt aktualisiert: 2026-04-07 (AssignWorkers echte Daten)_
 
 ---
 
@@ -85,15 +85,18 @@ _Zuletzt aktualisiert: 2026-03-30 (Detailed Worker View + Leave Reviews Screen)_
 
 ## 🔜 Offen
 
-### Priorität 7 — Worker Profile Screen
-- Navigations-Menü (wie Wireframe)
-- Edit Profile (Profilbild, Name, E-Mail, Telefon, Geburtsdatum, Location, Verfügbarkeit, Job Preferences, Skills, Legal)
-- Job Applications (Tabs: Confirmed / Applied / Completed / Cancelled)
-- Calendar (Monat/Woche Toggle)
-- Financial Overview (Donut-Chart, Zeitraum-Dropdown)
-- Settings & Support
-- Reviews Screen
-- Saved Screen
+### Nächste Schritte (Reihenfolge festgelegt 2026-04-03)
+
+| # | Was | Status |
+|---|-----|--------|
+| 1 | Fix `POST /jobs/:id/apply` → 500 | ✅ Erledigt |
+| 2 | AssignWorkers echte Daten (Shift-Model, Endpoint, iOS) | ✅ Erledigt |
+| 3 | LeaveReviews echte Daten (Review-Model, Endpoint, iOS) | 🔜 Offen |
+| 4 | JobPayment echte Daten (Payment-Model, Endpoint, iOS) | 🔜 Offen |
+| 5 | Worker Calendar / Financials / Saved / Reviews (Backend + iOS) | 🔜 Offen |
+| 6 | Edit Profile speichern (`PATCH /auth/me` + iOS) | 🔜 Offen |
+
+---
 
 ### Priorität 7 — Worker Profile Screen
 - `Features/Worker/Profile/WorkerProfileView.swift` — neu erstellt:
@@ -317,6 +320,67 @@ _Zuletzt aktualisiert: 2026-03-30 (Detailed Worker View + Leave Reviews Screen)_
   - **Payment List**: Worker-Name, Job, Stunden × Stundenlohn, Paid/Ausstehend-Badge
   - **View Breakdown Sheet** (modal): Segment-Toggle (Nach Status / Nach Kategorie), Balken-Zeilen mit Fortschrittsbalken + €-Betrag
 - Eingehängt: Dashboard-StatCard "Monatl. Ausgaben" → `EmployerFinancialView`; Profile-Tab "Financial Overview" → `EmployerFinancialView`
+
+### AssignWorkers — echte Daten
+
+- `prisma/schema.prisma` — `Apply.status String @default("pending")` + `Apply → User`-Relation ergänzt; Migration `add_apply_user_relation` angewendet
+- `src/routes.employer.js`:
+  - `POST /employer/applicants/:id/accept` → setzt `status = "accepted"` (statt No-Op)
+  - `POST /employer/applicants/:id/decline` → setzt `status = "declined"` (statt Delete)
+  - `POST /employer/applicants/:id/unassign` → setzt `status = "pending"` (neu)
+  - `GET /employer/assigned-workers` → gibt Jobs mit `openSpots`, `shifts` (JSON) und `assignedWorkers` (accepted applies) zurück (neu)
+  - `GET /employer/applicants` → gibt echten `status` zurück (statt hardcoded "pending")
+- `Networking/APIClient.swift` — `fetchAssignedWorkers()` + `unassignWorker(applyId:)` ergänzt
+- `Features/Employer/AssignWorkersView.swift` — komplett neu:
+  - DTOs: `AssignableJobDTO`, `ShiftSlotDTO`, `AssignedWorkerDTO`
+  - Lädt via `APIClient.shared.fetchAssignedWorkers()` in `.task`
+  - Filter-Chips: All / Open / Staffed
+  - `JobAssignCard`: ausklappbar, zeigt Schichten (read-only aus JSON) + zugewiesene Worker
+  - Unassign-Button → `APIClient.shared.unassignWorker()` + optimistischer UI-Update
+  - Lade- und Fehlerzustand
+
+### DB-User bereinigt — Emails & Passwörter
+
+- Alle Passwörter (außer Google-Account `kevinowusu14@gmail.com`) auf `Passwort1` gesetzt
+- Emails nach Rolle strukturiert:
+  - Workers: `worker1@example.de`, `worker2@example.de`, `worker3@example.de`
+  - Employers: `emp1@example.de` bis `emp6@example.de`
+  - Google-Account bleibt unverändert: `kevinowusu14@gmail.com`
+- Seed-Script (`prisma/seed.js`) ebenfalls auf `Passwort1` und `@swipeshift.test`-Schema aktualisiert
+
+### Seed-Daten erweitert — echte Firmen & Employer-User
+
+- `prisma/seed.js` — komplett neu:
+  - **5 Employer-User** (mit Employer-Profil via Relation): EventPro GmbH, LogiSpeed GmbH, RetailGroup AG, Brew & Co., CleanPro Services
+  - **2 Worker-User** zum Testen (Stuttgart + Hamburg)
+  - **16 Jobs** mit echtem `employerId` — alle Kategorien abgedeckt: Events, Hospitality, Logistics, Retail, Customer Service, Office, Cleaning
+  - Jobs haben je **2–6 echte Schichten** (JSON) → Apply-Flow mit Schicht-Auswahl testbar
+  - Pay-Spanne €12–€24/h → quickMoney- und High-Pay-Filter greifen
+  - Start-Zeiten: heute +2h, heute +4h, morgen, +2 Tage, +3 Tage → startingSoon-Filter greift
+  - Passwort für alle Test-User: `Test1234!`
+  - Seed löscht nur `@swipeshift.test`-User → bestehende Produktiv-Accounts bleiben erhalten
+
+### Fix — POST /jobs/:id/apply → 500
+
+- `prisma/schema.prisma` — `Conversation.employerId` von `String` auf `String?` (nullable) geändert
+- Migration `make_conversation_employer_id_nullable` angewendet
+- `src/routes.jobs.js` — `job.employerId ?? "unknown"` → `job.employerId ?? null`
+- **Ursache**: Seed-Jobs haben `employerId: null`; non-nullable Feld + `"unknown"` String führte zum Crash im `$transaction`
+- **Verhalten**: Worker sehen ihre Conversations (`workerId`-Filter); Employer sehen nur Conversations zu ihren eigenen Jobs (`employerId`-Filter) — Seed-Jobs ohne Employer tauchen dort nicht auf (korrekt)
+
+### Mock-Daten entfernt — echte DB-Anbindung
+
+- **Google Sign-In Fix** — `GIDSignIn.sharedInstance.handle(url)` in `swipeShiftApp.swift` ergänzt; war die Ursache für stillen Sign-In-Fehler
+- **Set Password für Social-User** — `POST /auth/set-password` Endpoint + `SetPasswordSheet` in `AccountSettingsView`; Social-User (Google/Apple) können erstmals ein Passwort setzen
+- **`hasSocialLogin`-Flag** — Login, Google-Auth, Apple-Auth und `/me` geben `hasSocialLogin: true/false` zurück; iOS zeigt "Passwort setzen" statt "Passwort ändern"
+- **`lat`/`lng` in Login-Response** — Prisma-Select in Login-Route hatte `lat`/`lng` nicht, Radar zeigte deshalb keine Jobs → behoben
+- **Messaging-Backend komplett neu** — `Conversation`- und `Message`-Modell in Prisma (Migration `20260402114545`); `POST /jobs/:id/apply` legt automatisch eine Conversation + System-Nachricht an; `routes.messages.js` mit `GET /messages`, `POST /messages/:id`, `PATCH /messages/:id/read`
+- **`MessageStore`** — alle Mock-Daten entfernt; lädt via `APIClient.shared.fetchConversations()`; optimistisches Senden mit Server-ID-Ersatz
+- **Company Profile** — Mock-Factory `CompanyProfile.mock()` entfernt; `routes.companies.js` (`GET /companies/:name`) aggregiert echte Job- und Employer-Daten aus DB; `CompanyProfileView` lädt live
+- **Employer Financial Overview** — alle hardcodierten Stats/Chart/Payment-Daten entfernt; `GET /employer/financials` liefert echte Prisma-Aggregationen; `EmployerFinancialView` vollständig neu an DB angebunden
+- **`AssignWorkersView`** — Mock-Jobs-Array entfernt, zeigt leeren Zustand (TODO: `GET /employer/jobs/:id/shifts`)
+- **`LeaveReviewsView`** — Mock-Reviews-Array entfernt, zeigt leeren Zustand (TODO: `GET /employer/reviews/pending`)
+- **`JobPaymentView`** — Mock-Factory entfernt, `workers: []` bis Backend-Endpoint existiert
 
 ### Calendar Screen (Arbeitgeber)
 - `Features/Employer/EmployerCalendarView.swift` — neu erstellt:

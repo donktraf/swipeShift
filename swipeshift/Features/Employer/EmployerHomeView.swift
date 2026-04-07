@@ -58,6 +58,7 @@ struct EmployerHomeView: View {
                 .ignoresSafeArea(edges: .bottom)
             }
             .navigationBarHidden(true)
+            .task { await messageStore.loadConversations() }
             .sheet(isPresented: $showPostJob) {
                 PostJobView()
                     .environmentObject(userStore)

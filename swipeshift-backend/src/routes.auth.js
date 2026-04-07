@@ -12,6 +12,7 @@ const { passwordResetEmail } = require("./emails/passwordResetEmail");
 
 const { OAuth2Client } = require("google-auth-library");
 const { createRemoteJWKSet, jwtVerify } = require("jose");
+const { requireAuth } = require("./auth");
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID; // iOS ClientID
 const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID);
@@ -292,6 +293,8 @@ router.post("/login", loginLimiter, async (req, res) => {
       role: true,
       onboarding: true,
       location: true,
+      lat: true,
+      lng: true,
       firstName: true,
       lastName: true,
       emailVerifiedAt: true,
@@ -335,7 +338,6 @@ router.post("/login", loginLimiter, async (req, res) => {
 
   console.log("Rolle Eingeloggter User: ", user.onboarding);
 
-  //Muss erweitert werden sobald Frontend mehr sachen braucht
   return res.json({
     token,
     user: {
@@ -343,12 +345,13 @@ router.post("/login", loginLimiter, async (req, res) => {
       email: user.email,
       role: user.role,
       location: user.location,
-      // lat: user.lat,           
-      // lng: user.lng,
+      lat: user.lat,
+      lng: user.lng,
       onboarding: user.onboarding,
       firstName: user.firstName,
       lastName: user.lastName,
       isEmailVerified: !!user.emailVerifiedAt,
+      hasSocialLogin: user.passwordHash === "SOCIAL_LOGIN",
     },
   });
 });
@@ -583,10 +586,13 @@ router.post("/google", async (req, res) => {
         role: user.role,
         onboarding: user.onboarding,
         location: user.location,
+        lat: user.lat,
+        lng: user.lng,
         firstName: user.firstName,
         lastName: user.lastName,
         profilePhotoUrl: user.profilePhotoUrl,
-        isEmailVerified: googleSaysVerified
+        isEmailVerified: googleSaysVerified,
+        hasSocialLogin: true,
       },
     });
   } catch (e) {
@@ -650,8 +656,12 @@ router.post("/apple", async (req, res) => {
         role: user.role,
         onboarding: user.onboarding,
         location: user.location,
+        lat: user.lat,
+        lng: user.lng,
         firstName: user.firstName,
         lastName: user.lastName,
+        isEmailVerified: payload.email_verified ?? true,
+        hasSocialLogin: true,
       },
     });
   } catch (e) {
@@ -745,6 +755,35 @@ router.post("/resend-verification", mailLimiter, async (req, res) => {
   }
 
   return res.json(okResponse);
+});
+
+// MARK: - Set Password (für Social-Login-User die noch kein Passwort haben)
+const setPasswordSchema = z.object({
+  newPassword: z.string().min(8, "Password must be at least 8 characters"),
+});
+
+router.post("/set-password", requireAuth, async (req, res) => {
+  const parsed = setPasswordSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.errors[0].message });
+  }
+
+  const userId = req.auth.sub;
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, passwordHash: true },
+  });
+
+  if (!user) return res.status(401).json({ error: "User not found" });
+
+  if (user.passwordHash !== "SOCIAL_LOGIN") {
+    return res.status(409).json({ error: "Account already has a password. Use change-password instead." });
+  }
+
+  const newHash = await bcrypt.hash(parsed.data.newPassword, 12);
+  await prisma.user.update({ where: { id: userId }, data: { passwordHash: newHash } });
+
+  return res.json({ ok: true });
 });
 
 

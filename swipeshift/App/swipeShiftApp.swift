@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import GoogleSignIn
 
 @main
 struct swipeShiftApp: App {
@@ -27,6 +28,10 @@ struct swipeShiftApp: App {
     }
 
     private func handleDeepLink(_ url: URL) {
+        // Google Sign-In redirect
+        if GIDSignIn.sharedInstance.handle(url) { return }
+
+        // Password-Reset Deep Link
         guard url.scheme == "swipeshift",
               url.host == "reset-password" else { return }
 
@@ -36,7 +41,6 @@ struct swipeShiftApp: App {
 
         guard let token, let email else { return }
 
-        // Token im Hintergrund speichern — kein automatisches Sheet
         userStore.pendingResetToken = token
         userStore.pendingResetEmail = email
         print("🔗 Reset token stored for:", email)
