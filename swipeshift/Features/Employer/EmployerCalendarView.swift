@@ -5,6 +5,19 @@
 
 import SwiftUI
 
+// MARK: - DTO
+
+struct EmployerCalendarJobDTO: Identifiable, Decodable {
+    let id: String
+    let title: String
+    let location: String
+    let logoEmoji: String
+    let startTime: Date
+    let endTime: Date?
+    let openSpots: Int
+    let assignedCount: Int
+}
+
 // MARK: - Models
 
 private enum EmployerCalendarMode { case month, week }
@@ -16,22 +29,41 @@ private enum ShiftFilter: String, CaseIterable {
 }
 
 private struct EmployerCalJob: Identifiable {
-    let id = UUID()
+    let id: String
     let title: String
     let location: String
     let logoEmoji: String
     let date: Date
     let startHour: Int    // 0–23
     let durationHours: Int
-    let openSpots: Int
-    let totalSpots: Int
+    let openSpots: Int      // remaining open spots
+    let totalSpots: Int     // total spots posted
 
     var isFullyStaffed: Bool { openSpots == 0 }
     var status: ShiftStatus { isFullyStaffed ? .fullyStaffed : (openSpots == totalSpots ? .needsWorkers : .partiallyStaffed) }
 
     var timeLabel: String {
-        let end = startHour + durationHours
+        let end = (startHour + durationHours) % 24
         return String(format: "%02d:00–%02d:00", startHour, end)
+    }
+
+    init(dto: EmployerCalendarJobDTO) {
+        let cal = Calendar.current
+        self.id            = dto.id
+        self.title         = dto.title
+        self.location      = dto.location
+        self.logoEmoji     = dto.logoEmoji
+        self.date          = dto.startTime
+        self.startHour     = cal.component(.hour, from: dto.startTime)
+        self.totalSpots    = dto.openSpots
+        self.openSpots     = max(dto.openSpots - dto.assignedCount, 0)
+
+        if let end = dto.endTime {
+            let diff = end.timeIntervalSince(dto.startTime)
+            self.durationHours = max(Int(diff / 3600), 1)
+        } else {
+            self.durationHours = 4
+        }
     }
 }
 
@@ -62,25 +94,13 @@ struct EmployerCalendarView: View {
     @State private var selectedFilter: ShiftFilter = .all
     @State private var displayedMonth: Date = .now
     @State private var selectedDate: Date = .now
+    @State private var allJobs: [EmployerCalJob] = []
+    @State private var isLoading = false
 
     private let calendar = Calendar.current
 
-    private var mockJobs: [EmployerCalJob] {
-        let today = Date()
-        return [
-            EmployerCalJob(title: "Event Staff",  location: "Marienplatz",  logoEmoji: "🎪", date: today,                                            startHour: 18, durationHours: 5, openSpots: 1, totalSpots: 3),
-            EmployerCalJob(title: "Barkeeper",     location: "Schwabing",    logoEmoji: "🍹", date: today,                                            startHour: 20, durationHours: 6, openSpots: 0, totalSpots: 2),
-            EmployerCalJob(title: "Warehouse Worker", location: "Munich North", logoEmoji: "📦", date: calendar.date(byAdding: .day, value: 1, to: today)!, startHour: 6,  durationHours: 8, openSpots: 2, totalSpots: 4),
-            EmployerCalJob(title: "Retail Helper", location: "Pasing",      logoEmoji: "🛍️", date: calendar.date(byAdding: .day, value: 2,  to: today)!, startHour: 10, durationHours: 6, openSpots: 0, totalSpots: 1),
-            EmployerCalJob(title: "Cleaning",       location: "Sendling",    logoEmoji: "🧹", date: calendar.date(byAdding: .day, value: 3,  to: today)!, startHour: 8,  durationHours: 4, openSpots: 1, totalSpots: 2),
-            EmployerCalJob(title: "Event Staff",   location: "Olympiapark", logoEmoji: "🎪", date: calendar.date(byAdding: .day, value: 5,  to: today)!, startHour: 14, durationHours: 8, openSpots: 3, totalSpots: 5),
-            EmployerCalJob(title: "Security",      location: "Haidhausen",  logoEmoji: "🔒", date: calendar.date(byAdding: .day, value: 7,  to: today)!, startHour: 22, durationHours: 8, openSpots: 0, totalSpots: 2),
-            EmployerCalJob(title: "Barkeeper",     location: "Maxvorstadt",  logoEmoji: "🍹", date: calendar.date(byAdding: .day, value: 9,  to: today)!, startHour: 19, durationHours: 5, openSpots: 1, totalSpots: 2),
-        ]
-    }
-
     private var filteredJobs: [EmployerCalJob] {
-        mockJobs.filter { job in
+        allJobs.filter { job in
             switch selectedFilter {
             case .all:          return true
             case .needsWorkers: return job.openSpots > 0
@@ -89,7 +109,6 @@ struct EmployerCalendarView: View {
         }
     }
 
-    // Datum-Set der Tage mit Jobs (für Monatsgitter-Punkte)
     private var jobDates: Set<String> {
         Set(filteredJobs.map { dateKey($0.date) })
     }
@@ -97,17 +116,28 @@ struct EmployerCalendarView: View {
     var body: some View {
         SubScreenShell(title: "Calendar") {
             VStack(spacing: 0) {
-                // Controls: Toggle + Filter
                 controlsRow
                     .padding(.bottom, 12)
 
-                if mode == .month {
+                if isLoading {
+                    ProgressView().tint(.white).frame(maxWidth: .infinity).padding(.top, 40)
+                } else if mode == .month {
                     monthContent
                 } else {
                     weekContent
                 }
             }
         }
+        .task { await load() }
+    }
+
+    private func load() async {
+        isLoading = true
+        do {
+            let dtos = try await APIClient.shared.fetchEmployerCalendar()
+            allJobs = dtos.map { EmployerCalJob(dto: $0) }
+        } catch { }
+        isLoading = false
     }
 
     // MARK: - Controls

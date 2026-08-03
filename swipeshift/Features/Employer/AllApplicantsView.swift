@@ -113,7 +113,8 @@ struct AllApplicantsView: View {
                                     applicant: applicant,
                                     localState: localStates[applicant.applyId],
                                     onAccept: { Task { await accept(applicant) } },
-                                    onDecline: { Task { await decline(applicant) } }
+                                    onDecline: { Task { await decline(applicant) } },
+                                    onSave: { Task { await saveApplicant(applicant) } }
                                 )
                             }
                             .buttonStyle(.plain)
@@ -124,6 +125,7 @@ struct AllApplicantsView: View {
             }
         }
         .task { await load() }
+        .refreshable { await load() }
     }
 
     // MARK: - Filter Chip
@@ -226,6 +228,12 @@ struct AllApplicantsView: View {
             errorMessage = error.localizedDescription
         }
     }
+
+    @MainActor
+    private func saveApplicant(_ applicant: Applicant) async {
+        do { try await APIClient.shared.saveApplicant(applyId: applicant.applyId) }
+        catch { }
+    }
 }
 
 // MARK: - ApplicantCard
@@ -235,6 +243,7 @@ private struct ApplicantCard: View {
     let localState: AllApplicantsView.ApplicantLocalState?
     let onAccept:   () -> Void
     let onDecline:  () -> Void
+    var onSave:     (() -> Void)? = nil
 
     private var isDecided: Bool { localState != nil }
 
@@ -273,6 +282,14 @@ private struct ApplicantCard: View {
                             .foregroundColor(.primary)
                         Spacer()
                         stateBadge
+                        if let onSave {
+                            Button(action: onSave) {
+                                Image(systemName: "bookmark")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(SS.primary)
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                     if let location = applicant.user?.location {
                         Label(location, systemImage: "mappin")

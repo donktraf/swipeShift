@@ -132,8 +132,10 @@ private struct EmployerPlaceholderTab: View {
 private struct EmployerProfileTab: View {
     @EnvironmentObject var userStore: UserStore
     @State private var showEditProfile = false
-    @State private var showFinancial   = false
-    @State private var showCalendar    = false
+    @State private var showFinancial      = false
+    @State private var showCalendar       = false
+    @State private var showSavedApplicants = false
+    @State private var showLogoutAlert = false
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -193,6 +195,8 @@ private struct EmployerProfileTab: View {
                 VStack(spacing: 0) {
                     ProfileNavRow(icon: "briefcase",           label: "Job Management")       {}
                     Divider().padding(.leading, 52)
+                    ProfileNavRow(icon: "bookmark",            label: "Saved Applicants")     { showSavedApplicants = true }
+                    Divider().padding(.leading, 52)
                     ProfileNavRow(icon: "chart.bar",           label: "Financial Overview")   { showFinancial = true }
                     Divider().padding(.leading, 52)
                     ProfileNavRow(icon: "calendar",            label: "Calendar")             { showCalendar = true }
@@ -204,7 +208,7 @@ private struct EmployerProfileTab: View {
 
                     // Logout
                     Button {
-                        userStore.logout()
+                        showLogoutAlert = true
                     } label: {
                         HStack(spacing: 14) {
                             Image(systemName: "rectangle.portrait.and.arrow.right")
@@ -240,6 +244,15 @@ private struct EmployerProfileTab: View {
         }
         .navigationDestination(isPresented: $showCalendar) {
             EmployerCalendarView()
+        }
+        .navigationDestination(isPresented: $showSavedApplicants) {
+            SavedApplicantsView()
+        }
+        .alert("Log Out?", isPresented: $showLogoutAlert) {
+            Button("Log Out", role: .destructive) { userStore.logout() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("You will be signed out of your account.")
         }
     }
 }

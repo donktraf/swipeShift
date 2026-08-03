@@ -37,11 +37,24 @@ struct EmployerDashboardView: View {
     @State private var showAssignWorkers  = false
     @State private var showFinancial      = false
     @State private var showCalendar       = false
+    @State private var showNotifications  = false
     @State private var stats: EmployerStatsDTO? = nil
+    @State private var jobsNeedingWorkersCount: Int = 0
+    @State private var pendingReviewsCount: Int = 0
+    @State private var pastReviews: [PastReviewItem] = []
 
     private var activeJobs:    Int    { stats?.activeJobs    ?? 0 }
     private var newApplicants: Int    { stats?.newApplicants ?? 0 }
     private var monthlySpend:  Double { stats?.monthlySpend  ?? 0 }
+
+    // Durchschnitt aller Bewertungen, die dieser Employer bisher an seine Worker vergeben hat
+    // (Review-Model: communication/teamwork/reliability/underPressure), gespeist aus
+    // GET /employer/reviews (bereits vorhanden, wird auch von LeaveReviewsView genutzt).
+    private var avgWorkerRating: Double? {
+        guard !pastReviews.isEmpty else { return nil }
+        let sum = pastReviews.reduce(0.0) { $0 + $1.avgRating }
+        return sum / Double(pastReviews.count)
+    }
 
     private var attentionItems: [AttentionItem] {
         var items: [AttentionItem] = []
@@ -62,8 +75,14 @@ struct EmployerDashboardView: View {
                   delta: "this week", deltaPositive: true, icon: "checkmark.circle"),
         TrendItem(value: "\(stats?.applicationsThisWeek ?? 0)", label: "New Applications",
                   delta: "this week", deltaPositive: true, icon: "person.crop.circle.badge.plus"),
-        TrendItem(value: "—", label: "Avg. Worker Rating",
-                  delta: "no data yet", deltaPositive: true, icon: "star"),
+        TrendItem(
+            value: avgWorkerRating.map { String(format: "%.1f", $0) } ?? "—",
+            label: "Avg. Worker Rating",
+            delta: avgWorkerRating != nil
+                ? "based on \(pastReviews.count) review\(pastReviews.count == 1 ? "" : "s")"
+                : "Available after your first completed job",
+            deltaPositive: true, icon: "star"
+        ),
         TrendItem(value: stats?.topCategory ?? "—", label: "Top Category",
                   delta: "\(activeJobs) active jobs", deltaPositive: true, icon: "trophy"),
     ]}
@@ -97,11 +116,26 @@ struct EmployerDashboardView: View {
         .navigationDestination(isPresented: $showCalendar) {
             EmployerCalendarView()
         }
+        .sheet(isPresented: $showNotifications) {
+            NavigationStack {
+                NotificationsView()
+            }
+        }
     }
 
     @MainActor
     private func loadStats() async {
-        stats = try? await APIClient.shared.fetchEmployerStats()
+        // Echte Counts für die Nav-Badges laden, analog zu "Active Jobs"/"New Applicants" oben,
+        // statt hartcodierter Platzhalter-Zahlen. Alle vier Calls parallel statt sequenziell.
+        async let employerStats = try? APIClient.shared.fetchEmployerStats()
+        async let assignableJobs = try? APIClient.shared.fetchAssignedWorkers()
+        async let pendingReviews = try? APIClient.shared.fetchPendingReviews()
+        async let completedReviews = try? APIClient.shared.fetchPastReviews()
+        let (statsResult, jobs, reviews, past) = await (employerStats, assignableJobs, pendingReviews, completedReviews)
+        stats = statsResult
+        jobsNeedingWorkersCount = jobs?.filter { !$0.isFullyStaffed }.count ?? 0
+        pendingReviewsCount = reviews?.count ?? 0
+        pastReviews = past ?? []
     }
 
     // MARK: - Header
@@ -128,7 +162,7 @@ struct EmployerDashboardView: View {
                 Spacer()
 
                 // Benachrichtigungs-Icon
-                Button { /* TODO: Notifications */ } label: {
+                Button { showNotifications = true } label: {
                     Image(systemName: "bell")
                         .font(.system(size: 20, weight: .semibold))
                         .foregroundColor(.white)
@@ -246,9 +280,11 @@ struct EmployerDashboardView: View {
                 NavGroup(title: "Worker Management") {
                     NavRow(icon: "person.crop.circle.badge.questionmark", label: "Applicants", badge: newApplicants > 0 ? "\(newApplicants)" : nil) { onViewApplicants?() }
                     Divider().padding(.leading, 52)
-                    NavRow(icon: "person.2.badge.gearshape", label: "Assign Workers", badge: "2") { showAssignWorkers = true }
+                    NavRow(icon: "person.2.badge.gearshape", label: "Assign Workers",
+                           badge: jobsNeedingWorkersCount > 0 ? "\(jobsNeedingWorkersCount)" : nil) { showAssignWorkers = true }
                     Divider().padding(.leading, 52)
-                    NavRow(icon: "star.bubble", label: "Leave Reviews", badge: "3") { showLeaveReviews = true }
+                    NavRow(icon: "star.bubble", label: "Leave Reviews",
+                           badge: pendingReviewsCount > 0 ? "\(pendingReviewsCount)" : nil) { showLeaveReviews = true }
                 }
             }
             .padding(.horizontal, 16)

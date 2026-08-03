@@ -263,24 +263,56 @@ private struct CompanyInfoTab: View {
     }
 
     private func prefill() {
-        companyName    = userStore.currentUser?.companyName ?? ""
-        email          = userStore.currentUser?.email ?? ""
-        companyBio     = userStore.currentUser?.companyDescription ?? ""
-        website        = userStore.currentUser?.websiteOrInstagram ?? ""
-        primaryLocation = userStore.currentUser?.location ?? ""
-        companySize    = userStore.currentUser?.companySize ?? "1–10"
-        if let areas = userStore.currentUser?.industry?.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespaces) }) {
+        guard let u = userStore.currentUser else { return }
+        companyName     = u.companyName      ?? ""
+        email           = u.companyEmail     ?? u.email
+        phone           = u.companyPhone     ?? ""
+        companyBio      = u.companyDescription ?? ""
+        website         = u.websiteOrInstagram ?? ""
+        primaryLocation = u.primaryHiringLocation ?? u.location ?? ""
+        companySize     = u.companySize      ?? "1–10"
+
+        if let areas = u.businessAreas, !areas.isEmpty {
             businessAreas = Set(areas)
+        } else if let ind = u.industry, !ind.isEmpty {
+            businessAreas = Set(ind.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) })
+        }
+
+        if let locs = u.companyLocations, !locs.isEmpty {
+            locations = locs
         }
     }
 
     private func save() async {
         isSaving = true
-        // TODO: PATCH /auth/me with updated employer fields
-        try? await Task.sleep(nanoseconds: 700_000_000)
-        await userStore.refreshMe()
-        isSaving = false
-        dismiss()
+        do {
+            var uploadedPhotoUrl: String? = nil
+            if let img = selectedLogo {
+                uploadedPhotoUrl = try await APIClient.shared.uploadProfilePhoto(img)
+            }
+            try await APIClient.shared.updateEmployerProfile(UpdateEmployerProfileRequest(
+                companyName:           companyName.isEmpty ? nil : companyName,
+                companySize:           companySize,
+                companyPhone:          phone.isEmpty   ? nil : phone,
+                companyEmail:          email.isEmpty   ? nil : email,
+                businessAreas:         Array(businessAreas),
+                locations:             locations,
+                primaryHiringLocation: primaryLocation.isEmpty ? nil : primaryLocation,
+                companyBio:            companyBio.isEmpty ? nil : companyBio,
+                website:               website.isEmpty ? nil : website,
+                teamMembers:           nil,
+                profilePhotoUrl:       uploadedPhotoUrl,
+                firstName:             nil,
+                lastName:              nil,
+                jobTitle:              nil,
+                managerRole:           nil
+            ))
+            await userStore.refreshMe()
+            isSaving = false
+            dismiss()
+        } catch {
+            isSaving = false
+        }
     }
 }
 
@@ -298,7 +330,7 @@ private struct PersonalProfileTab: View {
     @State private var managedLocations: [String] = ["Stuttgart HQ"]
     @State private var newManagedLocation: String = ""
 
-    @State private var teamMembers: [TeamMember] = TeamMember.mock
+    @State private var teamMembers: [TeamMember] = []
     @State private var inviteEmail: String = ""
     @State private var inviteRole: ManagerRole = .hiringManager
     @State private var showInviteSheet = false
@@ -536,18 +568,46 @@ private struct PersonalProfileTab: View {
     }
 
     private func prefill() {
-        firstName = userStore.currentUser?.firstName ?? ""
-        lastName  = userStore.currentUser?.lastName  ?? ""
-        workEmail = userStore.currentUser?.email     ?? ""
+        guard let u = userStore.currentUser else { return }
+        firstName = u.firstName ?? ""
+        lastName  = u.lastName  ?? ""
+        workEmail = u.email
+        jobTitle  = u.jobTitle  ?? ""
+        if let r = u.managerRole, let parsed = ManagerRole(rawValue: r) {
+            role = parsed
+        }
+        if let members = u.teamMembers {
+            teamMembers = members.map { TeamMember(name: $0.name, email: $0.email, role: ManagerRole(rawValue: $0.role) ?? .hiringManager) }
+        }
     }
 
     private func save() async {
         isSaving = true
-        // TODO: PATCH /auth/me with updated personal fields
-        try? await Task.sleep(nanoseconds: 700_000_000)
-        await userStore.refreshMe()
-        isSaving = false
-        dismiss()
+        let memberDTOs = teamMembers.map { TeamMemberDTO(name: $0.name, email: $0.email, role: $0.role.rawValue) }
+        do {
+            try await APIClient.shared.updateEmployerProfile(UpdateEmployerProfileRequest(
+                companyName:           nil,
+                companySize:           nil,
+                companyPhone:          nil,
+                companyEmail:          nil,
+                businessAreas:         nil,
+                locations:             nil,
+                primaryHiringLocation: nil,
+                companyBio:            nil,
+                website:               nil,
+                teamMembers:           memberDTOs,
+                profilePhotoUrl:       nil,
+                firstName:             firstName.isEmpty ? nil : firstName,
+                lastName:              lastName.isEmpty  ? nil : lastName,
+                jobTitle:              jobTitle.isEmpty  ? nil : jobTitle,
+                managerRole:           role.rawValue
+            ))
+            await userStore.refreshMe()
+            isSaving = false
+            dismiss()
+        } catch {
+            isSaving = false
+        }
     }
 }
 

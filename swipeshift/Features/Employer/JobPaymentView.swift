@@ -7,8 +7,8 @@ import SwiftUI
 
 // MARK: - Models
 
-struct PayableWorker: Identifiable {
-    let id: String
+struct PayableWorker: Identifiable, Decodable {
+    let id: String          // applyId
     let name: String
     let avatarEmoji: String
     let jobTitle: String
@@ -23,24 +23,19 @@ struct PayableWorker: Identifiable {
 // MARK: - JobPaymentView
 
 struct JobPaymentView: View {
+    let jobId: String
     let jobTitle: String
     let jobEmoji: String
     let jobLocation: String
 
-    @State private var workers: [PayableWorker]
+    @State private var workers: [PayableWorker] = []
+    @State private var isLoading    = false
+    @State private var errorMessage: String? = nil
 
     // Confirmation state
     @State private var workerToPay: PayableWorker? = nil
     @State private var showPayAllConfirm = false
     @State private var showPayRemainingConfirm = false
-    @State private var isPaying = false
-
-    init(jobTitle: String, jobEmoji: String, jobLocation: String, workers: [PayableWorker]) {
-        self.jobTitle    = jobTitle
-        self.jobEmoji    = jobEmoji
-        self.jobLocation = jobLocation
-        _workers = State(initialValue: workers)
-    }
 
     // MARK: - Computed
 
@@ -58,23 +53,32 @@ struct JobPaymentView: View {
     var body: some View {
         SubScreenShell(title: "Job Payments") {
             VStack(spacing: 20) {
-
                 jobHeader
                 summaryBar
 
-                if !unpaidWorkers.isEmpty {
-                    workerSection(title: "Pending Payment", workers: unpaidWorkers, isPaid: false)
+                if isLoading {
+                    ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
+                } else if let err = errorMessage {
+                    VStack(spacing: 12) {
+                        Text(err).font(.system(size: 13)).foregroundColor(.white.opacity(0.6))
+                            .multilineTextAlignment(.center).padding(.horizontal, 24)
+                        Button("Retry") { Task { await loadPayments() } }
+                            .font(.system(size: 14, weight: .semibold)).foregroundColor(SS.primary)
+                    }
+                    .padding(.top, 40)
+                } else {
+                    if !unpaidWorkers.isEmpty {
+                        workerSection(title: "Pending Payment", workers: unpaidWorkers, isPaid: false)
+                    }
+                    if !paidWorkers.isEmpty {
+                        workerSection(title: "Paid", workers: paidWorkers, isPaid: true)
+                    }
+                    if !workers.isEmpty { payActionButton }
+                    Spacer().frame(height: 20)
                 }
-
-                if !paidWorkers.isEmpty {
-                    workerSection(title: "Paid", workers: paidWorkers, isPaid: true)
-                }
-
-                payActionButton
-
-                Spacer().frame(height: 20)
             }
         }
+        .task { await loadPayments() }
         // Pay single worker confirmation
         .alert("Pay \(workerToPay?.name ?? "")?", isPresented: Binding(
             get:  { workerToPay != nil },
@@ -286,7 +290,18 @@ struct JobPaymentView: View {
         }
     }
 
-    // MARK: - Helpers
+    // MARK: - Data & API
+
+    private func loadPayments() async {
+        isLoading = true
+        errorMessage = nil
+        do {
+            workers = try await APIClient.shared.fetchJobPayments(jobId: jobId)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isLoading = false
+    }
 
     private func markPaid(id: String) {
         withAnimation {
@@ -294,22 +309,23 @@ struct JobPaymentView: View {
                 workers[i].isPaid = true
             }
         }
-        // TODO: POST /employer/jobs/:jobId/workers/:workerId/pay
+        Task { try? await APIClient.shared.payWorker(jobId: jobId, applyId: id) }
     }
 
     private func markAllPaid() {
-        withAnimation {
-            for i in workers.indices { workers[i].isPaid = true }
-        }
+        withAnimation { for i in workers.indices { workers[i].isPaid = true } }
+        Task { try? await APIClient.shared.payAllWorkers(jobId: jobId) }
     }
 
     private func markRemainingPaid() {
+        let unpaidIds = workers.filter { !$0.isPaid }.map(\.id)
         withAnimation {
-            for i in workers.indices where !workers[i].isPaid {
-                workers[i].isPaid = true
+            for i in workers.indices where !workers[i].isPaid { workers[i].isPaid = true }
+        }
+        Task {
+            for applyId in unpaidIds {
+                try? await APIClient.shared.payWorker(jobId: jobId, applyId: applyId)
             }
         }
     }
 }
-
-// TODO: GET /employer/jobs/:id/payments — Payment-Modell benötigt Backend-Erweiterung

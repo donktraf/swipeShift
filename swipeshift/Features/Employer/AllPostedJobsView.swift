@@ -129,13 +129,14 @@ struct AllPostedJobsView: View {
             }
         }
         .task { await load() }
+        .refreshable { await load() }
         .navigationDestination(isPresented: $showPayments) {
             if let job = jobForPayment {
                 JobPaymentView(
+                    jobId:       job.id,
                     jobTitle:    job.title,
                     jobEmoji:    job.logoEmoji,
-                    jobLocation: job.location,
-                    workers:     [] // TODO: GET /employer/jobs/:id/payments
+                    jobLocation: job.location
                 )
             }
         }

@@ -7,6 +7,21 @@ import SwiftUI
 
 // MARK: - DTOs (API Response)
 
+struct JobApplicantDTO: Identifiable, Decodable {
+    let applyId:         String
+    let userId:          String
+    let status:          String
+    let workerName:      String
+    let profilePhotoUrl: String?
+    let rating:          Double
+    let location:        String?
+    var id: String { applyId }
+}
+
+struct JobApplicantsResponse: Decodable {
+    let applicants: [JobApplicantDTO]
+}
+
 struct AssignableJobDTO: Identifiable, Decodable {
     let id: String
     let title: String
@@ -91,7 +106,8 @@ struct AssignWorkersView: View {
                                     job: job,
                                     isExpanded: expandedJobIds.contains(job.id),
                                     onToggleJob: { toggleJob(job.id) },
-                                    onUnassign: { applyId in unassign(jobId: job.id, applyId: applyId) }
+                                    onUnassign: { applyId in unassign(jobId: job.id, applyId: applyId) },
+                                    onAssign:   { worker   in assign(jobId: job.id, worker: worker) }
                                 )
                             }
                         }
@@ -192,6 +208,14 @@ struct AssignWorkersView: View {
             }
         }
     }
+
+    private func assign(jobId: String, worker: AssignedWorkerDTO) {
+        withAnimation {
+            if let ji = jobs.firstIndex(where: { $0.id == jobId }) {
+                jobs[ji].assignedWorkers.append(worker)
+            }
+        }
+    }
 }
 
 // MARK: - JobAssignCard
@@ -201,6 +225,9 @@ private struct JobAssignCard: View {
     let isExpanded: Bool
     let onToggleJob: () -> Void
     let onUnassign: (String) -> Void
+    var onAssign: ((AssignedWorkerDTO) -> Void)? = nil
+
+    @State private var showAddWorker = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -305,10 +332,7 @@ private struct JobAssignCard: View {
                         }
                     }
 
-                    // Add Worker — TODO: Bewerber-Liste öffnen
-                    Button {
-                        // TODO: Bewerber-Liste für diesen Job öffnen
-                    } label: {
+                    Button { showAddWorker = true } label: {
                         Label("Add Worker", systemImage: "plus")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundColor(SS.primary)
@@ -320,6 +344,11 @@ private struct JobAssignCard: View {
                             .padding(.bottom, 12)
                     }
                     .buttonStyle(.plain)
+                    .sheet(isPresented: $showAddWorker) {
+                        AddWorkerSheet(jobId: job.id, jobTitle: job.title) { newWorker in
+                            onAssign?(newWorker)
+                        }
+                    }
                 }
                 .background(Color.gray.opacity(0.03))
             }
@@ -329,6 +358,7 @@ private struct JobAssignCard: View {
         .shadow(color: .black.opacity(0.05), radius: 5, x: 0, y: 2)
     }
 
+    // jobId wird im Sheet benötigt — über Binding weitergeben
     private func workerRow(_ worker: AssignedWorkerDTO) -> some View {
         HStack(spacing: 10) {
             ZStack {
@@ -369,5 +399,136 @@ private struct JobAssignCard: View {
             .padding(.trailing, 14)
         }
         .padding(.vertical, 8)
+    }
+}
+
+// MARK: - AddWorkerSheet
+
+private struct AddWorkerSheet: View {
+    let jobId: String
+    let jobTitle: String
+    let onAssigned: (AssignedWorkerDTO) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var applicants: [JobApplicantDTO] = []
+    @State private var isLoading = true
+    @State private var assigningId: String? = nil
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if isLoading {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if applicants.isEmpty {
+                    VStack(spacing: 14) {
+                        Image(systemName: "person.crop.circle.badge.questionmark")
+                            .font(.system(size: 44))
+                            .foregroundColor(.secondary.opacity(0.4))
+                        Text("No pending applicants")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.secondary)
+                        Text("All applicants have already been accepted or declined.")
+                            .font(.system(size: 13))
+                            .foregroundColor(.secondary.opacity(0.7))
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 40)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List(applicants) { applicant in
+                        HStack(spacing: 12) {
+                            // Avatar
+                            ZStack {
+                                Circle()
+                                    .fill(SS.primary.opacity(0.12))
+                                    .frame(width: 44, height: 44)
+                                Text(String(applicant.workerName.prefix(1)))
+                                    .font(.system(size: 18, weight: .bold))
+                                    .foregroundColor(SS.primary)
+                            }
+
+                            // Info
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(applicant.workerName)
+                                    .font(.system(size: 15, weight: .semibold))
+                                if applicant.rating > 0 {
+                                    HStack(spacing: 3) {
+                                        Image(systemName: "star.fill")
+                                            .font(.system(size: 11))
+                                            .foregroundColor(.yellow)
+                                        Text(String(format: "%.1f", applicant.rating))
+                                            .font(.system(size: 12))
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+                                if let loc = applicant.location {
+                                    Label(loc, systemImage: "mappin")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+
+                            Spacer()
+
+                            // Assign Button
+                            Button {
+                                Task { await assign(applicant) }
+                            } label: {
+                                if assigningId == applicant.applyId {
+                                    ProgressView().scaleEffect(0.8)
+                                } else {
+                                    Text("Assign")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundColor(.white)
+                                        .padding(.horizontal, 14)
+                                        .padding(.vertical, 7)
+                                        .background(SS.primary)
+                                        .clipShape(Capsule())
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(assigningId != nil)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .listStyle(.plain)
+                }
+            }
+            .navigationTitle("Add Worker to \(jobTitle)")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+            }
+        }
+        .task { await loadApplicants() }
+    }
+
+    private func loadApplicants() async {
+        isLoading = true
+        do {
+            applicants = try await APIClient.shared.fetchPendingApplicantsForJob(jobId: jobId)
+        } catch { }
+        isLoading = false
+    }
+
+    private func assign(_ applicant: JobApplicantDTO) async {
+        assigningId = applicant.applyId
+        do {
+            try await APIClient.shared.acceptApplicant(applyId: applicant.applyId)
+            let newWorker = AssignedWorkerDTO(
+                applyId:    applicant.applyId,
+                userId:     applicant.userId,
+                name:       applicant.workerName,
+                photoEmoji: "👤",
+                rating:     applicant.rating
+            )
+            applicants.removeAll { $0.applyId == applicant.applyId }
+            onAssigned(newWorker)
+            if applicants.isEmpty { dismiss() }
+        } catch { }
+        assigningId = nil
     }
 }
