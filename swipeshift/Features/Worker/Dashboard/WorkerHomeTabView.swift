@@ -181,7 +181,8 @@ struct WorkerHomeTabView: View {
                                     ? jobStore.loadJobs()
                                     : jobStore.loadJobsAll()
             async let sections = jobStore.loadDashboardSections()
-            _ = await (base, sections)
+            async let saved    = jobStore.loadSavedJobIds()
+            _ = await (base, sections, saved)
         }
     }
 }

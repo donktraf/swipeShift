@@ -13,7 +13,13 @@ enum SS {
     static let bgTop    = Color(red: 29/255, green: 78/255, blue: 216/255).opacity(0.97)
     static let bgBottom = Color(red: 30/255, green: 58/255, blue: 138/255).opacity(0.97)
 
-    static let cardRadius: CGFloat = 34
+    /// Standard-Radius fuer Job-/Listenkarten (JobSectionView, JobListView, RadarView, JobDetailView).
+    /// Aktuell nutzen diese Views noch hardcodierte Werte (12-16pt) statt dieser Konstante —
+    /// siehe design-review.md Finding #8 fuer die optionale strukturelle Umstellung.
+    static let cardRadius: CGFloat = 14
+    /// Groesserer Radius, urspruenglich als "cardRadius" bezeichnet, wird ausschliesslich
+    /// von SSCard (Auth-Screens) verwendet.
+    static let authCardRadius: CGFloat = 34
     static let controlRadius: CGFloat = 16
 
     static let shadow = Color.black.opacity(0.10)
@@ -31,7 +37,7 @@ struct SSCard<Content: View>: View {
         content
             .padding(24)
             .background(Color.white)
-            .clipShape(RoundedRectangle(cornerRadius: SS.cardRadius, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: SS.authCardRadius, style: .continuous))
             .shadow(color: SS.shadow, radius: 18, x: 0, y: 10)
             .padding(.horizontal, 18)
     }

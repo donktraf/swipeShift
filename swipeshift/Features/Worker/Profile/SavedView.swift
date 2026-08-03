@@ -5,33 +5,6 @@
 
 import SwiftUI
 
-// MARK: - Saved Job (Mock)
-
-private struct SavedJob: Identifiable {
-    let id = UUID()
-    let title: String
-    let company: String
-    let logoEmoji: String
-    let location: String
-    let payText: String
-    let date: String
-    let savedAt: String
-    let appliedStatus: String?  // nil = nicht beworben, "Applied" / "Confirmed"
-}
-
-// MARK: - Saved Company (Mock)
-
-private struct SavedCompany: Identifiable {
-    let id = UUID()
-    let name: String
-    let logoEmoji: String
-    let category: String
-    let location: String
-    let openJobs: Int
-    let rating: Double
-    let isVerified: Bool
-}
-
 // MARK: - Saved Tab
 
 private enum SavedTab { case jobs, companies }
@@ -39,59 +12,45 @@ private enum SavedTab { case jobs, companies }
 // MARK: - SavedView
 
 struct SavedView: View {
-    @State private var selectedTab: SavedTab = .jobs
-
-    // TODO: aus Backend laden (GET /users/:id/saved)
-    private let savedJobs: [SavedJob] = [
-        SavedJob(title: "Barkeeper", company: "Sky Bar", logoEmoji: "🍸",
-                 location: "Berlin Mitte", payText: "€18/h",
-                 date: "Mar 28", savedAt: "Today",
-                 appliedStatus: "Applied"),
-        SavedJob(title: "Event Coordinator", company: "EventPro", logoEmoji: "🎪",
-                 location: "Charlottenburg", payText: "€20/h",
-                 date: "Apr 1", savedAt: "Yesterday",
-                 appliedStatus: nil),
-        SavedJob(title: "Retail Assistant", company: "StyleStore", logoEmoji: "👗",
-                 location: "Prenzlauer Berg", payText: "€13/h",
-                 date: "Apr 5", savedAt: "2 days ago",
-                 appliedStatus: "Confirmed"),
-        SavedJob(title: "Office Support", company: "TechCorp", logoEmoji: "💼",
-                 location: "Mitte", payText: "€15/h",
-                 date: "Apr 10", savedAt: "3 days ago",
-                 appliedStatus: nil),
-        SavedJob(title: "Warehouse Worker", company: "LogiHub", logoEmoji: "📦",
-                 location: "Wedding", payText: "€14/h",
-                 date: "Apr 12", savedAt: "1 week ago",
-                 appliedStatus: nil),
-    ]
-
-    private let savedCompanies: [SavedCompany] = [
-        SavedCompany(name: "Club Tresor", logoEmoji: "🎵", category: "Events & Nightlife",
-                     location: "Berlin Mitte", openJobs: 4, rating: 4.8, isVerified: true),
-        SavedCompany(name: "Eventify GmbH", logoEmoji: "🎪", category: "Events",
-                     location: "Berlin", openJobs: 7, rating: 4.5, isVerified: true),
-        SavedCompany(name: "LogiCore", logoEmoji: "📦", category: "Logistics",
-                     location: "Wedding", openJobs: 12, rating: 4.2, isVerified: false),
-    ]
+    @State private var selectedTab:     SavedTab = .jobs
+    @State private var savedJobs:       [WorkerSavedJob]    = []
+    @State private var savedCompanies:  [SavedCompanyItem]  = []
+    @State private var isLoading        = false
+    @State private var errorMessage:    String? = nil
 
     var body: some View {
         SubScreenShell(title: "Saved") {
             VStack(spacing: 16) {
-                tabSelector
-                    .padding(.horizontal, 16)
+                tabSelector.padding(.horizontal, 16)
 
                 if selectedTab == .jobs {
-                    savedJobsList
+                    if isLoading {
+                        ProgressView().frame(maxWidth: .infinity).padding(.top, 60)
+                    } else if let err = errorMessage {
+                        VStack(spacing: 12) {
+                            Text(err).font(.system(size: 13)).foregroundColor(.white.opacity(0.5))
+                                .multilineTextAlignment(.center).padding(.horizontal, 24)
+                            Button("Retry") { Task { await load() } }
+                                .font(.system(size: 14, weight: .semibold)).foregroundColor(SS.primary)
+                        }.padding(.top, 60)
+                    } else if savedJobs.isEmpty {
+                        emptyState
+                    } else {
+                        savedJobsList
+                    }
                 } else {
-                    savedCompaniesList
-                }
-
-                if selectedTab == .jobs && savedJobs.isEmpty ||
-                   selectedTab == .companies && savedCompanies.isEmpty {
-                    emptyState
+                    if isLoading {
+                        ProgressView().frame(maxWidth: .infinity).padding(.top, 60)
+                    } else if savedCompanies.isEmpty {
+                        emptyState
+                    } else {
+                        savedCompaniesList
+                    }
                 }
             }
         }
+        .task { await load() }
+        .onChange(of: selectedTab) { _, _ in Task { await load() } }
     }
 
     // MARK: - Tab Selector
@@ -103,8 +62,7 @@ struct SavedView: View {
                     Text(label)
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(selectedTab == tab ? .white : .secondary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity).padding(.vertical, 8)
                         .background(selectedTab == tab ? SS.primary : Color.clear)
                         .clipShape(Capsule())
                 }
@@ -117,37 +75,30 @@ struct SavedView: View {
         .shadow(color: .black.opacity(0.06), radius: 4, x: 0, y: 2)
     }
 
-    // MARK: - Saved Jobs
+    // MARK: - Saved Jobs List (nach Datum gruppiert)
 
     private var savedJobsList: some View {
-        VStack(spacing: 10) {
-            // Group by savedAt date label
-            let grouped = Dictionary(grouping: savedJobs, by: \.savedAt)
-            let keys = ["Today", "Yesterday", "2 days ago", "3 days ago", "1 week ago"]
-            ForEach(keys.filter { grouped[$0] != nil }, id: \.self) { key in
+        let grouped = Dictionary(grouping: savedJobs) { dateLabel($0.savedAt) }
+        let keys    = grouped.keys.sorted { a, b in
+            let dateA = savedJobs.first { dateLabel($0.savedAt) == a }?.savedAt ?? .distantPast
+            let dateB = savedJobs.first { dateLabel($0.savedAt) == b }?.savedAt ?? .distantPast
+            return dateA > dateB
+        }
+        return VStack(spacing: 10) {
+            ForEach(keys, id: \.self) { key in
                 VStack(alignment: .leading, spacing: 8) {
                     Text(key)
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundColor(.white.opacity(0.7))
                         .padding(.horizontal, 16)
-
                     ForEach(grouped[key] ?? []) { job in
-                        SavedJobCard(job: job)
+                        SavedJobCard(job: job) {
+                            withAnimation { savedJobs.removeAll { $0.id == job.id } }
+                        }
+                        .padding(.horizontal, 16)
                     }
-                    .padding(.horizontal, 16)
                 }
             }
-        }
-    }
-
-    // MARK: - Saved Companies
-
-    private var savedCompaniesList: some View {
-        VStack(spacing: 10) {
-            ForEach(savedCompanies) { company in
-                SavedCompanyCard(company: company)
-            }
-            .padding(.horizontal, 16)
         }
     }
 
@@ -156,83 +107,106 @@ struct SavedView: View {
     private var emptyState: some View {
         VStack(spacing: 12) {
             Image(systemName: "bookmark")
-                .font(.system(size: 40))
-                .foregroundColor(.white.opacity(0.3))
+                .font(.system(size: 40)).foregroundColor(.white.opacity(0.3))
             Text("You haven't saved anything yet.")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(.white.opacity(0.6))
+                .font(.system(size: 14, weight: .semibold)).foregroundColor(.white.opacity(0.6))
             Text("Start exploring jobs and companies and save the ones you like.")
-                .font(.system(size: 13))
-                .foregroundColor(.white.opacity(0.4))
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
+                .font(.system(size: 13)).foregroundColor(.white.opacity(0.4))
+                .multilineTextAlignment(.center).padding(.horizontal, 32)
+        }
+        .frame(maxWidth: .infinity).padding(.top, 40)
+    }
 
-            Button {
-                // TODO: → JobListView
-            } label: {
-                Text("Jobs durchsuchen")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(SS.primary)
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 10)
-                    .background(Color.white)
-                    .clipShape(Capsule())
+    // MARK: - Saved Companies List
+
+    private var savedCompaniesList: some View {
+        VStack(spacing: 10) {
+            ForEach(savedCompanies) { company in
+                SavedCompanyCard(company: company) {
+                    withAnimation { savedCompanies.removeAll { $0.id == company.id } }
+                }
+                .padding(.horizontal, 16)
             }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 40)
+    }
+
+    // MARK: - Helpers
+
+    private func load() async {
+        isLoading = true; errorMessage = nil
+        do {
+            if selectedTab == .jobs {
+                savedJobs = try await APIClient.shared.fetchWorkerSaved()
+            } else {
+                savedCompanies = try await APIClient.shared.fetchSavedCompanies()
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isLoading = false
+    }
+
+    private func dateLabel(_ date: Date) -> String {
+        let cal  = Calendar.current
+        let days = cal.dateComponents([.day], from: cal.startOfDay(for: date), to: cal.startOfDay(for: Date())).day ?? 0
+        switch days {
+        case 0:  return "Today"
+        case 1:  return "Yesterday"
+        case 2...6: return "\(days) days ago"
+        default: return date.formatted(date: .abbreviated, time: .omitted)
+        }
     }
 }
 
-// MARK: - Saved Job Card
+// MARK: - Saved Company Card
 
-private struct SavedJobCard: View {
-    let job: SavedJob
-    @State private var isSaved = true
+private struct SavedCompanyCard: View {
+    let company:  SavedCompanyItem
+    let onUnsave: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
-            Text(job.logoEmoji)
-                .font(.system(size: 26))
-                .frame(width: 48, height: 48)
-                .background(Color.gray.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+            ZStack(alignment: .bottomTrailing) {
+                Text(company.logoEmoji)
+                    .font(.system(size: 26)).frame(width: 48, height: 48)
+                    .background(Color.gray.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                if company.isVerified {
+                    Image(systemName: "checkmark.seal.fill")
+                        .font(.system(size: 12)).foregroundColor(SS.primary)
+                        .background(Color.white.clipShape(Circle()))
+                        .offset(x: 3, y: 3)
+                }
+            }
 
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(job.title)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.primary)
-                    if let status = job.appliedStatus {
-                        Text(status)
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(status == "Confirmed" ? Color.green : SS.primary)
-                            .clipShape(Capsule())
-                    }
-                }
-                Text(job.company)
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(company.companyName)
+                    .font(.system(size: 14, weight: .semibold)).foregroundColor(.primary)
+
                 HStack(spacing: 8) {
-                    Label(job.date, systemImage: "calendar")
-                    Label(job.payText, systemImage: "eurosign.circle")
+                    if let rating = company.rating {
+                        HStack(spacing: 3) {
+                            Image(systemName: "star.fill")
+                                .font(.system(size: 10)).foregroundColor(.yellow)
+                            Text(String(format: "%.1f", rating))
+                                .font(.system(size: 12)).foregroundColor(.secondary)
+                        }
+                    }
+                    Text("\(company.openJobs) open job\(company.openJobs == 1 ? "" : "s")")
+                        .font(.system(size: 12)).foregroundColor(.secondary)
                 }
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
             }
 
             Spacer()
 
             Button {
-                isSaved.toggle()
-                // TODO: DELETE /users/:id/saved/:jobId
+                Task {
+                    try? await APIClient.shared.unsaveCompany(name: company.companyName)
+                    onUnsave()
+                }
             } label: {
-                Image(systemName: isSaved ? "bookmark.fill" : "bookmark")
-                    .font(.system(size: 18))
-                    .foregroundColor(isSaved ? SS.primary : .gray.opacity(0.4))
+                Image(systemName: "bookmark.fill")
+                    .font(.system(size: 18)).foregroundColor(SS.primary)
             }
             .buttonStyle(.plain)
         }
@@ -243,66 +217,53 @@ private struct SavedJobCard: View {
     }
 }
 
-// MARK: - Saved Company Card
+// MARK: - Saved Job Card
 
-private struct SavedCompanyCard: View {
-    let company: SavedCompany
+private struct SavedJobCard: View {
+    let job:        WorkerSavedJob
+    let onUnsave:   () -> Void
 
     var body: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 12) {
-                Text(company.logoEmoji)
-                    .font(.system(size: 32))
-                    .frame(width: 56, height: 56)
-                    .background(Color.gray.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
+        HStack(spacing: 12) {
+            Text(job.logoEmoji)
+                .font(.system(size: 26)).frame(width: 48, height: 48)
+                .background(Color.gray.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
 
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        Text(company.name)
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundColor(.primary)
-                        if company.isVerified {
-                            Image(systemName: "checkmark.seal.fill")
-                                .font(.system(size: 13))
-                                .foregroundColor(SS.primary)
-                        }
-                    }
-                    Text(company.category)
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
-                    HStack(spacing: 4) {
-                        Image(systemName: "star.fill")
-                            .font(.system(size: 11))
-                            .foregroundColor(.yellow)
-                        Text(String(format: "%.1f", company.rating))
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.secondary)
-                        Text("·")
-                            .foregroundColor(.secondary)
-                        Text("\(company.openJobs) offene Jobs")
-                            .font(.system(size: 12))
-                            .foregroundColor(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(job.title)
+                        .font(.system(size: 14, weight: .semibold)).foregroundColor(.primary)
+                    if let status = job.appliedStatus {
+                        Text(status)
+                            .font(.system(size: 10, weight: .bold)).foregroundColor(.white)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(status == "Confirmed" ? Color.green : SS.primary)
+                            .clipShape(Capsule())
                     }
                 }
-
-                Spacer()
+                Text(job.company).font(.system(size: 12)).foregroundColor(.secondary)
+                HStack(spacing: 8) {
+                    Label(job.shiftText, systemImage: "calendar")
+                    Label(job.payText,   systemImage: "eurosign.circle")
+                }
+                .font(.system(size: 11)).foregroundColor(.secondary)
             }
 
+            Spacer()
+
             Button {
-                // TODO: → CompanyProfileView / gefilterte Job-Liste
+                Task {
+                    try? await APIClient.shared.unsaveJob(jobId: job.jobId)
+                    onUnsave()
+                }
             } label: {
-                Text("Offene Jobs ansehen")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(SS.primary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .background(SS.primary.opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                Image(systemName: "bookmark.fill")
+                    .font(.system(size: 18)).foregroundColor(SS.primary)
             }
             .buttonStyle(.plain)
         }
-        .padding(14)
+        .padding(12)
         .background(Color(uiColor: .systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)

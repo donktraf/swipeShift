@@ -14,6 +14,10 @@ struct ChatView: View {
 
     @State private var inputText = ""
     @State private var scrollToBottom = false
+    @State private var showRatingSheet = false
+    @State private var reviewSubmitted = false
+    @State private var jobDetailJob: Job? = nil
+    @State private var loadingJobDetail = false
 
     private var isReadOnly: Bool {
         conversation.status == .completed || conversation.status == .cancelled
@@ -41,6 +45,45 @@ struct ChatView: View {
                 messageStore.markEmployerConversationAsRead(conversationId: conversation.id)
             } else {
                 messageStore.markAsRead(conversationId: conversation.id)
+            }
+        }
+        .task(id: conversation.id) {
+            guard !isReadOnly else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(10))
+                guard !Task.isCancelled else { break }
+                await messageStore.refreshMessages(
+                    conversationId: conversation.id,
+                    isEmployerMode: isEmployerMode
+                )
+            }
+        }
+        .sheet(item: $jobDetailJob) { job in
+            NavigationStack {
+                JobDetailView(job: job)
+            }
+        }
+        .sheet(isPresented: $showRatingSheet) {
+            if isEmployerMode {
+                ReviewFormSheet(
+                    review: PendingReviewItem(
+                        applyId:     conversation.applyId,
+                        workerId:    "",
+                        workerName:  conversation.company,
+                        workerPhoto: nil,
+                        jobId:       "",
+                        jobTitle:    conversation.jobTitle,
+                        jobCategory: "",
+                        shiftDate:   conversation.jobDate,
+                        logoEmoji:   conversation.logoEmoji
+                    )
+                ) { reviewSubmitted = true }
+            } else {
+                EmployerRatingSheet(
+                    applyId:     conversation.applyId,
+                    companyName: conversation.company,
+                    jobTitle:    conversation.jobTitle
+                ) { reviewSubmitted = true }
             }
         }
     }
@@ -91,13 +134,23 @@ struct ChatView: View {
 
             Spacer()
 
-            // Info-Button → TODO: JobDetailView
+            // Info-Button → JobDetailView
             Button {
-                // TODO: Navigation zu JobDetailView des Jobs
+                guard !loadingJobDetail else { return }
+                loadingJobDetail = true
+                Task {
+                    jobDetailJob = try? await APIClient.shared.fetchJob(jobId: conversation.jobId)
+                    loadingJobDetail = false
+                }
             } label: {
-                Image(systemName: "info.circle")
-                    .font(.system(size: 20))
-                    .foregroundColor(SS.primary)
+                if loadingJobDetail {
+                    ProgressView()
+                        .frame(width: 24, height: 24)
+                } else {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 20))
+                        .foregroundColor(SS.primary)
+                }
             }
         }
         .padding(.horizontal, 16)
@@ -163,11 +216,15 @@ struct ChatView: View {
 
                 // Rating-Link bei Completed
                 if conversation.status == .completed {
-                    Button("Leave Review") {
-                        // TODO: Navigation zu ReviewScreen
+                    if reviewSubmitted {
+                        Label("Review Submitted", systemImage: "star.fill")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.secondary)
+                    } else {
+                        Button("Leave Review") { showRatingSheet = true }
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(SS.primary)
                     }
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(SS.primary)
                 }
             }
             .padding(.horizontal, 16)

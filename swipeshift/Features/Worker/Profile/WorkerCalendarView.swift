@@ -9,7 +9,7 @@ import SwiftUI
 
 private enum CalendarMode { case month, week }
 
-// MARK: - Calendar Job (Mock)
+// MARK: - Calendar Job
 
 private struct CalendarJob: Identifiable {
     let id = UUID()
@@ -25,22 +25,10 @@ private struct CalendarJob: Identifiable {
 struct WorkerCalendarView: View {
     @State private var mode: CalendarMode = .month
     @State private var displayedMonth: Date = Date()
+    @State private var calendarJobs: [CalendarJob] = []
+    @State private var isLoading = false
 
     private let calendar = Calendar.current
-
-    // TODO: aus Backend laden
-    private var mockJobs: [CalendarJob] {
-        let today = Date()
-        let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
-        let inThree = calendar.date(byAdding: .day, value: 3, to: today)!
-        let inSeven = calendar.date(byAdding: .day, value: 7, to: today)!
-        return [
-            CalendarJob(title: "Barkeeper",    company: "Club Tresor",   date: today,    timeRange: "22:00–04:00", status: .confirmed),
-            CalendarJob(title: "Event Staff",  company: "Eventify GmbH", date: tomorrow, timeRange: "14:00–22:00", status: .confirmed),
-            CalendarJob(title: "Warehouse",    company: "LogiCore",      date: inThree,  timeRange: "06:00–14:00", status: .applied),
-            CalendarJob(title: "Retail",       company: "FashionHub",    date: inSeven,  timeRange: "10:00–18:00", status: .applied),
-        ]
-    }
 
     var body: some View {
         SubScreenShell(title: "Calendar") {
@@ -48,13 +36,33 @@ struct WorkerCalendarView: View {
                 modeToggle
                     .padding(.horizontal, 16)
 
-                if mode == .month {
+                if isLoading {
+                    ProgressView()
+                        .tint(.white)
+                        .padding(.top, 40)
+                } else if mode == .month {
                     monthView
                 } else {
                     weekView
                 }
             }
         }
+        .task { await loadCalendarJobs() }
+    }
+
+    private func loadCalendarJobs() async {
+        isLoading = true
+        do {
+            let items = try await APIClient.shared.fetchWorkerApplications()
+            calendarJobs = items.compactMap { item in
+                guard item.displayStatus != "cancelled" && item.displayStatus != "completed",
+                      let date = item.startTime else { return nil }
+                let status: ApplicationStatus = item.displayStatus == "confirmed" ? .confirmed : .applied
+                return CalendarJob(title: item.jobTitle, company: item.company,
+                                   date: date, timeRange: item.shiftText, status: status)
+            }
+        } catch { }
+        isLoading = false
     }
 
     // MARK: - Mode Toggle
@@ -122,7 +130,7 @@ struct WorkerCalendarView: View {
             VStack(spacing: 0) {
                 // Weekday headers
                 HStack {
-                    ForEach(["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"], id: \.self) { d in
+                    ForEach(["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"], id: \.self) { d in
                         Text(d)
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundColor(.secondary)
@@ -153,11 +161,11 @@ struct WorkerCalendarView: View {
             .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
 
             // Upcoming Jobs List
-            let upcoming = mockJobs.filter { $0.date >= calendar.startOfDay(for: Date()) }
-                                    .sorted { $0.date < $1.date }
+            let upcoming = calendarJobs.filter { $0.date >= calendar.startOfDay(for: Date()) }
+                                       .sorted { $0.date < $1.date }
             if !upcoming.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Bevorstehende Jobs")
+                    Text("Upcoming Jobs")
                         .font(.system(size: 15, weight: .bold))
                         .foregroundColor(.white)
                         .padding(.horizontal, 16)
@@ -199,7 +207,7 @@ struct WorkerCalendarView: View {
     // MARK: - Helpers
 
     private func jobsOn(date: Date) -> [CalendarJob] {
-        mockJobs.filter { calendar.isDate($0.date, inSameDayAs: date) }
+        calendarJobs.filter { calendar.isDate($0.date, inSameDayAs: date) }
     }
 
     private func monthLabel(for date: Date) -> String {

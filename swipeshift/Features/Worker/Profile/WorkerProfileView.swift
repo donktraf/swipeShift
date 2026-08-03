@@ -9,10 +9,10 @@ struct WorkerProfileView: View {
     @EnvironmentObject var userStore: UserStore
 
     @State private var showLogoutAlert = false
-
-    // TODO: aus Backend laden
-    private let rating: Double = 4.6
-    private let reviewCount: Int = 23
+    @State private var rating: Double = 0
+    @State private var reviewCount: Int = 0
+    @State private var openApplicationsCount: Int = 0
+    @State private var savedCount: Int = 0
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -24,6 +24,20 @@ struct WorkerProfileView: View {
             }
         }
         .background(SS.background().ignoresSafeArea())
+        .task {
+            if let data = try? await APIClient.shared.fetchWorkerReviews() {
+                rating = data.overallRating
+                reviewCount = data.totalJobs
+            }
+            // Echte Counts für die Nav-Badges laden (analog zu den bereits live gespeisten
+            // Badges im Employer-Dashboard), statt hartcodierter Platzhalter-Zahlen.
+            async let applications = try? APIClient.shared.fetchWorkerApplications()
+            async let savedJobs    = try? APIClient.shared.fetchWorkerSaved()
+            async let savedCompanies = try? APIClient.shared.fetchSavedCompanies()
+            let (apps, jobs, companies) = await (applications, savedJobs, savedCompanies)
+            openApplicationsCount = apps?.filter { $0.displayStatus == "applied" }.count ?? 0
+            savedCount = (jobs?.count ?? 0) + (companies?.count ?? 0)
+        }
         .alert("Log Out?", isPresented: $showLogoutAlert) {
             Button("Log Out", role: .destructive) { userStore.logout() }
             Button("Cancel", role: .cancel) {}
@@ -71,16 +85,22 @@ struct WorkerProfileView: View {
                     .font(.system(size: 13))
                     .foregroundColor(.white.opacity(0.7))
 
-                HStack(spacing: 4) {
-                    Image(systemName: "star.fill")
+                if reviewCount > 0 {
+                    HStack(spacing: 4) {
+                        Image(systemName: "star.fill")
+                            .font(.system(size: 12))
+                            .foregroundColor(.yellow)
+                        Text(String(format: "%.1f", rating))
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.white)
+                        Text("(\(reviewCount) Review\(reviewCount == 1 ? "" : "s"))")
+                            .font(.system(size: 12))
+                            .foregroundColor(.white.opacity(0.6))
+                    }
+                } else {
+                    Text("No reviews yet")
                         .font(.system(size: 12))
-                        .foregroundColor(.yellow)
-                    Text(String(format: "%.1f", rating))
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.white)
-                    Text("(\(reviewCount) Reviews)")
-                        .font(.system(size: 12))
-                        .foregroundColor(.white.opacity(0.6))
+                        .foregroundColor(.white.opacity(0.5))
                 }
             }
 
@@ -119,7 +139,8 @@ struct WorkerProfileView: View {
             NavigationLink {
                 JobApplicationsView()
             } label: {
-                ProfileNavItem(icon: "briefcase.fill", label: "Job Applications", badge: "3")
+                ProfileNavItem(icon: "briefcase.fill", label: "Job Applications",
+                                badge: openApplicationsCount > 0 ? "\(openApplicationsCount)" : nil)
             }
             Divider().padding(.leading, 52)
 
@@ -140,7 +161,8 @@ struct WorkerProfileView: View {
             NavigationLink {
                 SavedView()
             } label: {
-                ProfileNavItem(icon: "bookmark.fill", label: "Saved", badge: "5")
+                ProfileNavItem(icon: "bookmark.fill", label: "Saved",
+                                badge: savedCount > 0 ? "\(savedCount)" : nil)
             }
             Divider().padding(.leading, 52)
 
@@ -286,16 +308,26 @@ struct AccountSettingsPlaceholderView: View {
 }
 
 struct HelpSupportPlaceholderView: View {
+    @Environment(\.openURL) private var openURL
+
     var body: some View {
         SubScreenShell(title: "Help & Support") {
             VStack(spacing: 0) {
-                SettingsRow(icon: "book.fill",         label: "Guide")            {}
+                SettingsRow(icon: "book.fill",        label: "Guide") {
+                    openURL(URL(string: "https://swipeshift.app/guide")!)
+                }
                 Divider().padding(.leading, 52)
-                SettingsRow(icon: "bubble.left.fill",  label: "Live Chat")            {}
+                SettingsRow(icon: "bubble.left.fill", label: "Live Chat") {
+                    openURL(URL(string: "mailto:support@swipeshift.app")!)
+                }
                 Divider().padding(.leading, 52)
-                SettingsRow(icon: "doc.text.fill",     label: "Terms & Conditions")                  {}
+                SettingsRow(icon: "doc.text.fill",    label: "Terms & Conditions") {
+                    openURL(URL(string: "https://swipeshift.app/terms")!)
+                }
                 Divider().padding(.leading, 52)
-                SettingsRow(icon: "hand.raised.fill",  label: "Privacy Policy") {}
+                SettingsRow(icon: "hand.raised.fill", label: "Privacy Policy") {
+                    openURL(URL(string: "https://swipeshift.app/privacy")!)
+                }
             }
             .background(Color(uiColor: .systemBackground))
             .clipShape(RoundedRectangle(cornerRadius: 16))
@@ -311,11 +343,19 @@ struct HelpSupportPlaceholderView: View {
 struct SubScreenShell<Content: View>: View {
     @Environment(\.dismiss) private var dismiss
     let title: String
+    let trailingButton: AnyView?
     let content: Content
 
     init(title: String, @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.content = content()
+        self.title         = title
+        self.trailingButton = nil
+        self.content       = content()
+    }
+
+    init<T: View>(title: String, @ViewBuilder trailing: () -> T, @ViewBuilder content: () -> Content) {
+        self.title          = title
+        self.trailingButton = AnyView(trailing())
+        self.content        = content()
     }
 
     var body: some View {
@@ -339,7 +379,11 @@ struct SubScreenShell<Content: View>: View {
                             .font(.system(size: 18, weight: .bold))
                             .foregroundColor(.white)
                         Spacer()
-                        Color.clear.frame(width: 40, height: 40)
+                        if let btn = trailingButton {
+                            btn.frame(width: 40, height: 40)
+                        } else {
+                            Color.clear.frame(width: 40, height: 40)
+                        }
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 8)

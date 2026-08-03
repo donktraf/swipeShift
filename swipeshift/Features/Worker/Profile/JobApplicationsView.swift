@@ -11,25 +11,13 @@ enum ApplicationStatus {
     case confirmed, applied, completed, cancelled
 }
 
-// MARK: - Mock Application
-
-struct JobApplication: Identifiable {
-    let id = UUID()
-    let jobTitle: String
-    let company: String
-    let logoEmoji: String
-    let date: String
-    let timeRange: String
-    let location: String
-    let payText: String
-    let status: ApplicationStatus
-    let appliedAt: String
-}
-
 // MARK: - JobApplicationsView
 
 struct JobApplicationsView: View {
     @State private var selectedTab: ApplicationStatus = .confirmed
+    @State private var applications: [WorkerApplicationItem] = []
+    @State private var isLoading    = false
+    @State private var errorMessage: String? = nil
 
     private let tabs: [(String, ApplicationStatus)] = [
         ("Confirmed", .confirmed),
@@ -38,50 +26,49 @@ struct JobApplicationsView: View {
         ("Cancelled", .cancelled),
     ]
 
-    // TODO: aus Backend laden (GET /users/:id/applications)
-    private let mockApplications: [JobApplication] = [
-        JobApplication(jobTitle: "Barkeeper", company: "Club Tresor", logoEmoji: "🍸",
-                       date: "Mar 28", timeRange: "22:00–04:00", location: "Berlin Mitte",
-                       payText: "€18/h", status: .confirmed, appliedAt: "2 days ago"),
-        JobApplication(jobTitle: "Event Staff", company: "Eventify GmbH", logoEmoji: "🎪",
-                       date: "Mar 30", timeRange: "14:00–22:00", location: "Prenzlauer Berg",
-                       payText: "€15/h", status: .confirmed, appliedAt: "3 days ago"),
-        JobApplication(jobTitle: "Warehouse Helper", company: "LogiCore", logoEmoji: "📦",
-                       date: "Apr 2", timeRange: "06:00–14:00", location: "Wedding",
-                       payText: "€14/h", status: .applied, appliedAt: "today"),
-        JobApplication(jobTitle: "Retail Assistant", company: "FashionHub", logoEmoji: "👗",
-                       date: "Apr 5", timeRange: "10:00–18:00", location: "Mitte",
-                       payText: "€13/h", status: .applied, appliedAt: "yesterday"),
-        JobApplication(jobTitle: "Catering Staff", company: "GourmetEvents", logoEmoji: "🍽️",
-                       date: "Mar 15", timeRange: "18:00–23:00", location: "Charlottenburg",
-                       payText: "€16/h", status: .completed, appliedAt: "2 weeks ago"),
-        JobApplication(jobTitle: "Cleaning Staff", company: "CleanPro", logoEmoji: "🧹",
-                       date: "Mar 10", timeRange: "08:00–12:00", location: "Tempelhof",
-                       payText: "€12/h", status: .cancelled, appliedAt: "3 weeks ago"),
-    ]
+    private func appStatus(_ item: WorkerApplicationItem) -> ApplicationStatus {
+        switch item.displayStatus {
+        case "confirmed": return .confirmed
+        case "completed": return .completed
+        case "cancelled": return .cancelled
+        default:          return .applied
+        }
+    }
 
-    private var filtered: [JobApplication] {
-        mockApplications.filter { $0.status == selectedTab }
+    private var filtered: [WorkerApplicationItem] {
+        applications.filter { appStatus($0) == selectedTab }
     }
 
     var body: some View {
         SubScreenShell(title: "Job Applications") {
             VStack(spacing: 16) {
-                tabSelector
-                    .padding(.horizontal, 16)
+                tabSelector.padding(.horizontal, 16)
 
-                if filtered.isEmpty {
+                if isLoading {
+                    ProgressView().frame(maxWidth: .infinity).padding(.top, 60)
+                } else if let err = errorMessage {
+                    VStack(spacing: 12) {
+                        Text(err).font(.system(size: 13)).foregroundColor(.white.opacity(0.5))
+                            .multilineTextAlignment(.center).padding(.horizontal, 24)
+                        Button("Retry") { Task { await load() } }
+                            .font(.system(size: 14, weight: .semibold)).foregroundColor(SS.primary)
+                    }
+                    .padding(.top, 60)
+                } else if filtered.isEmpty {
                     emptyState
                 } else {
                     VStack(spacing: 12) {
-                        ForEach(filtered) { app in
-                            ApplicationCard(application: app)
+                        ForEach(filtered) { item in
+                            ApplicationCard(item: item, status: appStatus(item)) {
+                                applications.removeAll { $0.id == item.id }
+                            }
                         }
                     }
                     .padding(.horizontal, 16)
                 }
             }
         }
+        .task { await load() }
     }
 
     // MARK: - Tab Selector
@@ -112,44 +99,51 @@ struct JobApplicationsView: View {
     private var emptyState: some View {
         VStack(spacing: 12) {
             Image(systemName: "tray")
-                .font(.system(size: 40))
-                .foregroundColor(.white.opacity(0.3))
+                .font(.system(size: 40)).foregroundColor(.white.opacity(0.3))
             Text("No jobs in this category")
-                .font(.system(size: 15))
-                .foregroundColor(.white.opacity(0.5))
+                .font(.system(size: 15)).foregroundColor(.white.opacity(0.5))
         }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 60)
+        .frame(maxWidth: .infinity).padding(.top, 60)
+    }
+
+    // MARK: - Load
+
+    private func load() async {
+        isLoading = true; errorMessage = nil
+        do { applications = try await APIClient.shared.fetchWorkerApplications() }
+        catch { errorMessage = error.localizedDescription }
+        isLoading = false
     }
 }
 
 // MARK: - Application Card
 
 private struct ApplicationCard: View {
-    let application: JobApplication
+    let item:     WorkerApplicationItem
+    let status:   ApplicationStatus
+    let onWithdraw: () -> Void
+
     @State private var showWithdrawAlert = false
+    @State private var isWithdrawing     = false
+    @State private var showRatingSheet   = false
+    @State private var hasReviewed       = false
 
     var body: some View {
         VStack(spacing: 0) {
             // Header
             HStack(spacing: 12) {
-                Text(application.logoEmoji)
-                    .font(.system(size: 28))
-                    .frame(width: 48, height: 48)
+                Text(item.logoEmoji)
+                    .font(.system(size: 28)).frame(width: 48, height: 48)
                     .background(Color.gray.opacity(0.08))
                     .clipShape(RoundedRectangle(cornerRadius: 12))
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(application.jobTitle)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(.primary)
-                    Text(application.company)
-                        .font(.system(size: 13))
-                        .foregroundColor(.secondary)
+                    Text(item.jobTitle)
+                        .font(.system(size: 15, weight: .semibold)).foregroundColor(.primary)
+                    Text(item.company)
+                        .font(.system(size: 13)).foregroundColor(.secondary)
                 }
-
                 Spacer()
-
                 statusBadge
             }
             .padding(14)
@@ -158,52 +152,60 @@ private struct ApplicationCard: View {
 
             // Details
             HStack(spacing: 16) {
-                Label(application.date, systemImage: "calendar")
-                Label(application.timeRange, systemImage: "clock")
-                Label(application.payText, systemImage: "eurosign.circle")
+                Label(item.shiftText, systemImage: "calendar")
+                Label(item.payText,   systemImage: "eurosign.circle")
+                Label(item.location,  systemImage: "mappin")
             }
-            .font(.system(size: 12))
-            .foregroundColor(.secondary)
+            .font(.system(size: 12)).foregroundColor(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
+            .padding(.horizontal, 14).padding(.vertical, 10)
+            .lineLimit(1)
 
-            // Withdraw button (nur bei Applied)
-            if application.status == .applied {
+            if status == .applied {
                 Divider().padding(.horizontal, 14)
                 Button {
                     showWithdrawAlert = true
                 } label: {
-                    Text("Withdraw Application")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.red)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
+                    Text(isWithdrawing ? "Withdrawing…" : "Withdraw Application")
+                        .font(.system(size: 13, weight: .semibold)).foregroundColor(.red)
+                        .frame(maxWidth: .infinity).padding(.vertical, 10)
                 }
                 .buttonStyle(.plain)
+                .disabled(isWithdrawing)
                 .alert("Withdraw Application?", isPresented: $showWithdrawAlert) {
                     Button("Withdraw", role: .destructive) {
-                        // TODO: DELETE /jobs/:id/apply
+                        Task {
+                            isWithdrawing = true
+                            try? await APIClient.shared.withdrawApplication(applyId: item.id)
+                            onWithdraw()
+                        }
                     }
                     Button("Cancel", role: .cancel) {}
                 } message: {
-                    Text("Your application for \(application.jobTitle) will be removed.")
+                    Text("Your application for \(item.jobTitle) will be removed.")
                 }
             }
 
-            // Leave rating button (nur bei Completed)
-            if application.status == .completed {
+            if status == .completed {
                 Divider().padding(.horizontal, 14)
-                Button {
-                    // TODO: → ReviewsView / leave rating
-                } label: {
-                    Label("Leave a Review", systemImage: "star")
+                Button { showRatingSheet = true } label: {
+                    Label(hasReviewed ? "Review Submitted" : "Leave a Review",
+                          systemImage: hasReviewed ? "star.fill" : "star")
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(SS.primary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
+                        .foregroundColor(hasReviewed ? .secondary : SS.primary)
+                        .frame(maxWidth: .infinity).padding(.vertical, 10)
                 }
                 .buttonStyle(.plain)
+                .disabled(hasReviewed)
+                .sheet(isPresented: $showRatingSheet) {
+                    EmployerRatingSheet(
+                        applyId:     item.id,
+                        companyName: item.company,
+                        jobTitle:    item.jobTitle
+                    ) {
+                        hasReviewed = true
+                    }
+                }
             }
         }
         .background(Color(uiColor: .systemBackground))
@@ -212,18 +214,15 @@ private struct ApplicationCard: View {
     }
 
     private var statusBadge: some View {
-        let (label, color): (String, Color) = switch application.status {
+        let (label, color): (String, Color) = switch status {
         case .confirmed: ("Confirmed", .green)
         case .applied:   ("Applied",   SS.primary)
         case .completed: ("Completed", .gray)
         case .cancelled: ("Cancelled", .red)
         }
         return Text(label)
-            .font(.system(size: 11, weight: .bold))
-            .foregroundColor(.white)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(color)
-            .clipShape(Capsule())
+            .font(.system(size: 11, weight: .bold)).foregroundColor(.white)
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .background(color).clipShape(Capsule())
     }
 }

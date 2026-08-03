@@ -84,6 +84,9 @@ struct MessagesView: View {
             .padding(.horizontal, 0)
             .padding(.bottom, 32)
         }
+        .refreshable {
+            await messageStore.loadConversations()
+        }
     }
 
     // MARK: - Leerzustand

@@ -11,8 +11,9 @@ struct JobDetailView: View {
     @EnvironmentObject var jobStore: JobStore
     @Environment(\.dismiss) private var dismiss
 
-    @State private var isBookmarked = false
     @State private var showApplySheet = false
+
+    private var isBookmarked: Bool { jobStore.savedJobIds.contains(job.id) }
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -41,6 +42,9 @@ struct JobDetailView: View {
             stickyApplyBar
         }
         .navigationBarHidden(true)
+        .task {
+            await jobStore.loadSavedJobIds()
+        }
         .sheet(isPresented: $showApplySheet) {
             ApplyFlowView(job: job, onSuccess: {
                 showApplySheet = false
@@ -63,14 +67,14 @@ struct JobDetailView: View {
                         .background(Color(uiColor: .systemBackground))
                         .clipShape(Circle())
                         .shadow(color: .black.opacity(0.06), radius: 4, x: 0, y: 2)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
 
                 Spacer()
 
                 Button {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
-                        isBookmarked.toggle()
-                    }
+                    Task { await jobStore.toggleSaveJob(job.id) }
                 } label: {
                     Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
                         .font(.system(size: 16, weight: .semibold))
@@ -79,6 +83,8 @@ struct JobDetailView: View {
                         .background(Color(uiColor: .systemBackground))
                         .clipShape(Circle())
                         .shadow(color: .black.opacity(0.06), radius: 4, x: 0, y: 2)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
             }
             .padding(.horizontal, 16)
@@ -146,7 +152,7 @@ struct JobDetailView: View {
                 Divider().frame(height: 36)
                 QuickInfoCell(icon: "clock", value: job.duration ?? "–", label: "Duration")
                 Divider().frame(height: 36)
-                QuickInfoCell(icon: "person.2", value: "\(job.openSpots ?? 1)", label: "Spots")
+                QuickInfoCell(icon: "person.2", value: job.openSpots.map { "\($0)" } ?? "–", label: "Spots")
             }
             .padding(.vertical, 12)
             Divider()
@@ -365,11 +371,9 @@ struct JobDetailView: View {
                     Text(job.payText)
                         .font(.system(size: 17, weight: .bold))
                         .foregroundColor(.primary)
-                    if let spots = job.openSpots {
-                        Text("\(spots) spot\(spots == 1 ? "" : "s") available")
-                            .font(.system(size: 12))
-                            .foregroundColor(.secondary)
-                    }
+                    Text(job.openSpots.map { "\($0) spot\($0 == 1 ? "" : "s") available" } ?? "– spots available")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
                 }
 
                 Button {

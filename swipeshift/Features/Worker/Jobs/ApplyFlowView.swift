@@ -119,11 +119,15 @@ struct ApplyFlowView: View {
 
         do {
             try await Task.sleep(nanoseconds: 900_000_000) // 0.9s UX-Feedback
-            await jobStore.apply(to: job)
-
+            try await jobStore.apply(to: job)
             withAnimation { step = .result(.submitted) }
+        } catch let applyError as ApplyError {
+            switch applyError {
+            case .shiftTaken:         withAnimation { step = .result(.shiftAlreadyTaken) }
+            case .jobUnavailable:     withAnimation { step = .result(.shiftUnavailable) }
+            case .schedulingConflict: withAnimation { step = .result(.schedulingConflict) }
+            }
         } catch {
-            // TODO: Backend-Fehlertypen mappen wenn verfügbar
             withAnimation { step = .result(.connectionLost) }
         }
     }

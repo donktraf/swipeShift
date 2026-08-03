@@ -178,6 +178,9 @@ struct RadarView: View {
                                 .padding(.horizontal, 16)
                                 .padding(.bottom, 32)
                             }
+                            .refreshable {
+                                await loadJobs()
+                            }
                             .coordinateSpace(name: "radarScroll")
                             .onPreferenceChange(ScrollOffsetKey.self) { offset in
                                 let collapsed = offset < -20

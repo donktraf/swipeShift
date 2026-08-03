@@ -8,14 +8,25 @@ import SwiftUI
 // MARK: - Sort & Filter Models
 
 enum JobSortOption: String, CaseIterable {
-    case newest     = "Newest"
-    case distance   = "Distance"
-    case pay        = "Highest Pay"
+    case newest   = "Newest"
+    case distance = "Distance"
+    case pay      = "Highest Pay"
 }
 
 struct JobFilterOptions {
-    var category: String? = nil
-    var maxDistance: Double? = nil  // TODO: wenn Backend Distanz-Felder liefert
+    var category:    String? = nil
+    var maxDistance: Double? = nil   // km; nil = kein Filter
+}
+
+// Haversine-Distanz in km zwischen zwei Koordinatenpaaren
+private func haversineKm(lat1: Double, lng1: Double, lat2: Double, lng2: Double) -> Double {
+    let R  = 6371.0
+    let φ1 = lat1 * .pi / 180
+    let φ2 = lat2 * .pi / 180
+    let Δφ = (lat2 - lat1) * .pi / 180
+    let Δλ = (lng2 - lng1) * .pi / 180
+    let a  = sin(Δφ/2) * sin(Δφ/2) + cos(φ1) * cos(φ2) * sin(Δλ/2) * sin(Δλ/2)
+    return R * 2 * atan2(sqrt(a), sqrt(1 - a))
 }
 
 // MARK: - JobListView
@@ -36,7 +47,18 @@ struct JobListView: View {
 
     // Aktiver Filter = mindestens ein Filterfeld gesetzt
     var hasActiveFilter: Bool {
-        filterOptions.category != nil
+        filterOptions.category != nil || filterOptions.maxDistance != nil
+    }
+
+    // User-Koordinaten für Distanz-Berechnung
+    private var userLat: Double? { userStore.currentUser?.lat }
+    private var userLng: Double? { userStore.currentUser?.lng }
+
+    // Distanz eines Jobs zum User in km (nil wenn Koordinaten fehlen)
+    private func distanceKm(to job: Job) -> Double? {
+        guard let uLat = userLat, let uLng = userLng,
+              let jLat = job.lat,  let jLng = job.lng else { return nil }
+        return haversineKm(lat1: uLat, lng1: uLng, lat2: jLat, lng2: jLng)
     }
 
     // Gefilterte + sortierte Jobs
@@ -61,25 +83,33 @@ struct JobListView: View {
             }
         }
 
-        // 3) Company-Filter (von CompanyProfileView)
+        // 3) Distanz-Filter
+        if let maxKm = filterOptions.maxDistance, userLat != nil {
+            result = result.filter { job in
+                guard let d = distanceKm(to: job) else { return true }
+                return d <= maxKm
+            }
+        }
+
+        // 4) Company-Filter (von CompanyProfileView)
         if let company = companyFilter {
             result = result.filter { $0.company.lowercased() == company.lowercased() }
         }
 
-        // 3) Sortierung
+        // 5) Sortierung
         switch sortOption {
         case .newest:
-            result.sort { a, b in
-                let aTime = a.startTime ?? .distantFuture
-                let bTime = b.startTime ?? .distantFuture
-                return aTime < bTime
+            result.sort {
+                ($0.startTime ?? .distantFuture) < ($1.startTime ?? .distantFuture)
             }
         case .pay:
-            result.sort { a, b in
-                (a.payAmount ?? 0) > (b.payAmount ?? 0)
-            }
+            result.sort { ($0.payAmount ?? 0) > ($1.payAmount ?? 0) }
         case .distance:
-            break // distanceText from nearby endpoint only; no-op for general list
+            result.sort { a, b in
+                let dA = distanceKm(to: a) ?? .greatestFiniteMagnitude
+                let dB = distanceKm(to: b) ?? .greatestFiniteMagnitude
+                return dA < dB
+            }
         }
 
         return result
@@ -135,6 +165,12 @@ struct JobListView: View {
                         .padding(.top, 12)
                         .padding(.bottom, 32)
                     }
+                    .refreshable {
+                        guard APIClient.shared.token != nil else { return }
+                        async let jobs  = jobStore.loadJobsAll()
+                        async let saved = jobStore.loadSavedJobIds()
+                        _ = await (jobs, saved)
+                    }
                 }
             }
         }
@@ -152,7 +188,9 @@ struct JobListView: View {
         }
         .task {
             guard APIClient.shared.token != nil else { return }
-            await jobStore.loadJobsAll()
+            async let jobs  = jobStore.loadJobsAll()
+            async let saved = jobStore.loadSavedJobIds()
+            _ = await (jobs, saved)
         }
         .onAppear {
             // Vorausgewählte Kategorie von CategoryJobListView übernehmen
@@ -317,29 +355,41 @@ struct FilterSheet: View {
     @Binding var filterOptions: JobFilterOptions
     @Environment(\.dismiss) private var dismiss
 
-    private let categories = JobCategory.all.map { $0.name }
+    private let categories    = JobCategory.all.map { $0.name }
+    private let distanceOptions: [Double] = [5, 10, 15, 20, 25]
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 20) {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 24) {
 
-                // Kategorie Filter
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Category")
-                        .font(.system(size: 16, weight: .semibold))
+                    // Distanz-Filter
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Max Distance")
+                            .font(.system(size: 16, weight: .semibold))
 
-                    ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
-                            ForEach(categories, id: \.self) { cat in
-                                let isSelected = filterOptions.category == cat
+                            // "Any" — kein Filter
+                            let anySelected = filterOptions.maxDistance == nil
+                            Button {
+                                filterOptions.maxDistance = nil
+                            } label: {
+                                Text("Any")
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundColor(anySelected ? .white : .primary)
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 8)
+                                    .background(anySelected ? SS.primary : Color.gray.opacity(0.1))
+                                    .clipShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
+
+                            ForEach(distanceOptions, id: \.self) { km in
+                                let isSelected = filterOptions.maxDistance == km
                                 Button {
-                                    if isSelected {
-                                        filterOptions.category = nil
-                                    } else {
-                                        filterOptions.category = cat
-                                    }
+                                    filterOptions.maxDistance = isSelected ? nil : km
                                 } label: {
-                                    Text(cat)
+                                    Text("\(Int(km)) km")
                                         .font(.system(size: 14, weight: .medium))
                                         .foregroundColor(isSelected ? .white : .primary)
                                         .padding(.horizontal, 14)
@@ -351,11 +401,39 @@ struct FilterSheet: View {
                             }
                         }
                     }
-                }
 
-                Spacer()
+                    Divider()
+
+                    // Kategorie-Filter
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Category")
+                            .font(.system(size: 16, weight: .semibold))
+
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(categories, id: \.self) { cat in
+                                    let isSelected = filterOptions.category == cat
+                                    Button {
+                                        filterOptions.category = isSelected ? nil : cat
+                                    } label: {
+                                        Text(cat)
+                                            .font(.system(size: 14, weight: .medium))
+                                            .foregroundColor(isSelected ? .white : .primary)
+                                            .padding(.horizontal, 14)
+                                            .padding(.vertical, 8)
+                                            .background(isSelected ? SS.primary : Color.gray.opacity(0.1))
+                                            .clipShape(Capsule())
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer()
+                }
+                .padding(20)
             }
-            .padding(20)
             .navigationTitle("Filter")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -364,10 +442,8 @@ struct FilterSheet: View {
                         .fontWeight(.semibold)
                 }
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Reset") {
-                        filterOptions = JobFilterOptions()
-                    }
-                    .foregroundColor(.red)
+                    Button("Reset") { filterOptions = JobFilterOptions() }
+                        .foregroundColor(.red)
                 }
             }
         }

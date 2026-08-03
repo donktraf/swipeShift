@@ -11,6 +11,15 @@ struct JobSwipeView: View {
 
     @State private var dragOffset: CGSize = .zero
     @State private var isAnimatingOut = false
+    @State private var showFilterSheet = false
+    @State private var filterOptions: JobFilterOptions = JobFilterOptions()
+
+    // Haptics: kippt einmalig pro Drag-Geste beim Ueberschreiten des Swipe-Thresholds
+    @State private var hasCrossedSwipeThreshold = false
+    // Haptics: toggelt bei jedem tatsaechlichen Apply/Skip-Auslösen
+    @State private var swipeHapticTrigger = false
+    // Haptics: toggelt bei jedem Bookmark-Toggle
+    @State private var bookmarkHapticTrigger = false
 
     // Wie weit gezogen wurde (0…1)
     private var dragFraction: CGFloat { min(abs(dragOffset.width) / 130, 1.0) }
@@ -18,9 +27,16 @@ struct JobSwipeView: View {
     private var isDraggingLeft:  Bool { dragOffset.width < -20 }
     private var rotation: Double { Double(dragOffset.width / 22) }
 
-    // swipeJobs als Quelle — unabhängig von jobs/nearbyJobs
-    private var topJob:  Job? { jobStore.swipeJobs.first }
-    private var nextJob: Job? { jobStore.swipeJobs.dropFirst().first }
+    private var filteredSwipeJobs: [Job] {
+        guard let cat = filterOptions.category else { return jobStore.swipeJobs }
+        return jobStore.swipeJobs.filter {
+            $0.category?.lowercased() == cat.lowercased()
+            || $0.tags.contains(where: { $0.lowercased() == cat.lowercased() })
+        }
+    }
+
+    private var topJob:  Job? { filteredSwipeJobs.first }
+    private var nextJob: Job? { filteredSwipeJobs.dropFirst().first }
 
     var body: some View {
         GeometryReader { geo in
@@ -35,10 +51,18 @@ struct JobSwipeView: View {
                 }
             }
         }
+        .sheet(isPresented: $showFilterSheet) {
+            FilterSheet(filterOptions: $filterOptions)
+                .presentationDetents([.medium])
+        }
+        .sensoryFeedback(.impact(weight: .light), trigger: hasCrossedSwipeThreshold)
+        .sensoryFeedback(.impact(weight: .medium), trigger: swipeHapticTrigger)
+        .sensoryFeedback(.impact(weight: .light), trigger: bookmarkHapticTrigger)
         .task {
             if jobStore.swipeJobs.isEmpty {
                 await jobStore.loadSwipeJobs()
             }
+            await jobStore.loadSavedJobIds()
         }
     }
 
@@ -50,19 +74,27 @@ struct JobSwipeView: View {
                 Text("Swipe")
                     .font(.system(size: 28, weight: .bold))
                     .foregroundColor(.white)
-                Text("\(jobStore.swipeJobs.count) jobs available")
+                Text("\(filteredSwipeJobs.count) jobs available")
                     .font(.system(size: 13))
                     .foregroundColor(.white.opacity(0.7))
             }
             Spacer()
-            Button { /* TODO: Filter */ } label: {
-                Image(systemName: "slider.horizontal.3")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundColor(SS.primary)
-                    .padding(10)
-                    .background(Color.white)
-                    .clipShape(Circle())
-                    .shadow(color: .black.opacity(0.08), radius: 4, x: 0, y: 2)
+            Button { showFilterSheet = true } label: {
+                ZStack(alignment: .topTrailing) {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundColor(SS.primary)
+                        .padding(10)
+                        .background(Color.white)
+                        .clipShape(Circle())
+                        .shadow(color: .black.opacity(0.08), radius: 4, x: 0, y: 2)
+                    if filterOptions.category != nil {
+                        Circle()
+                            .fill(Color.orange)
+                            .frame(width: 9, height: 9)
+                            .offset(x: 1, y: -1)
+                    }
+                }
             }
         }
         .padding(.horizontal, 16)
@@ -73,30 +105,30 @@ struct JobSwipeView: View {
     // MARK: - Card Area
 
     private func cardArea(geo: GeometryProxy) -> some View {
-        let cardH = geo.size.height * 0.63
+        let cardH = geo.size.height * 0.72
 
         return ZStack {
-            if jobStore.swipeJobs.isEmpty {
+            if filteredSwipeJobs.isEmpty {
                 emptyState
             } else {
                 // Karte 3 (ganz hinten, kaum sichtbar)
-                if jobStore.swipeJobs.count >= 3 {
-                    SwipeJobCard(job: jobStore.swipeJobs[2])
+                if filteredSwipeJobs.count >= 3 {
+                    SwipeJobCard(job: filteredSwipeJobs[2])
                         .frame(height: cardH)
                         .scaleEffect(0.91)
                         .offset(y: -10)
                         .zIndex(1)
                 }
                 // Karte 2 (mittig)
-                if jobStore.swipeJobs.count >= 2 {
-                    SwipeJobCard(job: jobStore.swipeJobs[1])
+                if filteredSwipeJobs.count >= 2 {
+                    SwipeJobCard(job: filteredSwipeJobs[1])
                         .frame(height: cardH)
                         .scaleEffect(0.96)
                         .offset(y: -5)
                         .zIndex(2)
                 }
                 // Top-Karte (ziehbar)
-                if let job = jobStore.swipeJobs.first {
+                if let job = topJob {
                     SwipeJobCard(
                         job: job,
                         dragFraction: dragFraction,
@@ -109,7 +141,13 @@ struct JobSwipeView: View {
                     .zIndex(3)
                     .gesture(
                         DragGesture()
-                            .onChanged { dragOffset = $0.translation }
+                            .onChanged { value in
+                                dragOffset = value.translation
+                                let fraction = min(abs(value.translation.width) / 130, 1.0)
+                                if fraction > 0.6 && !hasCrossedSwipeThreshold {
+                                    hasCrossedSwipeThreshold = true
+                                }
+                            }
                             .onEnded   { handleDragEnd($0, job: job) }
                     )
                     .animation(.interactiveSpring(response: 0.35, dampingFraction: 0.72), value: dragOffset)
@@ -126,17 +164,22 @@ struct JobSwipeView: View {
         HStack(spacing: 36) {
             // Skip (links)
             circleButton(icon: "xmark", color: .red, size: 58) {
-                if let job = jobStore.swipeJobs.first { animateSwipe(direction: -1, job: job) }
+                if let job = topJob { animateSwipe(direction: -1, job: job) }
             }
 
             // Bookmark (speichern)
-            circleButton(icon: "bookmark", color: SS.primary, size: 44) {
-                // TODO: POST /jobs/:id/save
+            circleButton(
+                icon: jobStore.savedJobIds.contains(topJob?.id ?? "") ? "bookmark.fill" : "bookmark",
+                color: SS.primary, size: 44
+            ) {
+                guard let job = topJob else { return }
+                bookmarkHapticTrigger.toggle()
+                Task { await jobStore.toggleSaveJob(job.id) }
             }
 
             // Apply (rechts)
             circleButton(icon: "checkmark", color: .green, size: 58) {
-                if let job = jobStore.swipeJobs.first { animateSwipe(direction: 1, job: job) }
+                if let job = topJob { animateSwipe(direction: 1, job: job) }
             }
         }
         .padding(.top, 22)
@@ -183,6 +226,8 @@ struct JobSwipeView: View {
 
     private func handleDragEnd(_ value: DragGesture.Value, job: Job) {
         let threshold: CGFloat = 110
+        // Threshold-Flag fuer die naechste Drag-Geste zuruecksetzen
+        hasCrossedSwipeThreshold = false
         if value.translation.width >= threshold {
             animateSwipe(direction: 1, job: job)   // rechts = apply
         } else if value.translation.width <= -threshold {
@@ -195,13 +240,14 @@ struct JobSwipeView: View {
     }
 
     private func animateSwipe(direction: CGFloat, job: Job) {
+        swipeHapticTrigger.toggle()
         withAnimation(.easeIn(duration: 0.28)) {
             dragOffset = CGSize(width: direction * 700, height: 0)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
             dragOffset = .zero
             Task {
-                if direction > 0 { await jobStore.apply(to: job) }
+                if direction > 0 { try? await jobStore.apply(to: job) }
                 else             { await jobStore.skip(job) }
             }
         }
@@ -225,9 +271,19 @@ private struct SwipeJobCard: View {
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
                 Divider().padding(.horizontal, 16)
-                descriptionBlock
-                tagsBlock
-                Spacer(minLength: 0)
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        descriptionBlock
+                        tagsBlock
+                        if let bd = job.reviewBreakdown {
+                            ratingsBlock(bd)
+                        }
+                        if !job.matchReasons.isEmpty {
+                            matchReasonsBlock
+                        }
+                        Spacer(minLength: 12)
+                    }
+                }
                 cardFooter
             }
             .background(Color(uiColor: .systemBackground))
@@ -330,6 +386,116 @@ private struct SwipeJobCard: View {
                 }
                 .padding(.vertical, 8)
             }
+        }
+    }
+
+    // MARK: Ratings & Reviews block
+
+    private func ratingsBlock(_ bd: JobReviewSummary) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Divider().padding(.horizontal, 16)
+
+            Text("RATINGS & REVIEWS")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
+
+            HStack(spacing: 12) {
+                VStack(spacing: 2) {
+                    Text(String(format: "%.1f", bd.avgRating))
+                        .font(.system(size: 28, weight: .bold))
+                        .foregroundColor(.primary)
+                    HStack(spacing: 2) {
+                        ForEach(1...5, id: \.self) { i in
+                            Image(systemName: Double(i) <= bd.avgRating ? "star.fill" : (Double(i) - 0.5 <= bd.avgRating ? "star.leadinghalf.filled" : "star"))
+                                .font(.system(size: 9))
+                                .foregroundColor(.yellow)
+                        }
+                    }
+                    Text("Based on \(bd.totalReviews) review\(bd.totalReviews == 1 ? "" : "s")")
+                        .font(.system(size: 9))
+                        .foregroundColor(.secondary)
+                }
+                .padding(.leading, 16)
+
+                Divider().frame(height: 54)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    ratingBar("Communication",   value: bd.communication)
+                    ratingBar("Payment",         value: bd.paymentFairness)
+                    ratingBar("Work Environment", value: bd.workEnvironment)
+                    ratingBar("Job Description", value: bd.jobDescriptionAccuracy)
+                    ratingBar("Overall",         value: bd.overallExperience)
+                }
+                .padding(.trailing, 16)
+            }
+
+            if !bd.tags.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(bd.tags, id: \.self) { tag in
+                            Text(tag)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(.green)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(Color.green.opacity(0.1))
+                                .clipShape(Capsule())
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                }
+                .padding(.bottom, 10)
+            }
+        }
+    }
+
+    private func ratingBar(_ label: String, value: Double) -> some View {
+        HStack(spacing: 5) {
+            Text(label)
+                .font(.system(size: 9))
+                .foregroundColor(.secondary)
+                .frame(width: 72, alignment: .leading)
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 2).fill(Color.secondary.opacity(0.12))
+                    RoundedRectangle(cornerRadius: 2).fill(SS.primary.opacity(0.65))
+                        .frame(width: geo.size.width * CGFloat(value / 5.0))
+                }
+            }
+            .frame(height: 4)
+            Text(String(format: "%.1f", value))
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundColor(.secondary)
+                .frame(width: 22, alignment: .trailing)
+        }
+    }
+
+    // MARK: Why you see this Job block
+
+    private var matchReasonsBlock: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Divider().padding(.horizontal, 16)
+            Text("WHY YOU SEE THIS JOB")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(job.matchReasons.prefix(3), id: \.self) { reason in
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 12))
+                            .foregroundColor(SS.primary)
+                        Text(reason)
+                            .font(.system(size: 12))
+                            .foregroundColor(.primary)
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 10)
         }
     }
 

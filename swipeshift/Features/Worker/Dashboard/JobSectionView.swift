@@ -80,6 +80,11 @@ struct JobSectionView: View {
 struct DashboardJobCard: View {
     let job: Job
 
+    // Saved-Status kommt zentral aus dem JobStore (gilt an allen Verwendungsstellen).
+    @EnvironmentObject var jobStore: JobStore
+
+    private var isSaved: Bool { jobStore.savedJobIds.contains(job.id) }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top) {
@@ -102,20 +107,18 @@ struct DashboardJobCard: View {
 
                 Spacer()
 
-                // Bookmark + Apply
-                HStack(spacing: 8) {
-                    Image(systemName: "bookmark")
+                // Echter Bookmark-Button (kein "Apply"-Fake-Button mehr —
+                // der vollwertige Apply-Flow lebt in JobDetailView).
+                Button {
+                    Task { await jobStore.toggleSaveJob(job.id) }
+                } label: {
+                    Image(systemName: isSaved ? "bookmark.fill" : "bookmark")
                         .font(.system(size: 16))
-                        .foregroundColor(.secondary)
-
-                    Text("Apply")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(SS.primary)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .foregroundColor(isSaved ? SS.primary : .secondary)
+                        .frame(width: 32, height: 32)
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
             }
 
             // Details

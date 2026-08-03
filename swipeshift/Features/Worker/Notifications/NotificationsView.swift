@@ -11,13 +11,25 @@ enum NotificationCategory: String, CaseIterable {
     case jobActivity = "Job Activity"
     case payments    = "Payments"
     case messages    = "Messages"
+    case reviews     = "Reviews"
     case system      = "System"
+
+    static func from(_ raw: String) -> NotificationCategory {
+        switch raw {
+        case "jobActivity": return .jobActivity
+        case "payments":    return .payments
+        case "messages":    return .messages
+        case "reviews":     return .reviews
+        default:            return .system
+        }
+    }
 
     var icon: String {
         switch self {
         case .jobActivity: return "briefcase.fill"
         case .payments:    return "eurosign.circle.fill"
         case .messages:    return "bubble.left.fill"
+        case .reviews:     return "star.fill"
         case .system:      return "bell.fill"
         }
     }
@@ -27,6 +39,7 @@ enum NotificationCategory: String, CaseIterable {
         case .jobActivity: return SS.primary
         case .payments:    return .green
         case .messages:    return .blue
+        case .reviews:     return .yellow
         case .system:      return .orange
         }
     }
@@ -35,12 +48,21 @@ enum NotificationCategory: String, CaseIterable {
 // MARK: - Notification Item
 
 struct AppNotification: Identifiable {
-    let id = UUID()
+    let id: String
     let category: NotificationCategory
     let title: String
     let body: String
     let timestamp: Date
     var isRead: Bool
+
+    init(dto: NotificationDTO) {
+        self.id        = dto.id
+        self.category  = NotificationCategory.from(dto.category)
+        self.title     = dto.title
+        self.body      = dto.body
+        self.timestamp = dto.timestamp
+        self.isRead    = false
+    }
 }
 
 // MARK: - NotificationsView
@@ -48,7 +70,8 @@ struct AppNotification: Identifiable {
 struct NotificationsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var selectedFilter: NotificationCategory? = nil
-    @State private var notifications: [AppNotification] = Self.mockNotifications()
+    @State private var notifications: [AppNotification] = []
+    @State private var isLoading = false
 
     private var filtered: [AppNotification] {
         guard let filter = selectedFilter else { return notifications }
@@ -63,13 +86,25 @@ struct NotificationsView: View {
                 filterBar
                     .padding(.horizontal, 16)
 
-                if filtered.isEmpty {
+                if isLoading {
+                    ProgressView().tint(.white).padding(.top, 40)
+                } else if filtered.isEmpty {
                     emptyState
                 } else {
                     notificationsList
                 }
             }
         }
+        .task { await loadNotifications() }
+    }
+
+    private func loadNotifications() async {
+        isLoading = true
+        do {
+            let dtos = try await APIClient.shared.fetchNotifications()
+            notifications = dtos.map { AppNotification(dto: $0) }
+        } catch { }
+        isLoading = false
     }
 
     // MARK: - Filter Bar
@@ -106,7 +141,7 @@ struct NotificationsView: View {
                         for i in notifications.indices { notifications[i].isRead = true }
                     }
                 } label: {
-                    Text("Alle als gelesen markieren")
+                    Text("Mark all as read")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(SS.primary)
                         .frame(maxWidth: .infinity, alignment: .trailing)
@@ -155,63 +190,6 @@ struct NotificationsView: View {
         }
     }
 
-    // MARK: - Mock Data
-
-    static func mockNotifications() -> [AppNotification] {
-        let now = Date()
-        func ago(_ seconds: TimeInterval) -> Date { now.addingTimeInterval(-seconds) }
-
-        return [
-            AppNotification(
-                category: .jobActivity,
-                title: "Application accepted!",
-                body: "Club Tresor has accepted your application as Bartender. Check your messages.",
-                timestamp: ago(300), isRead: false
-            ),
-            AppNotification(
-                category: .messages,
-                title: "New message from Eventify GmbH",
-                body: "\"Hi! We're looking forward to your shift on Mar 30. Please confirm your arrival time.\"",
-                timestamp: ago(1800), isRead: false
-            ),
-            AppNotification(
-                category: .payments,
-                title: "Payment received",
-                body: "€144 from Club Tresor has been credited to your account.",
-                timestamp: ago(7200), isRead: false
-            ),
-            AppNotification(
-                category: .jobActivity,
-                title: "New jobs near you",
-                body: "5 new Events jobs have been posted in Berlin that match your profile.",
-                timestamp: ago(14400), isRead: true
-            ),
-            AppNotification(
-                category: .system,
-                title: "Profile verification complete",
-                body: "Your profile has been successfully verified. You can now access all jobs.",
-                timestamp: ago(86400), isRead: true
-            ),
-            AppNotification(
-                category: .jobActivity,
-                title: "Reminder: Shift tomorrow",
-                body: "You're working tomorrow 22:00–04:00 at Club Tresor as Bartender.",
-                timestamp: ago(3600 * 5), isRead: true
-            ),
-            AppNotification(
-                category: .payments,
-                title: "Pending review",
-                body: "How was your shift at GourmetEvents? Leave a review now.",
-                timestamp: ago(86400 * 2), isRead: true
-            ),
-            AppNotification(
-                category: .messages,
-                title: "Message from LogiCore",
-                body: "\"Your application has been received. We will get back to you within 24h.\"",
-                timestamp: ago(86400 * 3), isRead: true
-            ),
-        ]
-    }
 }
 
 // MARK: - Filter Chip
@@ -308,24 +286,18 @@ private struct NotificationRow: View {
 private extension Date {
     var relativeLabel: String {
         let diff = Date().timeIntervalSince(self)
-        
         if diff < 60 {
-            
-            return "Gerade eben"
+            return "Just now"
         } else if diff < 3600 {
-            
-            return "vor \(Int(diff / 60)) Min."
+            return "\(Int(diff / 60)) min ago"
         } else if diff < 86400 {
-            
-            return "vor \(Int(diff / 3600)) Std."
+            return "\(Int(diff / 3600)) hr ago"
         } else if diff < 86400 * 7 {
-            
-            return "vor \(Int(diff / 86400)) Tag(en)"
+            return "\(Int(diff / 86400)) day(s) ago"
         } else {
             let f = DateFormatter()
             f.locale = Locale(identifier: "en_US")
-            f.dateFormat = "dd. MMM"
-            
+            f.dateFormat = "MMM d"
             return f.string(from: self)
         }
     }

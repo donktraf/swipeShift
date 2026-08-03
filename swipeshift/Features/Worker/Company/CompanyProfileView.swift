@@ -11,13 +11,16 @@ struct CompanyProfileView: View {
     let companyName: String
     let logoEmoji:   String         // Sofort sichtbar während API lädt
 
-    @State private var profile:    CompanyProfileDTO? = nil
-    @State private var isLoading   = true
-    @State private var errorMsg:   String? = nil
-    @State private var showAllReviews = false
+    @State private var profile:         CompanyProfileDTO? = nil
+    @State private var isLoading        = true
+    @State private var errorMsg:        String? = nil
+    @State private var showAllReviews   = false
+    @State private var expandedReviews  = false
+    @State private var isSaved          = false
+    @State private var isSaveLoading    = false
 
     var body: some View {
-        SubScreenShell(title: "Company Profile") {
+        SubScreenShell(title: "Company Profile", trailing: { bookmarkButton }) {
             if isLoading {
                 VStack { Spacer(); ProgressView(); Spacer() }
             } else if let errorMsg {
@@ -33,7 +36,7 @@ struct CompanyProfileView: View {
                     companyHeader(p)
                     if !p.businessAreas.isEmpty { areasSection(p) }
                     if let about = p.about, !about.isEmpty { aboutSection(about) }
-                    if p.rating != nil { ratingsSection(p) }
+                    ratingsSection(p)
                     if !p.locations.isEmpty { locationsSection(p) }
                     if let web = p.website, !web.isEmpty { contactSection(web) }
                     viewOpenJobsButton(p)
@@ -44,17 +47,54 @@ struct CompanyProfileView: View {
         .task { await load() }
     }
 
+    // MARK: - Bookmark Button
+
+    private var bookmarkButton: some View {
+        Button { toggleSave() } label: {
+            Image(systemName: isSaved ? "bookmark.fill" : "bookmark")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(isSaved ? SS.primary : .white)
+                .padding(10)
+                .background(Color.white.opacity(0.15))
+                .clipShape(Circle())
+        }
+        .disabled(isSaveLoading)
+    }
+
     // MARK: - Load
 
     private func load() async {
         isLoading = true
         errorMsg  = nil
         do {
-            profile = try await APIClient.shared.fetchCompany(name: companyName)
+            async let profileFetch = APIClient.shared.fetchCompany(name: companyName)
+            async let savedFetch   = APIClient.shared.fetchSavedCompanies()
+            let (p, saved) = try await (profileFetch, savedFetch)
+            profile = p
+            isSaved = saved.contains { $0.companyName.lowercased() == companyName.lowercased() }
         } catch {
             errorMsg = "Company profile could not be loaded."
         }
         isLoading = false
+    }
+
+    private func toggleSave() {
+        guard !isSaveLoading else { return }
+        isSaveLoading = true
+        let wasSaved = isSaved
+        isSaved = !wasSaved
+        Task {
+            do {
+                if wasSaved {
+                    try await APIClient.shared.unsaveCompany(name: companyName)
+                } else {
+                    try await APIClient.shared.saveCompany(name: companyName)
+                }
+            } catch {
+                isSaved = wasSaved
+            }
+            isSaveLoading = false
+        }
     }
 
     // MARK: - Header
@@ -153,39 +193,136 @@ struct CompanyProfileView: View {
         .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
     }
 
-    // MARK: - Ratings (kein Review-Modell im MVP → nur Gesamt-Rating)
+    // MARK: - Ratings
 
     private func ratingsSection(_ p: CompanyProfileDTO) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("RATING")
-                .font(.system(size: 11, weight: .semibold)).foregroundColor(.secondary)
-                .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
-
+        VStack(spacing: 0) {
+            // Overall score header
             if let rating = p.rating {
-                HStack(spacing: 12) {
-                    Text(String(format: "%.1f", rating))
-                        .font(.system(size: 36, weight: .bold))
-                        .foregroundColor(.primary)
-                        .padding(.leading, 14)
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 3) {
+                HStack(spacing: 14) {
+                    VStack(spacing: 4) {
+                        Text(String(format: "%.1f", rating))
+                            .font(.system(size: 40, weight: .bold))
+                            .foregroundColor(.primary)
+                        HStack(spacing: 2) {
                             ForEach(1...5, id: \.self) { i in
-                                Image(systemName: Double(i) <= rating ? "star.fill" : "star")
-                                    .font(.system(size: 14)).foregroundColor(.yellow)
+                                Image(systemName: Double(i) <= rating ? "star.fill" : (Double(i) - 0.5 <= rating ? "star.leadinghalf.filled" : "star"))
+                                    .font(.system(size: 12)).foregroundColor(.yellow)
                             }
                         }
-                        Text("Based on completed jobs")
-                            .font(.system(size: 12)).foregroundColor(.secondary)
+                        if let bd = p.reviewBreakdown {
+                            Text("\(bd.totalReviews) review\(bd.totalReviews == 1 ? "" : "s")")
+                                .font(.system(size: 11)).foregroundColor(.secondary)
+                        }
+                    }
+                    .padding(.leading, 14)
+
+                    if let bd = p.reviewBreakdown {
+                        Divider().frame(height: 70)
+                        VStack(alignment: .leading, spacing: 5) {
+                            breakdownBar("Communication",       value: bd.communication)
+                            breakdownBar("Payment",             value: bd.paymentFairness)
+                            breakdownBar("Work Environment",    value: bd.workEnvironment)
+                            breakdownBar("Job Description",     value: bd.jobDescriptionAccuracy)
+                            breakdownBar("Overall",             value: bd.overallExperience)
+                        }
+                        .padding(.trailing, 14)
                     }
                     Spacer()
                 }
-                .padding(.vertical, 12)
+                .padding(.vertical, 14)
+            } else {
+                VStack(spacing: 6) {
+                    Image(systemName: "star.slash")
+                        .font(.system(size: 28)).foregroundColor(.secondary.opacity(0.4))
+                    Text("No reviews yet")
+                        .font(.system(size: 13)).foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 20)
+            }
+
+            // Individual review cards
+            if let reviews = p.workerReviews, !reviews.isEmpty {
+                Divider().padding(.horizontal, 14)
+                Text("REVIEWS")
+                    .font(.system(size: 11, weight: .semibold)).foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 4)
+
+                let shown = expandedReviews ? reviews : Array(reviews.prefix(2))
+                ForEach(Array(shown.enumerated()), id: \.element.id) { i, r in
+                    if i > 0 { Divider().padding(.leading, 14) }
+                    reviewCard(r)
+                }
+
+                if reviews.count > 2 {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) { expandedReviews.toggle() }
+                    } label: {
+                        Text(expandedReviews ? "Show less" : "View all \(reviews.count) reviews")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(SS.primary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
         }
         .background(Color(uiColor: .systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .padding(.horizontal, 16)
         .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
+    }
+
+    private func breakdownBar(_ label: String, value: Double) -> some View {
+        HStack(spacing: 6) {
+            Text(label)
+                .font(.system(size: 10)).foregroundColor(.secondary)
+                .frame(width: 80, alignment: .leading)
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 3).fill(Color.secondary.opacity(0.12))
+                    RoundedRectangle(cornerRadius: 3).fill(SS.primary.opacity(0.7))
+                        .frame(width: geo.size.width * CGFloat(value / 5.0))
+                }
+            }
+            .frame(height: 5)
+            Text(String(format: "%.1f", value))
+                .font(.system(size: 10, weight: .semibold)).foregroundColor(.secondary)
+                .frame(width: 26, alignment: .trailing)
+        }
+    }
+
+    private func reviewCard(_ r: WorkerReviewDTO) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                ZStack {
+                    Circle().fill(SS.primary.opacity(0.1)).frame(width: 34, height: 34)
+                    Text(String(r.workerName.prefix(1)))
+                        .font(.system(size: 14, weight: .bold)).foregroundColor(SS.primary)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(r.workerName).font(.system(size: 13, weight: .semibold))
+                    HStack(spacing: 2) {
+                        ForEach(1...5, id: \.self) { i in
+                            Image(systemName: i <= r.overallExperience ? "star.fill" : "star")
+                                .font(.system(size: 10)).foregroundColor(.yellow)
+                        }
+                    }
+                }
+                Spacer()
+                Text(r.createdAt, style: .date)
+                    .font(.system(size: 11)).foregroundColor(.secondary)
+            }
+            if let c = r.comment, !c.isEmpty {
+                Text(c)
+                    .font(.system(size: 13)).foregroundColor(.primary).lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 12)
     }
 
     // MARK: - Locations

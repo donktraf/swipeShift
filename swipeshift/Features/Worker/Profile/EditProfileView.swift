@@ -32,6 +32,8 @@ struct EditProfileView: View {
 
     // Job Preferences
     @State private var selectedCategories: Set<String> = ["Hospitality", "Events"]
+    @State private var payRangeMin: Int = 12
+    @State private var payRangeMax: Int = 20
 
     // Skills (1-5)
     @State private var communication: Int = 4
@@ -241,6 +243,29 @@ struct EditProfileView: View {
                 }
             }
             .padding(.vertical, 4)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Preferred Hourly Pay (€/h)")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.secondary)
+                HStack(spacing: 16) {
+                    VStack(spacing: 2) {
+                        Text("Min").font(.system(size: 11)).foregroundColor(.secondary)
+                        Stepper("€\(payRangeMin)", value: $payRangeMin, in: 1...payRangeMax, step: 1)
+                            .labelsHidden()
+                        Text("€\(payRangeMin)").font(.system(size: 14, weight: .semibold))
+                    }
+                    Divider().frame(height: 40)
+                    VStack(spacing: 2) {
+                        Text("Max").font(.system(size: 11)).foregroundColor(.secondary)
+                        Stepper("€\(payRangeMax)", value: $payRangeMax, in: payRangeMin...200, step: 1)
+                            .labelsHidden()
+                        Text("€\(payRangeMax)").font(.system(size: 14, weight: .semibold))
+                    }
+                    Spacer()
+                }
+            }
+            .padding(.vertical, 4)
         }
     }
 
@@ -306,20 +331,96 @@ struct EditProfileView: View {
     // MARK: - Helpers
 
     private func prefillFromUser() {
-        firstName  = userStore.currentUser?.firstName ?? ""
-        lastName   = userStore.currentUser?.lastName ?? ""
-        email      = userStore.currentUser?.email ?? ""
-        location   = userStore.currentUser?.location ?? ""
-        bio        = userStore.currentUser?.bio ?? ""
+        guard let user = userStore.currentUser else { return }
+        firstName = user.firstName ?? ""
+        lastName  = user.lastName  ?? ""
+        email     = user.email
+        location  = user.location  ?? ""
+        bio       = user.bio       ?? ""
+        phone     = user.phone     ?? ""
+
+        if let dobStr = user.dateOfBirth,
+           let dob = ISO8601DateFormatter().date(from: dobStr) {
+            dateOfBirth = dob
+        }
+
+        if let av = user.availability, !av.isEmpty {
+            for item in av { availableDays[item.name] = item.available }
+        }
+
+        if let interests = user.jobInterests, !interests.isEmpty {
+            selectedCategories = Set(interests)
+        }
+
+        willingToRelocate   = user.willingToRelocate   ?? false
+        maxDistance         = user.maxTravelDistance   ?? 10
+        let rawTransport    = user.transport ?? ""
+        transport           = transportOptions.first { $0.lowercased() == rawTransport.lowercased() } ?? "Public Transport"
+        sameDayAvailable    = user.availableForSameDay ?? false
+
+        if let cats = user.preferredCategories, !cats.isEmpty {
+            selectedCategories = Set(cats)
+        }
+
+        if let min = user.payRangeMin { payRangeMin = Int(min) }
+        if let max = user.payRangeMax { payRangeMax = Int(max) }
+
+        if let s = user.skills {
+            communication  = s.communication
+            teamwork       = s.teamwork
+            reliability    = s.reliability
+            underPressure  = s.underPressure
+        }
+
+        workPermit = user.workAuthorization ?? false
     }
 
     private func save() async {
         isSaving = true
-        // TODO: PUT /users/:id mit aktualisierten Feldern
-        try? await Task.sleep(nanoseconds: 800_000_000)
-        await userStore.refreshMe()
-        isSaving = false
-        dismiss()
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd"
+        let dobString = fmt.string(from: dateOfBirth)
+
+        let availability = dayOrder.map { AvailabilityDTO(name: $0, available: availableDays[$0] ?? false) }
+        let skills = WorkerSkillsDTO(
+            communication: communication,
+            teamwork:      teamwork,
+            reliability:   reliability,
+            underPressure: underPressure
+        )
+
+        do {
+            var uploadedPhotoUrl: String? = nil
+            if let img = selectedImage {
+                uploadedPhotoUrl = try await APIClient.shared.uploadProfilePhoto(img)
+            }
+
+            try await APIClient.shared.updateProfile(UpdateProfileRequest(
+                firstName:           firstName.isEmpty ? nil : firstName,
+                lastName:            lastName.isEmpty  ? nil : lastName,
+                location:            location.isEmpty  ? nil : location,
+                bio:                 bio.isEmpty       ? nil : bio,
+                dateOfBirth:         dobString,
+                availability:        availability,
+                jobInterests:        Array(selectedCategories),
+                phone:               phone.isEmpty     ? nil : phone,
+                willingToRelocate:   willingToRelocate,
+                maxTravelDistance:   maxDistance,
+                transport:           transport,
+                availableForSameDay: sameDayAvailable,
+                preferredCategories: Array(selectedCategories),
+                payRangeMin:         Double(payRangeMin),
+                payRangeMax:         Double(payRangeMax),
+                skills:              skills,
+                workAuthorization:   workPermit,
+                profilePhotoUrl:     uploadedPhotoUrl
+            ))
+            await userStore.refreshMe()
+            isSaving = false
+            dismiss()
+        } catch {
+            isSaving = false
+        }
     }
 }
 

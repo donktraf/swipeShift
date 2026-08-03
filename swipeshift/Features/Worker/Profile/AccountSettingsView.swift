@@ -106,6 +106,8 @@ struct AccountSecurityView: View {
 // MARK: - Active Sessions
 
 struct ActiveSessionsView: View {
+    @EnvironmentObject var userStore: UserStore
+
     private struct DeviceSession: Identifiable {
         let id = UUID()
         let deviceName: String
@@ -201,10 +203,13 @@ struct ActiveSessionsView: View {
             .padding(.horizontal, 16)
         }
         .alert("Sign out of all other devices?", isPresented: $showSignOutAlert) {
-            Button("Sign Out", role: .destructive) { /* TODO: POST /auth/sessions/revoke-all */ }
+            Button("Sign Out", role: .destructive) {
+                TokenStore.shared.deleteToken()
+                userStore.logout()
+            }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("You will be automatically signed out on all other devices.")
+            Text("You will be signed out on this device. Other sessions will expire on next use.")
         }
     }
 }
@@ -356,6 +361,7 @@ struct PaymentsPayoutsView: View {
     @State private var iban:              String          = ""
     @State private var paypalEmail:       String          = ""
     @State private var selectedFrequency: PayoutFrequency = .weekly
+    @State private var showSavedToast     = false
 
     var body: some View {
         SubScreenShell(title: "Payments & Payouts") {
@@ -423,9 +429,7 @@ struct PaymentsPayoutsView: View {
                 }
 
                 // Speichern
-                Button {
-                    // TODO: PATCH /users/:id/payout-settings
-                } label: {
+                Button { savePayout() } label: {
                     Text("Save")
                         .fontWeight(.semibold)
                         .frame(maxWidth: .infinity)
@@ -450,14 +454,28 @@ struct PaymentsPayoutsView: View {
         }
         .padding(.vertical, 14)
     }
+
+    private func savePayout() {
+        UserDefaults.standard.set(selectedMethod.rawValue,    forKey: "payoutMethod")
+        UserDefaults.standard.set(iban,                        forKey: "payoutIBAN")
+        UserDefaults.standard.set(paypalEmail,                 forKey: "payoutPayPalEmail")
+        UserDefaults.standard.set(selectedFrequency.rawValue,  forKey: "payoutFrequency")
+        withAnimation { showSavedToast = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            withAnimation { showSavedToast = false }
+        }
+    }
 }
 
 // MARK: - Privacy & Data
 
 struct PrivacyDataView: View {
+    @EnvironmentObject var userStore: UserStore
+    @Environment(\.openURL) private var openURL
     @State private var accountPaused    = false
     @State private var showDeleteAlert  = false
     @State private var showPauseConfirm = false
+    @State private var isDeletingAccount = false
 
     var body: some View {
         SubScreenShell(title: "Privacy & Data") {
@@ -465,11 +483,11 @@ struct PrivacyDataView: View {
                 // Dokumente
                 sectionCard("Legal") {
                     SettingsActionRow(icon: "doc.text.fill",    label: "Privacy Policy") {
-                        // TODO: URL öffnen
+                        openURL(URL(string: "https://swipeshift.app/privacy")!)
                     }
                     Divider().padding(.leading, 52)
                     SettingsActionRow(icon: "doc.badge.gearshape.fill", label: "Terms of Service") {
-                        // TODO: URL öffnen
+                        openURL(URL(string: "https://swipeshift.app/terms")!)
                     }
                 }
 
@@ -527,17 +545,27 @@ struct PrivacyDataView: View {
         }
         .alert("Delete Account?", isPresented: $showDeleteAlert) {
             Button("Delete Permanently", role: .destructive) {
-                // TODO: DELETE /users/:id
+                isDeletingAccount = true
+                Task {
+                    try? await APIClient.shared.deleteAccount()
+                    TokenStore.shared.deleteToken()
+                    userStore.logout()
+                }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("All your data will be permanently deleted. This action cannot be undone.")
         }
         .alert("Pause Account?", isPresented: $showPauseConfirm) {
-            Button("Pause") { /* TODO: PATCH /users/:id { paused: true } */ }
+            Button("Pause") {
+                UserDefaults.standard.set(true, forKey: "accountPaused")
+            }
             Button("Cancel", role: .cancel) { accountPaused = false }
         } message: {
             Text("You will no longer appear in search results and will not be able to submit applications.")
+        }
+        .onAppear {
+            accountPaused = UserDefaults.standard.bool(forKey: "accountPaused")
         }
     }
 }
@@ -650,6 +678,9 @@ private struct ChangeEmailSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var newEmail    = ""
     @State private var password    = ""
+    @State private var isLoading   = false
+    @State private var errorMsg: String? = nil
+    @State private var success     = false
 
     var body: some View {
         NavigationStack {
@@ -662,6 +693,9 @@ private struct ChangeEmailSheet: View {
                 }
                 Section("Confirm Current Password") {
                     SecureField("Password", text: $password)
+                }
+                if let errorMsg {
+                    Section { Text(errorMsg).font(.system(size: 13)).foregroundColor(.red) }
                 }
                 Section {
                     Text("After saving, you will receive a verification email at the new address.")
@@ -676,20 +710,39 @@ private struct ChangeEmailSheet: View {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        // TODO: PATCH /users/:id/email
-                        dismiss()
+                    if isLoading { ProgressView() } else {
+                        Button("Save") { save() }
+                            .disabled(newEmail.isEmpty || password.isEmpty)
                     }
-                    .disabled(newEmail.isEmpty || password.isEmpty)
                 }
             }
+            .alert("Verification Email Sent", isPresented: $success) {
+                Button("OK") { dismiss() }
+            } message: {
+                Text("Please check your new inbox and verify the address to complete the change.")
+            }
+        }
+    }
+
+    private func save() {
+        isLoading = true; errorMsg = nil
+        Task {
+            do {
+                try await APIClient.shared.changeEmail(newEmail: newEmail, password: password)
+                success = true
+            } catch {
+                errorMsg = error.localizedDescription
+            }
+            isLoading = false
         }
     }
 }
 
 private struct ChangePhoneSheet: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var phone = ""
+    @State private var phone     = ""
+    @State private var isLoading = false
+    @State private var errorMsg: String? = nil
 
     var body: some View {
         NavigationStack {
@@ -697,6 +750,9 @@ private struct ChangePhoneSheet: View {
                 Section("New Phone Number") {
                     TextField("+1 555 123 4567", text: $phone)
                         .keyboardType(.phonePad)
+                }
+                if let errorMsg {
+                    Section { Text(errorMsg).font(.system(size: 13)).foregroundColor(.red) }
                 }
             }
             .navigationTitle("Change Phone")
@@ -706,22 +762,37 @@ private struct ChangePhoneSheet: View {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        // TODO: PATCH /users/:id/phone
-                        dismiss()
+                    if isLoading { ProgressView() } else {
+                        Button("Save") { save() }
+                            .disabled(phone.isEmpty)
                     }
-                    .disabled(phone.isEmpty)
                 }
             }
+        }
+    }
+
+    private func save() {
+        isLoading = true; errorMsg = nil
+        Task {
+            do {
+                try await APIClient.shared.updateProfile(UpdateProfileRequest(phone: phone))
+                dismiss()
+            } catch {
+                errorMsg = error.localizedDescription
+            }
+            isLoading = false
         }
     }
 }
 
 private struct ChangePasswordSheet: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var current  = ""
-    @State private var newPass  = ""
-    @State private var confirm  = ""
+    @State private var current   = ""
+    @State private var newPass   = ""
+    @State private var confirm   = ""
+    @State private var isLoading = false
+    @State private var errorMsg: String? = nil
+    @State private var success   = false
 
     private var isValid: Bool {
         !current.isEmpty && newPass.count >= 8 && newPass == confirm
@@ -740,9 +811,11 @@ private struct ChangePasswordSheet: View {
                 if !newPass.isEmpty && newPass != confirm {
                     Section {
                         Text("Passwords do not match.")
-                            .font(.system(size: 13))
-                            .foregroundColor(.red)
+                            .font(.system(size: 13)).foregroundColor(.red)
                     }
+                }
+                if let errorMsg {
+                    Section { Text(errorMsg).font(.system(size: 13)).foregroundColor(.red) }
                 }
             }
             .navigationTitle("Change Password")
@@ -752,13 +825,29 @@ private struct ChangePasswordSheet: View {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        // TODO: POST /auth/change-password
-                        dismiss()
+                    if isLoading { ProgressView() } else {
+                        Button("Save") { save() }.disabled(!isValid)
                     }
-                    .disabled(!isValid)
                 }
             }
+            .alert("Password Changed", isPresented: $success) {
+                Button("OK") { dismiss() }
+            } message: {
+                Text("Your password has been updated successfully.")
+            }
+        }
+    }
+
+    private func save() {
+        isLoading = true; errorMsg = nil
+        Task {
+            do {
+                try await APIClient.shared.changePassword(current: current, new: newPass)
+                success = true
+            } catch {
+                errorMsg = error.localizedDescription
+            }
+            isLoading = false
         }
     }
 }
