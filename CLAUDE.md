@@ -33,16 +33,28 @@ iOS App
 ./Features/Auth/ForgotPasswordView.swift
 ./Features/Auth/ResetPasswordView.swift
 ./Features/Auth/RoleChoiceView.swift
-./Features/Employer/EmployerHomeView.swift ← noch leer, jetzt implementieren
+./Features/Employer/EmployerHomeView.swift ← Tab-Container mit EmployerTabBar (vollstaendig implementiert)
+./Features/Employer/EmployerDashboardView.swift, PostJobView.swift, AllPostedJobsView.swift, AllApplicantsView.swift,
+  DetailedWorkerView.swift, AssignWorkersView.swift, LeaveReviewsView.swift, JobPaymentView.swift,
+  EmployerFinancialView.swift, EmployerCalendarView.swift, EditEmployerProfileView.swift, SavedApplicantsView.swift
+  ← alle implementiert, an echte Backend-Daten angebunden
 ./Features/Worker/Dashboard/WorkerHomeView.swift ← Tab-Container mit AppTabBar
 ./Features/Worker/Dashboard/WorkerHomeTabView.swift ← Home-Tab Inhalt
 ./Features/Worker/Dashboard/CategoryScrollView.swift ← Horizontales Karussell
 ./Features/Worker/Dashboard/JobSectionView.swift ← Wiederverwendbare Sektion + DashboardJobCard
 ./Features/Worker/Jobs/JobListView.swift ← Alle Jobs, Sticky Header, Suche/Sort/Filter
-./Features/Worker/Jobs/JobDetailView.swift ← Neu implementieren
-./Features/Worker/Jobs/JobSwipeView.swift
+./Features/Worker/Jobs/JobDetailView.swift ← vollstaendig implementiert
+./Features/Worker/Jobs/ApplyFlowView.swift ← Apply Flow (Schicht-Auswahl, Bestaetigung, Fehlerzustaende)
+./Features/Worker/Jobs/JobSwipeView.swift ← Redesign nach Wireframe implementiert
 ./Features/Worker/Jobs/CategoryJobListView.swift
-./Features/Worker/RadarView.swift ← MapKit implementieren
+./Features/Worker/Jobs/RadarView.swift ← MapKit implementiert (Clustering via ClusterMapView)
+./Features/Worker/Jobs/ClusterMapView.swift ← MKAnnotation-Clustering (UIViewRepresentable)
+./Features/Worker/Messages/MessagesView.swift, ChatView.swift ← Chat-System implementiert
+./Features/Worker/Notifications/NotificationsView.swift ← implementiert
+./Features/Worker/Company/CompanyProfileView.swift, EmployerRatingSheet.swift ← implementiert
+./Features/Worker/Profile/WorkerProfileView.swift ← implementiert, plus alle Sub-Screens
+  (EditProfileView, JobApplicationsView, WorkerCalendarView, FinancialOverviewView, ReviewsView,
+  SavedView, AccountSettingsView)
 ./Features/Onboarding/OnboardingRootView.swift
 ./Features/Onboarding/WorkerOnboardingView.swift
 ./Features/Onboarding/EmployerOnboardingView.swift
@@ -60,45 +72,102 @@ iOS App
 ./utils/Theme.swift ← SS.primary, SS.background(), SSPrimaryButtonStyle
 Backend
 src/
-db.js ← routes.auth.js ← routes.jobs.js ← utils/haversine.js ← middlewares/requireVerifiedEmail.js
-auth.js ← prisma/schema.prisma ← docker-compose.yml ← PostgreSQL + MailHog
-In-Memory Store für MVP (users, jobs, applies, skips, saves)
-Login, Register, Google/Apple OAuth, /me, Onboarding
-GET /jobs, GET /jobs/nearby, POST apply/skip/save
-Distanzberechnung zwischen zwei Koordinaten
-JWT requireAuth Middleware
-User-Model vorhanden, Job-Model noch NICHT erstellt
+index.js ← Express-App-Setup, Router-Registrierung
+prisma.js ← Prisma-Client-Singleton
+routes.auth.js ← Login, Register, Google/Apple OAuth, /me, Passwort aendern/setzen, Account loeschen
+routes.onboarding.js ← Onboarding-Endpunkte
+routes.jobs.js ← GET /jobs (inkl. type-/category-Filter), /jobs/nearby, /jobs/mine, /jobs/:id,
+  /jobs/:id/apply|skip|save, /jobs/:id/applicants, PATCH /jobs/:id/status
+routes.employer.js ← Applicants (accept/decline/save/unsave), Assigned Workers, Employer-Profil,
+  Employer-Kalender, Employer-Finanzen
+routes.messages.js ← Chat-System (Conversations + Messages, Polling via ?since=)
+routes.companies.js ← Company-Profil-Aggregation aus Job-/Employer-/Review-Daten
+routes.worker.js ← Saved Companies, Worker-Reviews (Employer bewerten)
+routes.notifications.js ← dynamische Benachrichtigungen (kein eigenes DB-Model)
+routes.upload.js ← Profilfoto-Upload
+routes.me.js ← PATCH /auth/me (Profil-Update)
+utils/haversine.js ← Distanzberechnung zwischen zwei Koordinaten
+utils/geocode.js ← Nominatim-Geocoding fuer POST /jobs
+middlewares/requireVerifiedEmail.js
+auth.js ← JWT requireAuth Middleware
+prisma/schema.prisma ← vollstaendiges Datenmodell (siehe unten)
+docker-compose.yml ← PostgreSQL + MailHog
+Alle Routen sind vollstaendig auf Prisma/PostgreSQL umgestellt, kein In-Memory-Store mehr aktiv.
+db.js (In-Memory-Store) wurde entfernt, da nirgends mehr aktiv referenziert.
 4. Aktueller Stand — Was funktioniert
+Hinweis: Der Grossteil der in Abschnitt 8 beschriebenen Wireframe-Screens ist mittlerweile vollstaendig
+implementiert und an echte Backend-/DB-Daten angebunden (siehe PROGRESS.md fuer die vollstaendige,
+chronologische Aenderungshistorie). Es gibt praktisch keine Mock-/Platzhalterdaten mehr in den
+Kern-Flows.
+
 Authentifizierung
 • E-Mail/Passwort Register + Login vollständig
-• Google Sign-In und Apple Sign-In funktionieren
+• Google Sign-In und Apple Sign-In funktionieren (inkl. Fix fuer GIDSignIn-URL-Handling)
 • E-Mail-Verifikationsflow funktioniert
 • isNewUser-Flag: GoogleLoginSuccessfulView erscheint nur bei neuen Social-Usern
 • Auth-Screens nutzen fullScreenCover (nicht NavigationLink)
 • ContentView-Routing: unverifiziert → Social Success → Onboarding → Home
-Worker Dashboard
-• WorkerHomeView: 5-Tab-Navigation mit eigenem AppTabBar (Home, Radar, Messages, Swipe, Profile)
-• WorkerHomeTabView: Header mit Name/Location/Bell, View-All-Button, CategoryScrollView, 5 Job-Sektionen
-als Placeholder
-• CategoryScrollView: horizontales Scrollen, weiße Kreise mit Icons
-• JobListView: Sticky Header, Suche, Sort-Sheet, Filter-Sheet, laedt alle Jobs via loadJobsAll()
-• RadarView: Jobs in der Naehe via GET /jobs/nearby, Refresh-Button, Job-Liste
-• Profile-Tab: Placeholder mit Logout-Button
+• Passwort setzen fuer Social-User, Passwort/E-Mail aendern, Account loeschen — alles ueber echte Endpunkte
+
+Worker — Dashboard, Jobs, Radar, Swipe
+• WorkerHomeView: 5-Tab-Navigation mit eigenem AppTabBar (Home, Radar, Messages, Swipe, Profile),
+  Messages-Tab zeigt Unread-Badge
+• WorkerHomeTabView: Header, View-All-Button, CategoryScrollView, 5 echte Job-Sektionen (Recommended,
+  Quick Money, Starting Soon, Popular, "Might Like") ueber Backend-Filter (?type=..., ?category=...)
+• JobListView: Sticky Header, Suche, Sort-Sheet, Filter-Sheet inkl. echtem Distanz-Filter
+• JobDetailView: vollstaendig laut Wireframe (Header, Quick-Info, Tags, Beschreibung, Aufgaben,
+  Requirements, Pay/Contract, Company-Section, "Was passiert als Naechstes")
+• ApplyFlowView: Schicht-Auswahl, Bestaetigung, alle Erfolgs-/Fehlerzustaende inkl. strukturierter
+  Backend-Fehlercodes (JOB_UNAVAILABLE, SHIFT_TAKEN, SCHEDULING_CONFLICT)
+• RadarView: MapKit mit Clustering (ClusterMapView), farbige Pins, Map-Shrink beim Scrollen,
+  Radius-Filter-Sheet, echte /jobs/nearby-Daten
+• JobSwipeView: Redesign laut Wireframe, Card-Stack mit Drag/Apply/Skip, Bookmark, Kategorie-Filter
+• CategoryJobListView: laedt direkt per Backend-Kategorie-Filter (kein Client-Filter mehr)
+• CompanyProfileView: echte Daten von GET /companies/:name inkl. Review-Breakdown, Save/Unsave
+
+Worker — Messages, Profil, Konto
+• Chat-System vollstaendig: Conversation-/Message-Modell in Prisma, MessagesView + ChatView,
+  Auto-Refresh via Polling, Read-only nach Completed/Cancelled, System-Nachrichten
+• NotificationsView: echte, dynamisch generierte Benachrichtigungen (kein eigenes DB-Model noetig)
+• WorkerProfileView + alle Sub-Screens implementiert: EditProfileView (inkl. Fotoupload),
+  JobApplicationsView, WorkerCalendarView, FinancialOverviewView (inkl. Sparziel), ReviewsView,
+  SavedView (Jobs + Companies), AccountSettingsView (Security, Notifications, Payments, Privacy, App Prefs)
+• Worker kann Employer nach Jobabschluss bewerten (EmployerRatingSheet)
+
+Employer
+• EmployerHomeView: 5-Tab-Container mit EmployerTabBar
+• EmployerDashboardView: echte Stats, Needs-Attention-Alerts, Quick Actions, Trends
+• PostJobView: vollstaendiges Formular (Schichten, Tags, Requirements, Payment/Contract), Draft/Publish
+• AllPostedJobsView, AllApplicantsView, DetailedWorkerView, AssignWorkersView (inkl. "Add Worker"-Sheet),
+  LeaveReviewsView, JobPaymentView, SavedApplicantsView, EmployerCalendarView, EmployerFinancialView,
+  EditEmployerProfileView — alle implementiert und an echte Backend-Endpunkte angebunden
+
 Backend
-• GET /jobs — alle Jobs ohne Location-Filter
-• GET /jobs/nearby?lat&lng;&radius;=100 — Radius-Filter mit Haversine-Formel
-• POST /jobs/:id/apply, /skip, /save
-• Jobs in db.js haben lat/lng Koordinaten
+• Vollstaendig auf Prisma/PostgreSQL umgestellt — kein In-Memory-Store mehr aktiv
+• Prisma-Modelle: User, Worker, Employer, Job, Apply, Skip, Save, Review, WorkerReview,
+  Conversation, Message, SavedCompany, SavedApplicant (siehe schema.prisma fuer Details)
+• GET /jobs — inkl. ?type=quickMoney|startingSoon|popular|recommended und ?category=
+• GET /jobs/nearby, /jobs/mine, /jobs/:id, /jobs/:id/applicants — implementiert
+• POST /jobs/:id/apply (mit Schicht-Auswahl + strukturierten Fehlercodes), /skip, /save
+• POST /jobs, PATCH /jobs/:id/status — Job erstellen/aktualisieren (Arbeitgeber)
+• routes.employer.js — Applicants (accept/decline/save/unsave), Assigned Workers, Kalender, Finanzen
+• routes.messages.js — Chat (GET /messages, GET /messages/:conversationId?since=, POST/PATCH)
+• routes.companies.js, routes.worker.js, routes.notifications.js — implementiert
+• Minimales Test-Setup vorhanden (node --test, siehe Abschnitt 12)
+
 5. Was noch NICHT implementiert ist
-• Messages-Tab → nur PlaceholderTabView
-• Swipe-Tab → JobSwipeView existiert, braucht Redesign laut Wireframe
-• Profile-Tab → nur Logout, kein echtes Profil
-• EmployerHomeView → leer
-• JobDetailView → muss komplett neu implementiert werden
-• RadarView → nur Liste, noch kein MapKit
-• Job-Sektionen im Dashboard zeigen alle dieselben Jobs (TODO: echte Filter)
-• Kein Prisma Job-Model (Jobs kommen aus db.js In-Memory)
-• Kein Chat-System, keine Notifications, kein Calendar, keine Finanzen
+Der ueberwiegende Teil der Wireframe-Anforderungen ist implementiert. Bekannte offene Detail-Punkte
+(siehe PROGRESS.md, TODO-Kommentare im Code):
+• Active-Sessions-Screen: einzelnes Geraet abmelden (POST /auth/sessions/:id/revoke) ist noch nicht
+  implementiert — nur "Von allen Geraeten abmelden" funktioniert (TODO-Kommentar in
+  AccountSettingsView.swift)
+• Kein XCTest-Target im Xcode-Projekt vorhanden — iOS-Unit-/UI-Tests muessen ueber Xcode
+  (File > New > Target > Unit Testing Bundle) manuell angelegt werden, siehe Abschnitt 12
+• Backend-Testabdeckung ist bewusst minimal (Smoke-Tests fuer reine Utility-Funktionen), keine
+  vollstaendige Route-/Integrationstest-Suite
+• Einige Bereiche nutzen weiterhin vereinfachte MVP-Logik statt echter Business-Regeln (z.B.
+  "recommended"-Sortierung basiert auf Worker.preferredCategories + payAmount, kein echtes Scoring;
+  Apply-Status-Feld bei manchen Flows minimal gehalten) — kein Blocker, aber erweiterbar
 6. Design System
 Alle neuen Views muessen das bestehende Design-System verwenden:
 • SS.primary → Markenfarbe (Lila/Blau)
@@ -360,75 +429,43 @@ Account Settings (Arbeitgeber)
 • Payments & Billing: Zahlungsmethode (Bank/PayPal), automatische vs. manuelle Zahlung, naechstes
 Zahlungsdatum
 • Privacy & Data, App Preferences (wie Worker)
-9. Backend-Erweiterungen
-Prisma Job-Model (wenn erstellt)
-model Job {
-// fuer Sortierung
-// Anzeige: "15 EUR / Stunde"
-// fuer "Starting Soon" Logik
-// Anzeige: "Today, 18:00-23:00"
-// published, draft, inProgress, completed, cancelled
-@default(now())
-employerId String
-id String @id @default(uuid())
-title String
-company String
-location String
-lat Float
-lng Float
-payAmount Float payText String startTime DateTime endTime DateTime
-shiftText String shortInfo String
-tags String[]
-logoEmoji String
-category String
-status String openSpots Int
-createdAt DateTime }
-Neue Endpunkte
-GET /jobs?type=quickMoney → Jobs die in <4h starten, hohe Bezahlung
-GET /jobs?type=startingSoon → Jobs die heute oder morgen starten
-GET /jobs?type=popular → Jobs mit 10+ Bewerbungen
-GET /jobs?type=recommended → Basierend auf User-Skills/Kategorien (MVP: zufaellig)
-GET /jobs?category=Hospitality → Kategorie-Filter
-GET /jobs/nearby?lat&lng&radius → Radius-Filter (bereits implementiert)
-POST /jobs/:id/apply → Bewerbung mit Schicht-Auswahl
-GET /messages → Chat-Liste
-POST /messages/:jobId → Nachricht senden
-GET /companies/:id → Unternehmens-Profil
-POST /jobs → Job erstellen (Arbeitgeber)
-PATCH /jobs/:id → Job aktualisieren
-DELETE /jobs/:id → Job stornieren
-GET /employer/applicants → Alle Bewerber
-POST /employer/applicants/:id/accept
-POST /employer/applicants/:id/decline
-10. Prioritaeten — In dieser Reihenfolge implementieren
-Prioritaet 1: Radar View (MapKit)
-• MapKit Map (45% Hoehe initial)
-• Farbige Pins (blau/orange/gruen), Clustering
-• Pin-Tippen → Job-Karte highlighten + scrollen
-• Scroll-Verhalten: Map schrumpft auf 25% beim Scrollen
-Prioritaet 2: Job Detail View
-• Vollstaendige Implementierung laut Wireframe
-• Apply-Button (sticky)
-• Company-Section mit Weiterleitung
-Prioritaet 3: Apply Flow
-• 1 Schicht: Bestaeigungs-Sheet
-• Mehrere Schichten: Schicht-Auswahl → Bestaetigung
-• Alle Erfolgs-/Fehlerzustaende
-Prioritaet 4: Messages Tab (Worker)
-• Chat-Liste mit Status-Badges und Sortierung
-• Leerzustand
-• Inside Chat Screen
-• Read-only nach Abschluss/Stornierung
-Prioritaet 5: Employer Home View
-• Dashboard mit Stats, Needs Attention, Quick Actions
-• Navigation zu allen Arbeitgeber-Screens
-Prioritaet 6: Post a New Job Screen
-• Komplexes Formular laut Wireframe
-• Save as Draft + Post Job
-Prioritaet 7: Worker Profile Screen
-• Navigations-Menue
-• Alle Sub-Screens: Edit Profile, Job Applications, Calendar, Financial Overview, Settings, Reviews, Saved
-11. Hinweise fuer Claude Code
+9. Backend-Erweiterungen (Status: erledigt)
+Das Prisma Job-Model ist erstellt und um zahlreiche Detailfelder erweitert worden (siehe
+prisma/schema.prisma fuer die vollstaendige, aktuelle Definition — inkl. Apply, Skip, Save, Review,
+WorkerReview, Conversation, Message, SavedCompany, SavedApplicant). Alle unten aufgefuehrten,
+urspruenglich geplanten Endpunkte sind implementiert (teils mit erweitertem Funktionsumfang):
+• GET /jobs?type=quickMoney|startingSoon|popular|recommended — implementiert (routes.jobs.js)
+• GET /jobs?category=Hospitality — Kategorie-Filter implementiert
+• GET /jobs/nearby?lat&lng&radius — Radius-Filter implementiert
+• POST /jobs/:id/apply — Bewerbung mit Schicht-Auswahl + strukturierten Fehlercodes implementiert
+• GET /messages, GET /messages/:conversationId?since=, POST/PATCH /messages — Chat implementiert
+• GET /companies/:name — Unternehmens-Profil implementiert (inkl. Review-Aggregation)
+• POST /jobs, PATCH /jobs/:id/status — Job erstellen/Status aendern implementiert
+• GET /employer/applicants, POST /employer/applicants/:id/accept|decline|save|unsave — implementiert
+Damit gilt Abschnitt 9 als abgeschlossen; neue Erweiterungswuensche sollten als eigene TODOs erfasst
+werden statt hier nachgetragen zu werden.
+
+10. Prioritaeten (historisch — alle abgeschlossen)
+Alle urspruenglich hier definierten Prioritaeten 1-7 (Radar View/MapKit, Job Detail View, Apply Flow,
+Messages Tab, Employer Home View, Post a New Job Screen, Worker Profile Screen) sind vollstaendig
+umgesetzt. Fuer die detaillierte Chronologie aller nachfolgenden Erweiterungen (Assign Workers,
+Financial Overview, Notifications, Saved Companies, etc.) siehe PROGRESS.md. Neue Prioritaeten sollten
+bei Bedarf hier durch das Team neu definiert werden.
+
+11. Testinfrastruktur
+Backend (swipeshift-backend/):
+• `npm test` fuehrt echte Tests aus via Node's eingebautem Test-Runner (`node --test`), keine
+  zusaetzliche Dependency noetig
+• Tests liegen unter src/**/*.test.js (aktuell: utils/haversine.test.js) — bewusst auf reine,
+  DB-freie Utility-Funktionen beschraenkt, keine vollstaendige Route-/Integrationstest-Suite
+iOS (swipeShift.xcodeproj):
+• Es existiert noch KEIN XCTest-Target im Xcode-Projekt. Das Anlegen eines Test-Targets per
+  Texteditor im project.pbxproj ist fehleranfaellig und kann die Projektdatei korrumpieren — dies
+  muss manuell in Xcode erfolgen: File > New > Target > Unit Testing Bundle (bzw. UI Testing Bundle
+  fuer UI-Tests). Danach koennen XCTest-Cases fuer Stores (UserStore, JobStore, MessageStore) und
+  DTOs ergaenzt werden.
+
+12. Hinweise fuer Claude Code
 • Zuerst alle bestehenden Dateien lesen um den aktuellen Stand zu verstehen
 • Bei unklarem Wireframe-Verhalten nachfragen bevor implementiert wird
 • Fuer jede neue Datei den Terminal-Befehl mit korrektem Zielordner angeben

@@ -34,3 +34,11 @@ npm-debug.log*
 # Environment
 .env
 .env.local
+
+# Reference assets (wireframes/mockups, not app source)
+swipeshift-mockups/
+employee-screen.pdf
+employer-screen.pdf
+
+# Claude Code local settings (per-user, not shared)
+.claude/settings.local.json

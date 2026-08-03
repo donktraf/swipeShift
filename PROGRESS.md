@@ -1,6 +1,6 @@
 # SwipeShift — iOS Frontend Progress
 
-_Zuletzt aktualisiert: 2026-04-07 (AssignWorkers echte Daten)_
+_Zuletzt aktualisiert: 2026-07-24 (Chat Auto-Refresh — B1)_
 
 ---
 
@@ -91,10 +91,10 @@ _Zuletzt aktualisiert: 2026-04-07 (AssignWorkers echte Daten)_
 |---|-----|--------|
 | 1 | Fix `POST /jobs/:id/apply` → 500 | ✅ Erledigt |
 | 2 | AssignWorkers echte Daten (Shift-Model, Endpoint, iOS) | ✅ Erledigt |
-| 3 | LeaveReviews echte Daten (Review-Model, Endpoint, iOS) | 🔜 Offen |
-| 4 | JobPayment echte Daten (Payment-Model, Endpoint, iOS) | 🔜 Offen |
-| 5 | Worker Calendar / Financials / Saved / Reviews (Backend + iOS) | 🔜 Offen |
-| 6 | Edit Profile speichern (`PATCH /auth/me` + iOS) | 🔜 Offen |
+| 3 | LeaveReviews echte Daten (Review-Model, Endpoint, iOS) | ✅ Erledigt |
+| 4 | JobPayment echte Daten (Payment-Model, Endpoint, iOS) | ✅ Erledigt |
+| 5 | Worker Calendar / Financials / Saved / Reviews (Backend + iOS) | ✅ Erledigt |
+| 6 | Edit Profile speichern (`PATCH /auth/me` + iOS) | ✅ Erledigt |
 
 ---
 
@@ -397,3 +397,237 @@ _Zuletzt aktualisiert: 2026-04-07 (AssignWorkers echte Daten)_
   - **EmployerCalJobCard**: Status-Stripe, Logo, Titel, Zeit, Standort, "X/Y"-Staffing-Anzeige
   - Mock-Daten: 8 Jobs über 2 Wochen verteilt
 - Eingehängt: Profile-Tab "Kalender" → `EmployerCalendarView`; Dashboard `navigationDestination` registriert
+
+### Employer Calendar — echte Daten (2026-06-01)
+- `src/routes.employer.js` — `GET /employer/calendar` neu:
+  - Gibt Jobs des Arbeitgebers zurück (status: published/inProgress/completed, startTime not null)
+  - Pro Job: id, title, location, logoEmoji, startTime, endTime, openSpots, assignedCount (accepted applies)
+- `Networking/APIClient.swift` — `fetchEmployerCalendar() -> [EmployerCalendarJobDTO]` ergänzt
+- `Features/Employer/EmployerCalendarView.swift` — vollständig auf echte Daten umgestellt:
+  - `EmployerCalendarJobDTO: Identifiable, Decodable` als neues Struct (oben in der Datei)
+  - `EmployerCalJob.init(dto:)` — leitet `date`, `startHour`, `durationHours`, `openSpots`, `totalSpots` aus DTO ab
+  - Mock-Jobs-Array entfernt; lädt via `APIClient.shared.fetchEmployerCalendar()` in `.task`
+  - `isLoading`-State + ProgressView während Laden
+
+### Mockup-Review — Neue Prioritätenliste (2026-05-29)
+
+Alle Mockup-Images analysiert (15 Dateien), neue Lücken identifiziert und implementiert:
+
+| # | Was | Status |
+|---|-----|--------|
+| 1 | Worker Calendar — echte Daten (mock → API) | ✅ Erledigt |
+| 2 | Notifications — echte Daten (Worker + Employer) | ✅ Erledigt |
+| 3 | Employer Saved Applicants (Save/Unsave, Liste) | ✅ Erledigt |
+| 4 | Worker Financial "Step to Target" (Einkommensziel) | ✅ Erledigt |
+
+### Worker Calendar — echte Daten
+- `Features/Worker/Profile/WorkerCalendarView.swift` — Mock-Jobs entfernt:
+  - Lädt via `APIClient.shared.fetchWorkerApplications()` in `.task`
+  - Filtert `cancelled` + `completed` heraus
+  - Konvertiert `WorkerApplicationItem` → `CalendarJob` (mit `ApplicationStatus` Mapping)
+  - Weekday-Header auf Englisch übersetzt (Mo/Di/Mi → Mo/Tu/We)
+  - "Bevorstehende Jobs" → "Upcoming Jobs"
+
+### Notifications — echte Daten
+- `src/routes.notifications.js` — neu erstellt (dynamische Notifications, kein DB-Model):
+  - **Worker**: accepted applies + reviews received + paid applies
+  - **Employer**: pending applicants + reviews to leave (completed jobs ohne Review)
+  - Sortiert nach timestamp absteigend
+- `src/index.js` — `/notifications`-Router registriert
+- `DTOs/NotificationDTO.swift` — neu: `NotificationDTO` mit id, category, title, body, timestamp
+- `Networking/APIClient.swift` — `fetchNotifications()` ergänzt
+- `Features/Worker/Notifications/NotificationsView.swift` — vollständig auf echte Daten umgestellt:
+  - `AppNotification` — `id` von `UUID` auf `String` geändert; `init(dto:)` hinzugefügt
+  - `NotificationCategory` — `.reviews` Case + `from(_ raw:)` Factory ergänzt
+  - Mock-Daten entfernt; lädt via `fetchNotifications()` in `.task`
+  - "Alle als gelesen markieren" + relative Zeitangaben auf Englisch
+
+### Employer Saved Applicants
+- `prisma/schema.prisma` — `SavedApplicant`-Model + `Apply.savedApplicant`-Relation; Migration `20260529154913_add_saved_applicant`
+- `src/routes.employer.js` — 3 neue Endpunkte:
+  - `POST /employer/applicants/:applyId/save` — Bewerber speichern (upsert)
+  - `DELETE /employer/applicants/:applyId/save` — Bewerber entfernen
+  - `GET /employer/saved-applicants` — alle gespeicherten Bewerber mit Worker+Job-Info
+- `Networking/APIClient.swift` — `saveApplicant()`, `unsaveApplicant()`, `fetchSavedApplicants()` ergänzt
+- `Features/Employer/SavedApplicantsView.swift` — neu erstellt:
+  - `SavedApplicantItem` Decodable-Struct
+  - Liste + Leerzustand + Unsave-Button per Karte
+- `Features/Employer/AllApplicantsView.swift` — Bookmark-Icon an ApplicantCard ergänzt
+- `Features/Employer/EmployerHomeView.swift` — "Saved Applicants" NavRow + `navigationDestination`
+
+### Chat Auto-Refresh (Polling) — B1 aus TODO-Audit (2026-07-24)
+- `swipeshift-backend/src/routes.messages.js` — `GET /messages/:conversationId` neu: gibt Nachrichten einer Conversation zurück; `?since=<ISO8601>` filtert auf neuere Nachrichten; Teilnehmer-Check (403 wenn nicht workerId/employerId)
+- `Networking/APIClient.swift` — `fetchMessages(conversationId:since:)` ergänzt (ISO8601-Encoding des since-Parameters)
+- `Stores/MessageStore.swift` — `refreshMessages(conversationId:isEmployerMode:)`:
+  - Letzten echten Timestamp ermitteln (optimistic-Prefix ausschließen)
+  - Nur neue Nachrichten per `since`-Filter holen
+  - Bereits bekannte IDs herausfiltern → nur wirklich neue Nachrichten appenden
+  - `appendMessages()` privater Helper aktualisiert zusätzlich `lastMessage`/`lastMessageTime`
+- `Features/Worker/Messages/ChatView.swift` — `.task(id: conversation.id)`:
+  - Startet nicht bei read-only (completed/cancelled)
+  - 10-Sekunden-Intervall via `Task.sleep(for: .seconds(10))`
+  - Task wird automatisch gecancelt wenn View verschwindet (SwiftUI structured concurrency)
+  - Neue Nachrichten erscheinen sofort durch `@Published`-Update im Store
+
+### Saved Companies (Worker) — A4 aus TODO-Audit (2026-07-24)
+- `prisma/schema.prisma` — `SavedCompany`-Model ergänzt (userId, companyName, savedAt, @@unique, Cascade-Delete); `User.savedCompanies`-Relation; Migration `20260724095918_add_saved_company` angewendet
+- `src/routes.worker.js` — 3 neue Endpoints:
+  - `GET /worker/saved-companies` — Liste mit Anreicherung (logoEmoji, rating, openJobs) via Promise.all
+  - `POST /worker/saved-companies` — upsert (idempotent)
+  - `DELETE /worker/saved-companies/:name` — URL-kodierter Name
+- `DTOs/MessageDTO.swift` — `SavedCompanyItem` Struct (id, companyName, logoEmoji, isVerified, openJobs, rating, savedAt)
+- `Networking/APIClient.swift` — `fetchSavedCompanies()`, `saveCompany(name:)`, `unsaveCompany(name:)`
+- `Features/Worker/Profile/WorkerProfileView.swift` — `SubScreenShell` um zweiten Init erweitert (`trailing: () -> T` via `AnyView`-Slot), alle bestehenden Aufrufe unverändert
+- `Features/Worker/Company/CompanyProfileView.swift` — `isSaved`/`isSaveLoading`-State; `bookmarkButton` computed prop; `load()` lädt isSaved parallel; `toggleSave()` optimistisch
+- `Features/Worker/Profile/SavedView.swift` — `savedCompanies: [SavedCompanyItem]`-State; `onChange(selectedTab)` lädt jeweils; `savedCompaniesList` + `SavedCompanyCard` (Logo, Verified, Rating, Open Jobs, Unsave-Button)
+
+### CategoryJobListView: Backend-Filter — A2 aus TODO-Audit (2026-07-24)
+- `Features/Worker/Jobs/CategoryJobListView.swift` — komplett umgeschrieben:
+  - `@EnvironmentObject var jobStore` + client-seitiger Filter entfernt
+  - Eigener `@State jobs: [Job]`, `isLoading`, `errorMessage`
+  - `.task { await load() }` ruft `APIClient.shared.fetchJobs(category: category.name)` auf → `GET /jobs?category=Hospitality`
+  - Lade- und Fehlerzustand ergänzt; Retry-Button bei Fehler
+  - `@EnvironmentObject` nicht mehr nötig (kein `jobStore`-Inject mehr erforderlich)
+
+### Profilfoto-Upload Worker — A1 aus TODO-Audit (2026-07-24)
+- `DTOs/AuthDTO.swift` — `UpdateProfileRequest` um `profilePhotoUrl: String?` ergänzt (Feld + init-Parameter)
+- `Features/Worker/Profile/EditProfileView.swift` — `save()`: wenn `selectedImage != nil`, wird erst `APIClient.shared.uploadProfilePhoto(img)` aufgerufen; zurückgegebene URL wird als `profilePhotoUrl` an `updateProfile()` übergeben
+- `swipeshift-backend/src/routes.me.js` — `PATCH /auth/me`: `profilePhotoUrl` in Destructuring + Worker-Update ergänzt; wird jetzt in `Worker`-Tabelle persistiert
+
+### Worker Financial — Step to Target
+- `Features/Worker/Profile/FinancialOverviewView.swift`:
+  - `@State incomeGoal: Double` — persistiert in `UserDefaults` (Key: `incomeGoal`, Default: 2000)
+  - `stepToTargetSection` — neuer Abschnitt zwischen Donut und Earnings:
+    - Fortschrittsbalken (blau = in progress, grün = Ziel erreicht)
+    - "€X earned" + "€X to go" / "Goal reached!" Label
+    - Bearbeitungs-Button → `GoalEditorSheet`
+  - `GoalEditorSheet` — native Form-Sheet mit DecimalPad-Eingabe + Save/Cancel
+
+### Worker bewertet Employer (2026-06-01)
+- `prisma/schema.prisma` — `WorkerReview`-Model + `Apply.workerReview`-Relation; Migration `20260601084140_add_worker_review`
+- `src/routes.worker.js` — `POST /worker/reviews`: Worker bewertet Arbeitgeber (5 Kategorien + Kommentar); upsert → idempotent
+- `src/routes.companies.js` — `GET /companies/:name` erweitert:
+  - `workerReviews` (Promise.all parallel query, max 10) inkl. Worker-Name aus User-Relation
+  - `reviewBreakdown` (Ø der 5 Kategorien + totalReviews)
+  - `rating` nutzt jetzt `overallExperience`-Ø aus WorkerReviews (Fallback: job.companyRating)
+- `DTOs/MessageDTO.swift` — `ReviewBreakdownDTO` + `WorkerReviewDTO` (mit Date); `CompanyProfileDTO` erweitert um `reviewBreakdown` + `workerReviews`
+- `Networking/APIClient.swift` — `EmployerReviewRequest` Encodable-Struct + `submitEmployerReview()` ergänzt; `fetchCompany()` nutzt ISO8601-Decoder
+- `Features/Worker/Company/EmployerRatingSheet.swift` — neu erstellt:
+  - 5 Stern-Kategorien: Communication, Payment Fairness, Work Environment, Job Description Accuracy, Overall Experience
+  - Interaktive Sterne-Buttons (1–5) mit Label (Poor/Fair/Good/Great/Excellent)
+  - Optionaler Kommentar (max 400 Zeichen, Zähler)
+  - Submit-Button disabled bis alle 5 Kategorien bewertet; Lade-State; Fehler-Anzeige
+  - Nach Erfolg: Callback + dismiss()
+- `Features/Worker/Profile/JobApplicationsView.swift` — "Leave a Review"-Button verdrahtet:
+  - `@State showRatingSheet` + `hasReviewed` pro Karte
+  - Nach Submit: Button wechselt zu "Review Submitted" (grau, disabled)
+- `Features/Worker/Company/CompanyProfileView.swift` — `ratingsSection()` komplett ersetzt:
+  - Gesamtbewertung + 5 Kategorie-Fortschrittsbalken (GeometryReader) wenn `reviewBreakdown` vorhanden
+  - Leerzustand "No reviews yet" wenn kein Rating
+  - Einzelne Review-Karten mit Avatar (Initialbuchstabe), Name, Sterne, Datum, Kommentar
+  - "View all X reviews" Toggle (max 2 initial, ausklappbar)
+
+### WorkerProfileView: echte Daten (2026-06-01)
+- `Features/Worker/Profile/WorkerProfileView.swift`:
+  - `@State rating` + `reviewCount` statt statischer Konstanten
+  - `.task` lädt `fetchWorkerReviews()` → `overallRating` + `totalJobs`
+  - Leerzustand "No reviews yet" wenn `reviewCount == 0`
+
+### AccountSettings: Backend-Endpunkte verdrahtet (2026-06-01)
+- `src/routes.auth.js` — 3 neue Endpoints:
+  - `POST /auth/change-password` — verifiziert altes Passwort, setzt neues
+  - `PATCH /auth/me/email` — verifiziert Passwort, prüft Duplikat, updated Email + schickt Verifikations-Mail
+  - `DELETE /auth/me` — löscht Account mit Cascade
+- `Networking/APIClient.swift` — `changePassword()`, `changeEmail()`, `deleteAccount()` ergänzt
+- `Features/Worker/Profile/AccountSettingsView.swift`:
+  - `ChangeEmailSheet` — loading + error state + success Alert, ruft `changeEmail()` auf
+  - `ChangePhoneSheet` — ruft `updateProfile(phone:)` auf
+  - `ChangePasswordSheet` — loading + error state + success Alert, ruft `changePassword()` auf
+  - `ActiveSessionsView` — "Sign out of all devices" löscht Token + `userStore.logout()`
+  - `PaymentsPayoutsView` — Save speichert in UserDefaults
+  - `PrivacyDataView` — Privacy Policy + Terms via `openURL`; Delete Account ruft `deleteAccount()` + logout; Pause Account via UserDefaults
+
+### EmployerDashboardView: Bell → NotificationsView (2026-06-01)
+- `Features/Employer/EmployerDashboardView.swift` — `@State showNotifications` + Bell-Button verdrahtet
+- `.sheet(isPresented: $showNotifications)` → `NavigationStack { NotificationsView() }`
+
+### JobSwipeView: Bookmark + Filter verdrahtet (2026-06-01)
+- `Networking/APIClient.swift` — `saveJob(jobId:)` ergänzt (`POST /jobs/:id/save`)
+- `Features/Worker/Jobs/JobSwipeView.swift`:
+  - Filter-Button öffnet `FilterSheet` (Kategorie-Chips); oranger Dot-Indikator bei aktivem Filter
+  - `filteredSwipeJobs` — lokaler Kategorie-Filter über `jobStore.swipeJobs`
+  - Bookmark-Button ruft `saveJob(jobId:)` auf; Icon wechselt optimistisch zu `bookmark.fill`
+  - Skip/Apply-Buttons nutzen `topJob` (filterbewusst)
+
+### ChatView: Info-Button → JobDetailView verdrahtet (2026-06-01)
+- `prisma/schema.prisma` / Backend: kein Schema-Change nötig (jobId war bereits in Apply/Conversation)
+- `src/routes.jobs.js` — `GET /jobs/:id` hinzugefügt (nach `/mine`, vor `/:id/applicants`)
+- `Models/Conversation.swift` — `jobId: String` hinzugefügt
+- `DTOs/MessageDTO.swift` — `jobId` in `toDomain()` weitergegeben
+- `Networking/APIClient.swift` — `fetchJob(jobId:)` ergänzt
+- `Features/Worker/Messages/ChatView.swift`:
+  - `@State jobDetailJob: Job?` + `loadingJobDetail: Bool`
+  - Info-Button: fetcht `GET /jobs/:id`, zeigt `ProgressView` während Laden
+  - `.sheet(item: $jobDetailJob)` → `NavigationStack { JobDetailView(job:) }`
+
+### AssignWorkers — Mitarbeiter hinzufügen (2026-06-01)
+- `src/routes.jobs.js` — `GET /jobs/:id/applicants` erweitert:
+  - `?status=` Query-Parameter-Filter (z.B. `?status=pending`)
+  - Gibt `status`, `workerName`, `profilePhotoUrl`, `rating` (aus Reviews aggregiert), `location` zurück
+- `Features/Employer/AssignWorkersView.swift` — `AddWorkerSheet` hinzugefügt:
+  - `JobApplicantDTO` + `JobApplicantsResponse` DTOs
+  - "Add Worker"-Button öffnet `AddWorkerSheet` via `.sheet`
+  - `AddWorkerSheet`: lädt pending Bewerber via `fetchPendingApplicantsForJob(jobId:)`, zeigt Avatar, Name, Rating, Standort
+  - "Assign"-Button ruft `acceptApplicant(applyId:)` auf, fügt Worker optimistisch zur Liste hinzu, entfernt Bewerber aus Sheet
+  - Schließt automatisch wenn alle Bewerber zugewiesen
+- `Networking/APIClient.swift` — `fetchPendingApplicantsForJob(jobId:)` ergänzt
+
+### C-Prios: Popular / Recommended / Apply Error Codes (2026-07-24)
+
+**C1 — "Popular This Week": Sort by Apply Count**
+- `swipeshift-backend/src/routes.jobs.js` — `popular`-Branch: `orderBy: { openSpots: "desc" }` → `orderBy: { applies: { _count: "desc" } }` (Prisma relation count sort)
+
+**C2 — "Recommended for You": Category Matching**
+- `swipeshift-backend/src/routes.jobs.js` — `recommended`-Branch:
+  - Lädt `Worker.preferredCategories` für den aktuellen User
+  - Alle Jobs nach `payAmount DESC` holen
+  - Partitioniert: matching Jobs zuerst, dann der Rest (beide Gruppen payAmount-sortiert)
+  - Kein Einfluss auf andere Typen
+
+**C3 — Apply Flow: Strukturierte Error Codes**
+- `swipeshift-backend/src/routes.jobs.js` — `POST /jobs/:id/apply`:
+  - `job.status !== "published"` → HTTP 400 `{ error: "JOB_UNAVAILABLE" }`
+  - `job.openSpots <= 0` → HTTP 409 `{ error: "SHIFT_TAKEN" }`
+  - Scheduling-Konflikt (accepted Apply für überlappende Zeit) → HTTP 409 `{ error: "SCHEDULING_CONFLICT" }`
+- `Networking/APIClient.swift` — `ApplyError` enum (shiftTaken / jobUnavailable / schedulingConflict) + `apply(jobId:)` parst HTTP-Fehlerantwort und wirft typisierten Fehler
+- `Stores/JobStore.swift` — `apply(to:)` jetzt `throws` (rethrowt `ApplyError`)
+- `Features/Worker/Jobs/ApplyFlowView.swift` — `submitApplication()`: fängt `ApplyError` und mappt auf korrekte `ApplyResult`-States (shiftAlreadyTaken / shiftUnavailable / schedulingConflict); generische Netzwerkfehler → connectionLost
+- `Features/Worker/Jobs/JobSwipeView.swift` — Swipe-Tap nutzt `try? await` (stille Fehler bei Swipe gewollt)
+
+### Employer Profilfoto-Upload — B4 aus TODO-Audit (2026-07-24)
+- `DTOs/AuthDTO.swift` — `UpdateEmployerProfileRequest` um `profilePhotoUrl: String?` ergänzt
+- `swipeshift-backend/src/routes.employer.js` — `PATCH /employer/profile`: `profilePhotoUrl` in Destructuring + `employerUpdate.companyLogoUrl = profilePhotoUrl` ergänzt (Feld existiert bereits in Prisma-Schema als `Employer.companyLogoUrl`)
+- `Features/Employer/EditEmployerProfileView.swift` — `CompanyInfoTab.save()`:
+  - Wenn `selectedLogo != nil`: `APIClient.shared.uploadProfilePhoto(img)` aufgerufen, URL zurückgegeben
+  - URL als `profilePhotoUrl` an `UpdateEmployerProfileRequest` übergeben
+  - `PersonalProfileTab.save()` übergibt `profilePhotoUrl: nil` (kein Foto-Tab dort)
+- `/me`-Response gibt `companyLogoUrl` bereits zurück → Logo erscheint nach `refreshMe()` sofort
+
+### Help & Support Buttons — B3 aus TODO-Audit (2026-07-24)
+- `Features/Worker/Profile/WorkerProfileView.swift` — `HelpSupportPlaceholderView`:
+  - `@Environment(\.openURL)` ergänzt
+  - Guide → `openURL("https://swipeshift.app/guide")`
+  - Live Chat → `openURL("mailto:support@swipeshift.app")`
+  - Terms & Conditions → `openURL("https://swipeshift.app/terms")` (konsistent mit `PrivacyDataView`)
+  - Privacy Policy → `openURL("https://swipeshift.app/privacy")` (konsistent mit `PrivacyDataView`)
+
+### JobListView: Distance Filter — B2 aus TODO-Audit (2026-07-24)
+- `Features/Worker/Jobs/JobListView.swift`:
+  - `haversineKm(lat1:lng1:lat2:lng2:)` free function — client-seitige Erdradius-Berechnung (6371 km)
+  - `JobFilterOptions.maxDistance: Double?` — TODO-Kommentar entfernt, vollständig aktiviert
+  - `hasActiveFilter` — schließt `maxDistance != nil` ein (Filter-Button leuchtet bei aktivem Distanz-Filter)
+  - `userLat` / `userLng` — computed props aus `userStore.currentUser`
+  - `distanceKm(to:)` — gibt nil wenn Koordinaten fehlen (graceful fallback)
+  - `displayedJobs` Schritt 3 — wendet `maxDistance`-Filter an; Jobs ohne Koordinaten werden eingeschlossen
+  - `displayedJobs` Schritt 5 — `.distance`-Sortierung nutzt `distanceKm(to:)` mit `.greatestFiniteMagnitude` als Fallback
+  - `FilterSheet` — Distanz-Sektion mit "Any"-Chip + 5/10/15/20/25 km Chips oberhalb der Kategorie-Chips
