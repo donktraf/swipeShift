@@ -24,6 +24,86 @@ async function getSeenJobIds(userId) {
 }
 
 // ─────────────────────────────────────────────
+// Helper: Enriches job list with employer review breakdowns + match reasons
+// ─────────────────────────────────────────────
+async function enrichJobsWithRatings(jobs, userId) {
+  if (!jobs.length) return jobs;
+
+  const employerIds = [...new Set(jobs.map((j) => j.employerId).filter(Boolean))];
+
+  const [reviews, workerProfile] = await Promise.all([
+    prisma.workerReview.findMany({
+      where: { employerId: { in: employerIds } },
+      select: {
+        employerId: true,
+        communication: true, paymentFairness: true,
+        workEnvironment: true, jobDescriptionAccuracy: true,
+        overallExperience: true,
+      },
+    }),
+    prisma.worker.findUnique({
+      where: { userId },
+      select: { preferredCategories: true, payRangeMin: true, payRangeMax: true, maxTravelDistance: true },
+    }).catch(() => null),
+  ]);
+
+  // Group reviews by employerId
+  const byEmployer = {};
+  for (const r of reviews) {
+    if (!byEmployer[r.employerId]) byEmployer[r.employerId] = [];
+    byEmployer[r.employerId].push(r);
+  }
+
+  // Compute breakdown per employer
+  const breakdownMap = {};
+  for (const [empId, revs] of Object.entries(byEmployer)) {
+    const avg = (field) => revs.reduce((s, r) => s + r[field], 0) / revs.length;
+    const comm = avg("communication");
+    const pay  = avg("paymentFairness");
+    const env  = avg("workEnvironment");
+    const desc = avg("jobDescriptionAccuracy");
+    const over = avg("overallExperience");
+    const totalAvg = (comm + pay + env + desc + over) / 5;
+
+    const tags = [];
+    if (env  >= 4.0) tags.push("Friendly Team");
+    if (pay  >= 4.0) tags.push("Fair Pay");
+    if (comm >= 4.0) tags.push("Good Communication");
+    if (over >= 4.2) tags.push("Great Experience");
+    if (desc >= 4.0) tags.push("Clear Job Description");
+
+    breakdownMap[empId] = {
+      avgRating: Math.round(totalAvg * 10) / 10,
+      totalReviews: revs.length,
+      communication: Math.round(comm * 10) / 10,
+      paymentFairness: Math.round(pay * 10) / 10,
+      workEnvironment: Math.round(env * 10) / 10,
+      jobDescriptionAccuracy: Math.round(desc * 10) / 10,
+      overallExperience: Math.round(over * 10) / 10,
+      tags: tags.slice(0, 3),
+    };
+  }
+
+  return jobs.map((job) => {
+    const bd = job.employerId ? breakdownMap[job.employerId] : null;
+
+    // Match reasons based on user preferences
+    const matchReasons = [];
+    if (workerProfile) {
+      const cats = workerProfile.preferredCategories ?? [];
+      if (job.category && cats.includes(job.category)) matchReasons.push("Matches your category preference");
+      if (workerProfile.payRangeMin != null && job.payAmount >= workerProfile.payRangeMin) matchReasons.push("Matches your pay expectations");
+      if (workerProfile.payRangeMax != null && job.payAmount <= workerProfile.payRangeMax) {/* already counted above */}
+    }
+    const now = new Date();
+    if (job.startTime && new Date(job.startTime) - now <= 24 * 3600 * 1000) matchReasons.push("Starting soon — act fast!");
+    if ((job.openSpots ?? 0) <= 2) matchReasons.push("Only a few spots left");
+
+    return { ...job, reviewBreakdown: bd, matchReasons };
+  });
+}
+
+// ─────────────────────────────────────────────
 // GET /jobs?type=quickMoney|startingSoon|popular|recommended
 //          &category=Events|Hospitality|...
 //
@@ -77,14 +157,23 @@ router.get("/", requireAuth, requireVerifiedEmail, async (req, res) => {
     } else if (type === "popular") {
       jobs = await prisma.job.findMany({
         where: baseWhere,
-        orderBy: { openSpots: "desc" },
+        orderBy: { applies: { _count: "desc" } },
       });
 
     } else if (type === "recommended") {
-      jobs = await prisma.job.findMany({
+      const worker = await prisma.worker.findUnique({
+        where: { userId },
+        select: { preferredCategories: true },
+      });
+      const preferred = worker?.preferredCategories ?? [];
+      const allJobs = await prisma.job.findMany({
         where: baseWhere,
         orderBy: { payAmount: "desc" },
       });
+      // Category matches first, then remaining — both groups sorted by payAmount already
+      const matched   = allJobs.filter(j => preferred.length > 0 && preferred.includes(j.category));
+      const unmatched = allJobs.filter(j => !matched.some(m => m.id === j.id));
+      jobs = [...matched, ...unmatched];
 
     } else {
       jobs = await prisma.job.findMany({
@@ -93,7 +182,8 @@ router.get("/", requireAuth, requireVerifiedEmail, async (req, res) => {
       });
     }
 
-    return res.json({ jobs });
+    const enriched = await enrichJobsWithRatings(jobs, userId);
+    return res.json({ jobs: enriched });
   } catch (err) {
     console.error("GET /jobs error:", err);
     return res.status(500).json({ error: "Internal server error" });
@@ -133,8 +223,9 @@ router.get("/nearby", requireAuth, requireVerifiedEmail, async (req, res) => {
 
     console.log(`Found ${nearbyJobs.length} jobs within ${radius}km of (${lat}, ${lng})`);
 
+    const enrichedNearby = await enrichJobsWithRatings(nearbyJobs, userId);
     return res.json({
-      jobs: nearbyJobs,
+      jobs: enrichedNearby,
       meta: { lat, lng, radius, total: nearbyJobs.length },
     });
   } catch (err) {
@@ -228,9 +319,34 @@ router.post("/:id/apply", requireAuth, requireVerifiedEmail, async (req, res) =>
 
     const job = await prisma.job.findUnique({
       where: { id: jobId },
-      select: { id: true, title: true, employerId: true },
+      select: { id: true, title: true, employerId: true, status: true, openSpots: true, startTime: true, endTime: true },
     });
     if (!job) return res.status(404).json({ error: "Job not found" });
+
+    // Job muss published sein
+    if (job.status !== "published") {
+      return res.status(400).json({ error: "JOB_UNAVAILABLE" });
+    }
+
+    // Keine offenen Stellen mehr
+    if (job.openSpots != null && job.openSpots <= 0) {
+      return res.status(409).json({ error: "SHIFT_TAKEN" });
+    }
+
+    // Scheduling-Konflikt: Worker hat bereits einen angenommenen Job zur gleichen Zeit
+    if (job.startTime && job.endTime) {
+      const conflict = await prisma.apply.findFirst({
+        where: {
+          userId,
+          status: "accepted",
+          job: {
+            startTime: { lt: job.endTime },
+            endTime:   { gt: job.startTime },
+          },
+        },
+      });
+      if (conflict) return res.status(409).json({ error: "SCHEDULING_CONFLICT" });
+    }
 
     // Apply + Conversation in einer Transaktion
     const result = await prisma.$transaction(async (tx) => {
@@ -321,6 +437,21 @@ router.post("/:id/save", requireAuth, requireVerifiedEmail, async (req, res) => 
 });
 
 // ─────────────────────────────────────────────
+// DELETE /jobs/:id/save
+// ─────────────────────────────────────────────
+router.delete("/:id/save", requireAuth, requireVerifiedEmail, async (req, res) => {
+  try {
+    const userId = req.auth.sub;
+    const jobId  = req.params.id;
+    await prisma.save.deleteMany({ where: { userId, jobId } });
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("DELETE /jobs/:id/save error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─────────────────────────────────────────────
 // GET /jobs/mine — alle Jobs des eingeloggten Arbeitgebers
 // ─────────────────────────────────────────────
 router.get("/mine", requireAuth, requireVerifiedEmail, async (req, res) => {
@@ -380,6 +511,23 @@ router.patch("/:id/status", requireAuth, requireVerifiedEmail, async (req, res) 
 });
 
 // ─────────────────────────────────────────────
+// GET /jobs/:id — Single job detail
+// ─────────────────────────────────────────────
+router.get("/:id", requireAuth, requireVerifiedEmail, async (req, res) => {
+  const { id } = req.params;
+  const userId  = req.auth.sub;
+  try {
+    const job = await prisma.job.findUnique({ where: { id } });
+    if (!job) return res.status(404).json({ error: "Job not found" });
+    const [enriched] = await enrichJobsWithRatings([job], userId);
+    return res.json({ job: enriched });
+  } catch (err) {
+    console.error("GET /jobs/:id error:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ─────────────────────────────────────────────
 // GET /jobs/:id/applicants — Bewerber für einen Job
 // ─────────────────────────────────────────────
 router.get("/:id/applicants", requireAuth, requireVerifiedEmail, async (req, res) => {
@@ -391,29 +539,54 @@ router.get("/:id/applicants", requireAuth, requireVerifiedEmail, async (req, res
     if (!job)                        return res.status(404).json({ error: "Job not found" });
     if (job.employerId !== employerId) return res.status(403).json({ error: "Forbidden" });
 
+    const statusFilter = req.query.status; // optional: "pending" | "accepted" | "declined"
+
     const applies = await prisma.apply.findMany({
-      where: { jobId },
-      orderBy: { createdAt: "desc" },
-      include: {
-        // Worker-Profildaten aus User-Tabelle
-        job: false,
+      where: {
+        jobId,
+        ...(statusFilter ? { status: statusFilter } : {}),
       },
+      orderBy: { createdAt: "desc" },
     });
 
-    // User-Daten für jeden Bewerber laden
     const userIds = applies.map((a) => a.userId);
     const users   = await prisma.user.findMany({
       where: { id: { in: userIds } },
-      select: { id: true, firstName: true, lastName: true, location: true, lat: true, lng: true },
+      select: {
+        id: true, firstName: true, lastName: true, location: true,
+        worker: { select: { profilePhotoUrl: true } },
+      },
     });
     const userMap = Object.fromEntries(users.map((u) => [u.id, u]));
 
-    const applicants = applies.map((a) => ({
-      applyId:   a.id,
-      userId:    a.userId,
-      appliedAt: a.createdAt,
-      user:      userMap[a.userId] ?? null,
-    }));
+    // Ratings pro Worker aggregieren
+    const reviews = await prisma.review.findMany({
+      where: { workerId: { in: userIds } },
+      select: { workerId: true, communication: true, teamwork: true, reliability: true, underPressure: true },
+    });
+    const ratingMap = {};
+    for (const r of reviews) {
+      const avg = (r.communication + r.teamwork + r.reliability + r.underPressure) / 4;
+      if (!ratingMap[r.workerId]) ratingMap[r.workerId] = { sum: 0, count: 0 };
+      ratingMap[r.workerId].sum   += avg;
+      ratingMap[r.workerId].count += 1;
+    }
+
+    const applicants = applies.map((a) => {
+      const u = userMap[a.userId];
+      const r = ratingMap[a.userId];
+      const name = [u?.firstName, u?.lastName].filter(Boolean).join(" ") || "Unknown";
+      return {
+        applyId:         a.id,
+        userId:          a.userId,
+        status:          a.status,
+        appliedAt:       a.createdAt,
+        workerName:      name,
+        profilePhotoUrl: u?.worker?.profilePhotoUrl ?? null,
+        rating:          r ? Math.round((r.sum / r.count) * 10) / 10 : 0,
+        location:        u?.location ?? null,
+      };
+    });
 
     return res.json({ applicants });
   } catch (err) {

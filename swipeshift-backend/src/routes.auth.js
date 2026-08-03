@@ -3,7 +3,6 @@ const express = require("express");
 const bcrypt = require("bcrypt");
 const { z } = require("zod");
 const { v4: uuid } = require("uuid");
-// const { users } = require("./db");
 const { signToken } = require("./auth");
 const { prisma } = require("./prisma.js");
 const crypto = require("crypto");
@@ -760,6 +759,65 @@ router.post("/resend-verification", mailLimiter, async (req, res) => {
 // MARK: - Set Password (für Social-Login-User die noch kein Passwort haben)
 const setPasswordSchema = z.object({
   newPassword: z.string().min(8, "Password must be at least 8 characters"),
+});
+
+// POST /auth/change-password
+router.post("/change-password", requireAuth, async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+  if (!currentPassword || !newPassword) return res.status(400).json({ error: "Missing fields" });
+  if (newPassword.length < 8) return res.status(400).json({ error: "Password must be at least 8 characters" });
+
+  const userId = req.auth.sub;
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { passwordHash: true } });
+  if (!user || !user.passwordHash || user.passwordHash === "SOCIAL_LOGIN")
+    return res.status(400).json({ error: "No password set on this account" });
+
+  const valid = await bcrypt.compare(currentPassword, user.passwordHash);
+  if (!valid) return res.status(401).json({ error: "Current password is incorrect" });
+
+  const hash = await bcrypt.hash(newPassword, 12);
+  await prisma.user.update({ where: { id: userId }, data: { passwordHash: hash } });
+  return res.json({ ok: true });
+});
+
+// PATCH /auth/me/email
+router.patch("/me/email", requireAuth, async (req, res) => {
+  const { newEmail, password } = req.body;
+  if (!newEmail || !password) return res.status(400).json({ error: "Missing fields" });
+
+  const userId = req.auth.sub;
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { passwordHash: true } });
+  if (!user || !user.passwordHash || user.passwordHash === "SOCIAL_LOGIN")
+    return res.status(400).json({ error: "No password set on this account" });
+
+  const valid = await bcrypt.compare(password, user.passwordHash);
+  if (!valid) return res.status(401).json({ error: "Password is incorrect" });
+
+  const existing = await prisma.user.findUnique({ where: { email: newEmail } });
+  if (existing) return res.status(409).json({ error: "Email already in use" });
+
+  const crypto = require("crypto");
+  const rawToken = crypto.randomBytes(32).toString("hex");
+  await prisma.user.update({
+    where: { id: userId },
+    data: { email: newEmail, emailVerifiedAt: null, verificationToken: rawToken },
+  });
+
+  const verifyLink = buildVerifyLink(newEmail, rawToken);
+  await sendVerificationEmail(newEmail, verifyLink);
+  return res.json({ ok: true });
+});
+
+// DELETE /auth/me
+router.delete("/me", requireAuth, async (req, res) => {
+  const userId = req.auth.sub;
+  try {
+    await prisma.user.delete({ where: { id: userId } });
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("DELETE /auth/me error:", err);
+    return res.status(500).json({ error: "Could not delete account" });
+  }
 });
 
 router.post("/set-password", requireAuth, async (req, res) => {

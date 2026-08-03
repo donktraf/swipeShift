@@ -1,0 +1,139 @@
+const express = require("express");
+const router = express.Router();
+const { requireAuth } = require("./auth");
+const { prisma } = require("./prisma");
+
+// GET /notifications — dynamic notifications from existing DB data
+router.get("/", requireAuth, async (req, res) => {
+  const userId = req.auth.sub;
+  const userRole = req.auth.role;
+  const notifications = [];
+
+  try {
+    if (userRole === "worker") {
+      // 1. Accepted applications → "You got the job!"
+      const accepted = await prisma.apply.findMany({
+        where: { userId, status: "accepted" },
+        include: { job: { select: { title: true, company: true } } },
+        orderBy: { createdAt: "desc" },
+        take: 10,
+      });
+      for (const a of accepted) {
+        notifications.push({
+          id: `accepted-${a.id}`,
+          category: "jobActivity",
+          title: "Application accepted!",
+          body: `Congrats! You got the job at ${a.job.company} — ${a.job.title}`,
+          timestamp: a.createdAt,
+          actionLabel: "View Job",
+          actionPayload: { jobId: a.jobId },
+        });
+      }
+
+      // 2. Reviews received
+      const reviews = await prisma.review.findMany({
+        where: { workerId: userId },
+        include: { apply: { include: { job: { select: { title: true, company: true } } } } },
+        orderBy: { createdAt: "desc" },
+        take: 10,
+      });
+      for (const r of reviews) {
+        notifications.push({
+          id: `review-${r.id}`,
+          category: "reviews",
+          title: "New review received",
+          body: `You received a review for your last job at ${r.apply.job.company}`,
+          timestamp: r.createdAt,
+          actionLabel: null,
+          actionPayload: null,
+        });
+      }
+
+      // 3. Completed jobs without worker review (nudge to leave review — for workers this is inverse)
+      // Workers don't leave reviews in MVP; skip.
+
+      // 4. Payment received (isPaid flipped)
+      const paid = await prisma.apply.findMany({
+        where: { userId, isPaid: true },
+        include: { job: { select: { title: true, company: true, payAmount: true } } },
+        orderBy: { createdAt: "desc" },
+        take: 10,
+      });
+      for (const p of paid) {
+        notifications.push({
+          id: `paid-${p.id}`,
+          category: "payments",
+          title: "Payment received",
+          body: `Money for ${p.job.title} at ${p.job.company} was sent to your account`,
+          timestamp: p.createdAt,
+          actionLabel: null,
+          actionPayload: null,
+        });
+      }
+    } else if (userRole === "employer") {
+      // 1. New pending applicants
+      const applicants = await prisma.apply.findMany({
+        where: {
+          job: { employerId: userId },
+          status: "pending",
+        },
+        include: {
+          user: { select: { firstName: true, lastName: true } },
+          job: { select: { title: true } },
+        },
+        orderBy: { createdAt: "desc" },
+        take: 10,
+      });
+      for (const a of applicants) {
+        const name = [a.user.firstName, a.user.lastName].filter(Boolean).join(" ") || "Someone";
+        notifications.push({
+          id: `applicant-${a.id}`,
+          category: "jobActivity",
+          title: "New applicant",
+          body: `${name} applied for your job: ${a.job.title}`,
+          timestamp: a.createdAt,
+          actionLabel: "View Applicant",
+          actionPayload: { applyId: a.id },
+        });
+      }
+
+      // 2. Reviews to leave (accepted workers with completed jobs, no review yet)
+      const needsReview = await prisma.apply.findMany({
+        where: {
+          job: { employerId: userId, status: "completed" },
+          status: "accepted",
+          review: null,
+        },
+        include: {
+          user: { select: { firstName: true, lastName: true } },
+          job: { select: { title: true } },
+        },
+        orderBy: { createdAt: "desc" },
+        take: 10,
+      });
+      for (const a of needsReview) {
+        const name = [a.user.firstName, a.user.lastName].filter(Boolean).join(" ") || "Worker";
+        notifications.push({
+          id: `review-due-${a.id}`,
+          category: "reviews",
+          title: "Please review your worker",
+          body: `Leave a review for ${name} — ${a.job.title}`,
+          timestamp: a.createdAt,
+          actionLabel: null,
+          actionPayload: null,
+        });
+      }
+
+      // 3. Reviews received from workers (future feature placeholder — skip for now)
+    }
+
+    // Sort all by timestamp descending
+    notifications.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    res.json(notifications);
+  } catch (err) {
+    console.error("GET /notifications error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+module.exports = router;

@@ -11,8 +11,9 @@ router.get("/:name", async (req, res) => {
   try {
     const companyName = decodeURIComponent(req.params.name);
 
-    // Alle Jobs dieses Unternehmens
-    const jobs = await prisma.job.findMany({
+    // Alle Jobs + Worker-Reviews für dieses Unternehmen parallel laden
+    const [jobs, workerReviews] = await Promise.all([
+    prisma.job.findMany({
       where:   { company: { equals: companyName, mode: "insensitive" } },
       select:  {
         id: true, title: true, category: true, location: true,
@@ -21,7 +22,21 @@ router.get("/:name", async (req, res) => {
         isVerified: true, tags: true, startTime: true, employerId: true,
       },
       orderBy: { createdAt: "desc" },
-    });
+    }),
+    // Worker-Reviews werden nach employerId gefiltert (nach jobs.load)
+    prisma.workerReview.findMany({
+      where:   { apply: { job: { company: { equals: companyName, mode: "insensitive" } } } },
+      include: {
+        apply: {
+          include: {
+            user: { select: { firstName: true, lastName: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+    }),
+    ]);
 
     if (!jobs.length) return res.status(404).json({ error: "Company not found" });
 
@@ -40,12 +55,37 @@ router.get("/:name", async (req, res) => {
     }
 
     // Aggregierte Werte
-    const activeJobs       = jobs.filter(j => j.status === "published").length;
+    const activeJobs         = jobs.filter(j => j.status === "published").length;
     const completedJobsCount = jobs.filter(j => j.status === "completed").length;
-    const ratings          = jobs.map(j => j.companyRating).filter(Boolean);
-    const avgRating        = ratings.length
-      ? Math.round((ratings.reduce((s, r) => s + r, 0) / ratings.length) * 10) / 10
-      : null;
+
+    // Rating: Worker-Reviews bevorzugt, sonst Job-companyRating als Fallback
+    const avg = (arr) => arr.length ? Math.round((arr.reduce((s, v) => s + v, 0) / arr.length) * 10) / 10 : null;
+    const avgRating = workerReviews.length
+      ? avg(workerReviews.map(r => r.overallExperience))
+      : avg(jobs.map(j => j.companyRating).filter(Boolean));
+
+    // Review-Breakdown
+    const reviewBreakdown = workerReviews.length ? {
+      communication:          avg(workerReviews.map(r => r.communication)),
+      paymentFairness:        avg(workerReviews.map(r => r.paymentFairness)),
+      workEnvironment:        avg(workerReviews.map(r => r.workEnvironment)),
+      jobDescriptionAccuracy: avg(workerReviews.map(r => r.jobDescriptionAccuracy)),
+      overallExperience:      avg(workerReviews.map(r => r.overallExperience)),
+      totalReviews:           workerReviews.length,
+    } : null;
+
+    // Einzelne Worker-Reviews (max 10)
+    const reviewsList = workerReviews.slice(0, 10).map(r => ({
+      id:                    r.id,
+      workerName:            r.apply?.user ? `${r.apply.user.firstName} ${r.apply.user.lastName}` : "Anonymous",
+      communication:          r.communication,
+      paymentFairness:        r.paymentFairness,
+      workEnvironment:        r.workEnvironment,
+      jobDescriptionAccuracy: r.jobDescriptionAccuracy,
+      overallExperience:      r.overallExperience,
+      comment:               r.comment ?? null,
+      createdAt:             r.createdAt,
+    }));
 
     // Kategorien
     const categories = [...new Set(jobs.map(j => j.category).filter(Boolean))];
@@ -75,6 +115,8 @@ router.get("/:name", async (req, res) => {
           id: j.id, title: j.title, payText: j.payText,
           shiftText: j.shiftText, category: j.category,
         })),
+      reviewBreakdown,
+      workerReviews: reviewsList,
     });
   } catch (err) {
     console.error("GET /companies/:name error:", err);

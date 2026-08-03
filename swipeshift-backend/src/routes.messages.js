@@ -34,6 +34,7 @@ function formatConversation(conv, currentUserId) {
 
   return {
     id:              conv.id,
+    applyId:         conv.applyId,
     jobId:           job.id,
     jobTitle:        job.title,
     company:         isWorker
@@ -164,6 +165,47 @@ router.post("/:conversationId", requireAuth, async (req, res) => {
     timestamp:     message.createdAt,
     isSystemMessage: false,
   });
+});
+
+// ─── GET /messages/:conversationId ──────────────────────────────────────────
+// Gibt einzelne Nachrichten zurück. ?since=<ISO8601> liefert nur neue Nachrichten.
+router.get("/:conversationId", requireAuth, async (req, res) => {
+  try {
+    const userId             = req.auth.sub;
+    const { conversationId } = req.params;
+    const { since }          = req.query;
+
+    const conv = await prisma.conversation.findUnique({
+      where:  { id: conversationId },
+      select: { workerId: true, employerId: true },
+    });
+
+    if (!conv) return res.status(404).json({ error: "Conversation not found" });
+    if (conv.workerId !== userId && conv.employerId !== userId) {
+      return res.status(403).json({ error: "Not a participant" });
+    }
+
+    const messages = await prisma.message.findMany({
+      where: {
+        conversationId,
+        ...(since ? { createdAt: { gt: new Date(since) } } : {}),
+      },
+      orderBy: { createdAt: "asc" },
+    });
+
+    return res.json({
+      messages: messages.map(m => ({
+        id:              m.id,
+        text:            m.text,
+        isFromUser:      m.senderId === userId,
+        timestamp:       m.createdAt,
+        isSystemMessage: m.isSystem,
+      })),
+    });
+  } catch (err) {
+    console.error("GET /messages/:conversationId error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 // ─── PATCH /messages/:conversationId/read ────────────────────────────────────

@@ -13,15 +13,18 @@ const jobsRoutes      = require("./routes.jobs.js");
 const meRoutes        = require("./routes.me.js");
 const onboardingRoutes = require("./routes.onboarding");
 const employerRoutes   = require("./routes.employer");
-const messagesRoutes   = require("./routes.messages");
-const companiesRoutes  = require("./routes.companies");
+const workerRoutes     = require("./routes.worker");
+const messagesRoutes        = require("./routes.messages");
+const companiesRoutes       = require("./routes.companies");
+const notificationsRoutes   = require("./routes.notifications");
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+// Muss mit uploadDir in routes.upload.js übereinstimmen (Projekt-Root/uploads, nicht src/uploads)
+app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
 app.use("/uploads", uploadsRoutes);
 
 // Healthcheck
@@ -33,8 +36,10 @@ app.use("/auth",      authRoutes);
 app.use("/jobs",      jobsRoutes);
 app.use("/onboarding", onboardingRoutes);
 app.use("/employer",  employerRoutes);
-app.use("/messages",  messagesRoutes);
-app.use("/companies", companiesRoutes);
+app.use("/worker",    workerRoutes);
+app.use("/messages",       messagesRoutes);
+app.use("/companies",      companiesRoutes);
+app.use("/notifications",  notificationsRoutes);
 
 const PORT = process.env.PORT || 3000;
 

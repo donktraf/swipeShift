@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test $(find src -name '*.test.js')"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.2.0",

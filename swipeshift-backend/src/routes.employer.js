@@ -341,4 +341,450 @@ router.get("/assigned-workers", requireAuth, requireVerifiedEmail, async (req, r
   }
 });
 
+// ─────────────────────────────────────────────
+// GET /employer/jobs/:jobId/payments
+// Alle akzeptierten Worker für diesen Job mit Zahlungsstatus
+// ─────────────────────────────────────────────
+router.get("/jobs/:jobId/payments", requireAuth, requireVerifiedEmail, async (req, res) => {
+  try {
+    const employerId = req.auth.sub;
+    const { jobId }  = req.params;
+
+    const job = await prisma.job.findUnique({
+      where:  { id: jobId },
+      select: { id: true, title: true, employerId: true, payAmount: true, startTime: true, endTime: true, logoEmoji: true },
+    });
+
+    if (!job)                              return res.status(404).json({ error: "Job not found" });
+    if (job.employerId !== employerId)     return res.status(403).json({ error: "Forbidden" });
+
+    const applies = await prisma.apply.findMany({
+      where:   { jobId, status: "accepted" },
+      include: { user: { select: { id: true, firstName: true, lastName: true } } },
+      orderBy: { createdAt: "asc" },
+    });
+
+    const hourlyRate  = job.payAmount ?? 0;
+    const hoursWorked = job.startTime && job.endTime
+      ? Math.round(((new Date(job.endTime) - new Date(job.startTime)) / 3_600_000) * 10) / 10
+      : 8;
+
+    const shiftLabel = job.startTime
+      ? new Date(job.startTime).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+      : "—";
+
+    const workers = applies.map((a) => ({
+      id:          a.id,
+      name:        `${a.user?.firstName ?? ""} ${a.user?.lastName ?? ""}`.trim() || "Unknown",
+      avatarEmoji: "👤",
+      jobTitle:    job.title,
+      shiftDate:   shiftLabel,
+      hoursWorked,
+      hourlyRate,
+      isPaid:      a.isPaid,
+    }));
+
+    return res.json({ workers });
+  } catch (err) {
+    console.error("GET /employer/jobs/:id/payments error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─────────────────────────────────────────────
+// POST /employer/jobs/:jobId/workers/:applyId/pay
+// Einzelnen Worker als bezahlt markieren
+// ─────────────────────────────────────────────
+router.post("/jobs/:jobId/workers/:applyId/pay", requireAuth, requireVerifiedEmail, async (req, res) => {
+  try {
+    const employerId = req.auth.sub;
+    const { jobId, applyId } = req.params;
+
+    const apply = await prisma.apply.findUnique({
+      where:   { id: applyId },
+      include: { job: { select: { employerId: true } } },
+    });
+
+    if (!apply)                              return res.status(404).json({ error: "Application not found" });
+    if (apply.jobId !== jobId)               return res.status(400).json({ error: "Apply does not belong to this job" });
+    if (apply.job.employerId !== employerId) return res.status(403).json({ error: "Forbidden" });
+
+    await prisma.apply.update({ where: { id: applyId }, data: { isPaid: true } });
+    return res.json({ ok: true, applyId });
+  } catch (err) {
+    console.error("POST /employer/jobs/:jobId/workers/:applyId/pay error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─────────────────────────────────────────────
+// POST /employer/jobs/:jobId/pay-all
+// Alle Worker eines Jobs als bezahlt markieren
+// ─────────────────────────────────────────────
+router.post("/jobs/:jobId/pay-all", requireAuth, requireVerifiedEmail, async (req, res) => {
+  try {
+    const employerId = req.auth.sub;
+    const { jobId }  = req.params;
+
+    const job = await prisma.job.findUnique({
+      where:  { id: jobId },
+      select: { employerId: true },
+    });
+
+    if (!job)                          return res.status(404).json({ error: "Job not found" });
+    if (job.employerId !== employerId) return res.status(403).json({ error: "Forbidden" });
+
+    const { count } = await prisma.apply.updateMany({
+      where: { jobId, status: "accepted" },
+      data:  { isPaid: true },
+    });
+
+    return res.json({ ok: true, updatedCount: count });
+  } catch (err) {
+    console.error("POST /employer/jobs/:jobId/pay-all error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─────────────────────────────────────────────
+// GET /employer/reviews/pending
+// Akzeptierte Worker ohne Bewertung
+// ─────────────────────────────────────────────
+router.get("/reviews/pending", requireAuth, requireVerifiedEmail, async (req, res) => {
+  try {
+    const employerId = req.auth.sub;
+
+    const applies = await prisma.apply.findMany({
+      where: {
+        status: "accepted",
+        job:    { employerId },
+        review: null,
+      },
+      include: {
+        user: { select: { id: true, firstName: true, lastName: true } },
+        job:  { select: { id: true, title: true, category: true, startTime: true, logoEmoji: true } },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    const pending = applies.map((a) => ({
+      applyId:     a.id,
+      workerId:    a.userId,
+      workerName:  `${a.user?.firstName ?? ""} ${a.user?.lastName ?? ""}`.trim() || "Unknown Worker",
+      workerPhoto: null,
+      jobId:       a.jobId,
+      jobTitle:    a.job?.title    ?? "—",
+      jobCategory: a.job?.category ?? "—",
+      shiftDate:   a.job?.startTime ?? a.createdAt,
+      logoEmoji:   a.job?.logoEmoji ?? "🏢",
+    }));
+
+    return res.json({ pending });
+  } catch (err) {
+    console.error("GET /employer/reviews/pending error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─────────────────────────────────────────────
+// POST /employer/reviews
+// Bewertung einreichen
+// ─────────────────────────────────────────────
+router.post("/reviews", requireAuth, requireVerifiedEmail, async (req, res) => {
+  try {
+    const employerId = req.auth.sub;
+    const { applyId, communication, teamwork, reliability, underPressure, comment, wouldRehire } = req.body;
+
+    if (!applyId || !communication || !teamwork || !reliability || !underPressure) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    const apply = await prisma.apply.findUnique({
+      where:   { id: applyId },
+      include: { job: { select: { employerId: true } } },
+    });
+
+    if (!apply)                              return res.status(404).json({ error: "Application not found" });
+    if (apply.job.employerId !== employerId) return res.status(403).json({ error: "Forbidden" });
+
+    const review = await prisma.review.create({
+      data: {
+        employerId,
+        workerId:     apply.userId,
+        jobId:        apply.jobId,
+        applyId,
+        communication: Number(communication),
+        teamwork:      Number(teamwork),
+        reliability:   Number(reliability),
+        underPressure: Number(underPressure),
+        comment:       comment ?? null,
+        wouldRehire:   wouldRehire ?? true,
+      },
+    });
+
+    return res.json({ ok: true, review });
+  } catch (err) {
+    console.error("POST /employer/reviews error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─────────────────────────────────────────────
+// GET /employer/reviews
+// Alle abgegebenen Bewertungen des Arbeitgebers
+// ─────────────────────────────────────────────
+router.get("/reviews", requireAuth, requireVerifiedEmail, async (req, res) => {
+  try {
+    const employerId = req.auth.sub;
+
+    const reviews = await prisma.review.findMany({
+      where:   { employerId },
+      include: {
+        apply: {
+          include: {
+            user: { select: { id: true, firstName: true, lastName: true } },
+            job:  { select: { id: true, title: true, category: true, startTime: true, logoEmoji: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    const result = reviews.map((r) => ({
+      id:            r.id,
+      workerName:    `${r.apply.user?.firstName ?? ""} ${r.apply.user?.lastName ?? ""}`.trim() || "Unknown",
+      workerPhoto:   null,
+      jobTitle:      r.apply.job?.title    ?? "—",
+      jobCategory:   r.apply.job?.category ?? "—",
+      logoEmoji:     r.apply.job?.logoEmoji ?? "🏢",
+      shiftDate:     r.apply.job?.startTime ?? r.createdAt,
+      communication: r.communication,
+      teamwork:      r.teamwork,
+      reliability:   r.reliability,
+      underPressure: r.underPressure,
+      comment:       r.comment,
+      wouldRehire:   r.wouldRehire,
+      createdAt:     r.createdAt,
+    }));
+
+    return res.json({ reviews: result });
+  } catch (err) {
+    console.error("GET /employer/reviews error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─────────────────────────────────────────────
+// POST /employer/applicants/:applyId/save
+// Bewerber als gespeichert markieren
+// ─────────────────────────────────────────────
+router.post("/applicants/:applyId/save", requireAuth, requireVerifiedEmail, async (req, res) => {
+  try {
+    const employerId = req.auth.sub;
+    const { applyId } = req.params;
+
+    const saved = await prisma.savedApplicant.upsert({
+      where:  { applyId },
+      create: { employerId, applyId },
+      update: {},
+    });
+
+    return res.json({ saved });
+  } catch (err) {
+    console.error("POST /employer/applicants/:applyId/save error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─────────────────────────────────────────────
+// DELETE /employer/applicants/:applyId/save
+// Gespeicherten Bewerber entfernen
+// ─────────────────────────────────────────────
+router.delete("/applicants/:applyId/save", requireAuth, requireVerifiedEmail, async (req, res) => {
+  try {
+    const employerId = req.auth.sub;
+    const { applyId } = req.params;
+
+    await prisma.savedApplicant.deleteMany({
+      where: { employerId, applyId },
+    });
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("DELETE /employer/applicants/:applyId/save error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─────────────────────────────────────────────
+// GET /employer/saved-applicants
+// Alle gespeicherten Bewerber des Arbeitgebers
+// ─────────────────────────────────────────────
+router.get("/saved-applicants", requireAuth, requireVerifiedEmail, async (req, res) => {
+  try {
+    const employerId = req.auth.sub;
+
+    const saved = await prisma.savedApplicant.findMany({
+      where:   { employerId },
+      include: {
+        apply: {
+          include: {
+            user: {
+              select: {
+                id: true, firstName: true, lastName: true,
+                worker: { select: { profilePhotoUrl: true, bio: true, jobInterests: true } },
+              },
+            },
+            job: {
+              select: { id: true, title: true, company: true, category: true,
+                        logoEmoji: true, location: true, startTime: true, payText: true },
+            },
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    const result = saved.map((s) => ({
+      savedId:    s.id,
+      applyId:    s.applyId,
+      savedAt:    s.createdAt,
+      workerName: `${s.apply.user?.firstName ?? ""} ${s.apply.user?.lastName ?? ""}`.trim() || "Unknown",
+      workerPhoto: s.apply.user?.worker?.profilePhotoUrl ?? null,
+      bio:         s.apply.user?.worker?.bio ?? null,
+      jobInterests: s.apply.user?.worker?.jobInterests ?? [],
+      applyStatus: s.apply.status,
+      jobId:       s.apply.job?.id ?? "",
+      jobTitle:    s.apply.job?.title ?? "—",
+      company:     s.apply.job?.company ?? "—",
+      logoEmoji:   s.apply.job?.logoEmoji ?? "🏢",
+      location:    s.apply.job?.location ?? "—",
+      shiftDate:   s.apply.job?.startTime ?? null,
+      payText:     s.apply.job?.payText ?? "—",
+    }));
+
+    return res.json(result);
+  } catch (err) {
+    console.error("GET /employer/saved-applicants error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─────────────────────────────────────────────
+// GET /employer/calendar
+// Alle Jobs des Arbeitgebers mit Schicht-Zeiten + Staffing-Zahlen
+// ─────────────────────────────────────────────
+router.get("/calendar", requireAuth, requireVerifiedEmail, async (req, res) => {
+  try {
+    const employerId = req.auth.sub;
+
+    const jobs = await prisma.job.findMany({
+      where: {
+        employerId,
+        status: { in: ["published", "inProgress", "completed"] },
+        startTime: { not: null },
+      },
+      select: {
+        id: true,
+        title: true,
+        location: true,
+        logoEmoji: true,
+        startTime: true,
+        endTime: true,
+        openSpots: true,
+        status: true,
+        applies: {
+          where: { status: "accepted" },
+          select: { id: true },
+        },
+      },
+      orderBy: { startTime: "asc" },
+    });
+
+    const result = jobs.map((j) => ({
+      id:            j.id,
+      title:         j.title,
+      location:      j.location,
+      logoEmoji:     j.logoEmoji ?? "🏢",
+      startTime:     j.startTime,
+      endTime:       j.endTime,
+      openSpots:     j.openSpots ?? 1,
+      assignedCount: j.applies.length,
+      status:        j.status,
+    }));
+
+    return res.json(result);
+  } catch (err) {
+    console.error("GET /employer/calendar error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─────────────────────────────────────────────
+// PATCH /employer/profile
+// Speichert Company Info Tab + Your Profile Tab
+// ─────────────────────────────────────────────
+router.patch("/profile", requireAuth, async (req, res) => {
+  try {
+    const userId = req.auth.sub;
+
+    const {
+      // Company Info
+      companyName, companySize, companyPhone, companyEmail,
+      businessAreas, locations, primaryHiringLocation,
+      companyBio, website, teamMembers, profilePhotoUrl,
+      // Your Profile
+      firstName, lastName, jobTitle, managerRole,
+    } = req.body;
+
+    // User-Felder
+    const userUpdate = {};
+    if (firstName !== undefined) userUpdate.firstName = firstName;
+    if (lastName  !== undefined) userUpdate.lastName  = lastName;
+    if (Object.keys(userUpdate).length > 0) {
+      await prisma.user.update({ where: { id: userId }, data: userUpdate });
+    }
+
+    // Employer-Felder
+    const employerUpdate = {};
+    if (companyName           !== undefined) employerUpdate.companyName           = companyName;
+    if (companySize           !== undefined) employerUpdate.companySize           = companySize;
+    if (companyPhone          !== undefined) employerUpdate.companyPhone          = companyPhone ?? null;
+    if (companyEmail          !== undefined) employerUpdate.companyEmail          = companyEmail ?? null;
+    if (businessAreas         !== undefined) {
+      employerUpdate.businessAreas = businessAreas ?? [];
+      employerUpdate.industry = Array.isArray(businessAreas) && businessAreas.length > 0
+        ? businessAreas.join(", ")
+        : "";
+    }
+    if (locations             !== undefined) employerUpdate.locations             = locations ?? [];
+    if (primaryHiringLocation !== undefined) employerUpdate.primaryHiringLocation = primaryHiringLocation ?? null;
+    if (companyBio            !== undefined) employerUpdate.companyDescription    = companyBio ?? null;
+    if (website               !== undefined) employerUpdate.websiteOrInstagram    = website ?? null;
+    if (teamMembers           !== undefined) employerUpdate.teamMembers           = teamMembers ?? null;
+    if (jobTitle              !== undefined) employerUpdate.jobTitle              = jobTitle ?? null;
+    if (managerRole           !== undefined) employerUpdate.managerRole           = managerRole ?? null;
+    if (profilePhotoUrl       !== undefined) employerUpdate.companyLogoUrl        = profilePhotoUrl ?? null;
+
+    if (Object.keys(employerUpdate).length > 0) {
+      await prisma.employer.upsert({
+        where:  { userId },
+        update: employerUpdate,
+        create: {
+          userId,
+          companyName:  employerUpdate.companyName  ?? "",
+          companySize:  employerUpdate.companySize  ?? "1-10",
+          industry:     employerUpdate.industry     ?? "",
+          ...employerUpdate,
+        },
+      });
+    }
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("PATCH /employer/profile error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 module.exports = router;

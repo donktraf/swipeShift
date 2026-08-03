@@ -42,6 +42,7 @@ model User {
   passwordResetTokens PasswordResetToken[]
   emailVerificationTokens EmailVerificationToken[]
   applies Apply[]
+  savedCompanies SavedCompany[]
 }
 
 model Worker {
@@ -55,6 +56,17 @@ model Worker {
 
   jobInterests Json
   availability Json
+
+  phone               String?
+  willingToRelocate   Boolean  @default(false)
+  maxTravelDistance   Int      @default(10)
+  transport           String   @default("car")
+  availableForSameDay Boolean  @default(false)
+  preferredCategories String[]
+  payRangeMin         Float?
+  payRangeMax         Float?
+  skills              Json?
+  workAuthorization   Boolean  @default(false)
 
   createdAt DateTime @default(now())
 }
@@ -71,6 +83,15 @@ model Employer {
   companyLogoUrl     String?
   websiteOrInstagram String?
   companyDescription String? @db.Text
+
+  companyPhone            String?
+  companyEmail            String?
+  businessAreas           String[]
+  locations               String[]
+  primaryHiringLocation   String?
+  teamMembers             Json?
+  jobTitle                String?
+  managerRole             String?
 }
 
 model PasswordResetToken {
@@ -159,14 +180,62 @@ model Apply {
   userId    String
   jobId     String
   status    String   @default("pending") // pending, accepted, declined
+  isPaid    Boolean  @default(false)
   createdAt DateTime @default(now())
 
-  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  job          Job           @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  conversation Conversation?
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  job            Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  conversation   Conversation?
+  review         Review?
+  savedApplicant SavedApplicant?
+  workerReview   WorkerReview?
 
   @@unique([userId, jobId])
   @@index([userId])
+  @@index([jobId])
+}
+
+model Review {
+  id           String   @id @default(uuid())
+  employerId   String
+  workerId     String
+  jobId        String
+  applyId      String   @unique
+
+  communication Int
+  teamwork      Int
+  reliability   Int
+  underPressure Int
+  comment       String?  @db.Text
+  wouldRehire   Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+
+  apply Apply @relation(fields: [applyId], references: [id], onDelete: Cascade)
+
+  @@index([employerId])
+  @@index([workerId])
+  @@index([jobId])
+}
+
+model WorkerReview {
+  id                     String   @id @default(uuid())
+  applyId                String   @unique
+  employerId             String
+  workerId               String
+  jobId                  String
+  communication          Int
+  paymentFairness        Int
+  workEnvironment        Int
+  jobDescriptionAccuracy Int
+  overallExperience      Int
+  comment                String?  @db.Text
+  createdAt              DateTime @default(now())
+
+  apply Apply @relation(fields: [applyId], references: [id], onDelete: Cascade)
+
+  @@index([employerId])
+  @@index([workerId])
   @@index([jobId])
 }
 
@@ -228,4 +297,30 @@ model Save {
   @@unique([userId, jobId])
   @@index([userId])
   @@index([jobId])
+}
+
+// Worker bookmarks a company for later reference
+model SavedCompany {
+  id          String   @id @default(uuid())
+  userId      String
+  companyName String
+  savedAt     DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, companyName])
+  @@index([userId])
+}
+
+// Employer bookmarks a worker (Apply) for later review
+model SavedApplicant {
+  id         String   @id @default(uuid())
+  employerId String
+  applyId    String   @unique
+  createdAt  DateTime @default(now())
+
+  apply Apply @relation(fields: [applyId], references: [id], onDelete: Cascade)
+
+  @@unique([employerId, applyId])
+  @@index([employerId])
 }
