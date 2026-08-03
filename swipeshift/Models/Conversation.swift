@@ -6,7 +6,7 @@
 import Foundation
 
 // MARK: - Conversation Status
-enum ConversationStatus {
+enum ConversationStatus: String {
     case today      // Job ist heute (nächste 24h) → blaue Pill
     case upcoming   // Zukünftiger Job → grüne Pill
     case completed  // Abgeschlossener Job → weiße Pill
@@ -35,6 +35,8 @@ enum ConversationStatus {
 // MARK: - Conversation
 struct Conversation: Identifiable {
     let id: String
+    let applyId: String
+    let jobId: String
     let jobTitle: String
     let company: String
     let logoEmoji: String

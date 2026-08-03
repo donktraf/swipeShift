@@ -9,6 +9,7 @@ import Foundation
 
 struct ConversationDTO: Decodable, Identifiable {
     let id:              String
+    let applyId:         String
     let jobId:           String
     let jobTitle:        String
     let company:         String      // Worker: company name; Employer: worker name
@@ -23,6 +24,8 @@ struct ConversationDTO: Decodable, Identifiable {
     func toDomain() -> Conversation {
         Conversation(
             id:              id,
+            applyId:         applyId,
+            jobId:           jobId,
             jobTitle:        jobTitle,
             company:         company,
             logoEmoji:       logoEmoji,
@@ -59,20 +62,22 @@ struct ChatMessageDTO: Decodable, Identifiable {
 // MARK: - Company Profile
 
 struct CompanyProfileDTO: Decodable {
-    let name:           String
-    let logoEmoji:      String
-    let isVerified:     Bool
-    let rating:         Double?
-    let completedJobs:  Int
-    let activeJobs:     Int
-    let businessAreas:  [String]
-    let locations:      [String]
-    let replyTime:      String?
-    let about:          String?
-    let website:        String?
-    let industry:       String?
-    let companySize:    String?
-    let openJobs:       [CompanyOpenJobDTO]
+    let name:             String
+    let logoEmoji:        String
+    let isVerified:       Bool
+    let rating:           Double?
+    let completedJobs:    Int
+    let activeJobs:       Int
+    let businessAreas:    [String]
+    let locations:        [String]
+    let replyTime:        String?
+    let about:            String?
+    let website:          String?
+    let industry:         String?
+    let companySize:      String?
+    let openJobs:         [CompanyOpenJobDTO]
+    let reviewBreakdown:  ReviewBreakdownDTO?
+    let workerReviews:    [WorkerReviewDTO]?
 }
 
 struct CompanyOpenJobDTO: Decodable, Identifiable {
@@ -81,6 +86,39 @@ struct CompanyOpenJobDTO: Decodable, Identifiable {
     let payText:   String
     let shiftText: String
     let category:  String?
+}
+
+struct ReviewBreakdownDTO: Decodable {
+    let communication:          Double
+    let paymentFairness:        Double
+    let workEnvironment:        Double
+    let jobDescriptionAccuracy: Double
+    let overallExperience:      Double
+    let totalReviews:           Int
+}
+
+struct WorkerReviewDTO: Identifiable, Decodable {
+    let id:                     String
+    let workerName:             String
+    let communication:          Int
+    let paymentFairness:        Int
+    let workEnvironment:        Int
+    let jobDescriptionAccuracy: Int
+    let overallExperience:      Int
+    let comment:                String?
+    let createdAt:              Date
+}
+
+// MARK: - Saved Company
+
+struct SavedCompanyItem: Identifiable, Decodable {
+    let id:          String
+    let companyName: String
+    let logoEmoji:   String
+    let isVerified:  Bool
+    let openJobs:    Int
+    let rating:      Double?
+    let savedAt:     Date
 }
 
 // MARK: - Employer Financials

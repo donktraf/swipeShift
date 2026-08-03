@@ -44,6 +44,15 @@ final class JobStore: ObservableObject {
     /// Wenn `nil`, werden keine Jobs geladen.
     @Published var selectedLocation: String?
 
+    /// IDs der vom Worker gespeicherten (gebookmarkten) Jobs.
+    /// Wird zentral hier gehalten, damit `DashboardJobCard` an allen
+    /// Verwendungsstellen (Dashboard-Sektionen, JobListView) denselben
+    /// Saved-Status anzeigt und togglen kann.
+    @Published var savedJobIds: Set<String> = []
+
+    /// Verhindert wiederholtes Neuladen der Saved-IDs bei jedem `.task`-Aufruf.
+    private var hasLoadedSavedJobIds = false
+
     // MARK: - Loading
 
     /// Lädt Jobs vom Backend basierend auf `selectedLocation`.
@@ -140,6 +149,30 @@ final class JobStore: ObservableObject {
         }
     }
 
+    /// Lädt die IDs der gespeicherten Jobs einmalig vom Backend.
+    /// Wird von `WorkerHomeTabView` und `JobListView` aufgerufen, damit
+    /// `DashboardJobCard` den echten Bookmark-Status anzeigen kann.
+    @MainActor
+    func loadSavedJobIds() async {
+        guard !hasLoadedSavedJobIds else { return }
+        hasLoadedSavedJobIds = true
+        if let saved = try? await APIClient.shared.fetchWorkerSaved() {
+            savedJobIds = Set(saved.map { $0.jobId })
+        }
+    }
+
+    /// Speichert/entspeichert einen Job und aktualisiert den lokalen Status optimistisch.
+    @MainActor
+    func toggleSaveJob(_ jobId: String) async {
+        if savedJobIds.contains(jobId) {
+            savedJobIds.remove(jobId)
+            try? await APIClient.shared.unsaveJob(jobId: jobId)
+        } else {
+            savedJobIds.insert(jobId)
+            try? await APIClient.shared.saveJob(jobId: jobId)
+        }
+    }
+
     // MARK: - Actions (Swipe)
 
     /// Skippt einen Job (nicht interessiert).
@@ -159,15 +192,10 @@ final class JobStore: ObservableObject {
     /// Bewirbt sich auf einen Job.
     /// Entfernt nur aus swipeJobs — Radar, Dashboard und andere Bereiche bleiben unberührt.
     @MainActor
-    func apply(to job: Job) async {
+    func apply(to job: Job) async throws {
         errorMessage = nil
-        do {
-            try await APIClient.shared.apply(jobId: job.id)
-            swipeJobs.removeAll { $0.id == job.id }
-        } catch {
-            errorMessage = error.localizedDescription
-            print("apply error:", error.localizedDescription)
-        }
+        try await APIClient.shared.apply(jobId: job.id)
+        swipeJobs.removeAll { $0.id == job.id }
     }
 
     // MARK: - Helper

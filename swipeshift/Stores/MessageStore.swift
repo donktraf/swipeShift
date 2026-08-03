@@ -98,6 +98,45 @@ final class MessageStore: ObservableObject {
         }
     }
 
+    // MARK: - Polling (neue Nachrichten seit letzter bekannter Nachricht)
+
+    func refreshMessages(conversationId: String, isEmployerMode: Bool) async {
+        let list = isEmployerMode ? employerConversations : conversations
+        guard let conv = list.first(where: { $0.id == conversationId }) else { return }
+
+        // Nur optimistische Nachrichten haben kein Server-Timestamp — wir nutzen das echte letzte
+        let since = conv.messages
+            .filter { !$0.id.hasPrefix("optimistic-") }
+            .max(by: { $0.timestamp < $1.timestamp })?.timestamp
+
+        do {
+            let dtos = try await APIClient.shared.fetchMessages(conversationId: conversationId, since: since)
+            let newMessages = dtos.map { $0.toDomain() }
+            guard !newMessages.isEmpty else { return }
+
+            let knownIds = Set(conv.messages.map(\.id))
+            let incoming = newMessages.filter { !knownIds.contains($0.id) }
+            guard !incoming.isEmpty else { return }
+
+            if isEmployerMode {
+                appendMessages(&employerConversations, conversationId: conversationId, messages: incoming)
+            } else {
+                appendMessages(&conversations, conversationId: conversationId, messages: incoming)
+            }
+        } catch {
+            // Polling-Fehler still ignorieren — nächster Zyklus versucht es erneut
+        }
+    }
+
+    private func appendMessages(_ list: inout [Conversation], conversationId: String, messages: [ChatMessage]) {
+        guard let idx = list.firstIndex(where: { $0.id == conversationId }) else { return }
+        list[idx].messages.append(contentsOf: messages)
+        if let last = messages.last {
+            list[idx].lastMessage     = last.text
+            list[idx].lastMessageTime = last.timestamp
+        }
+    }
+
     // MARK: - Helpers
 
     private func update(_ list: inout [Conversation], id: String, mutation: (inout Conversation) -> Void) {

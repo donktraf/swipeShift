@@ -54,4 +54,17 @@ struct Job: Identifiable, Equatable {
     let replyTime: String?          // z.B. "Antwortet meist innerhalb von 2 Stunden"
     let isVerified: Bool?
     let shifts: [JobShift]?     // nil oder 1 Eintrag = single-shift, 2+ = multi-shift
+    let reviewBreakdown: JobReviewSummary?
+    let matchReasons: [String]
+}
+
+struct JobReviewSummary: Equatable {
+    let avgRating: Double
+    let totalReviews: Int
+    let communication: Double
+    let paymentFairness: Double
+    let workEnvironment: Double
+    let jobDescriptionAccuracy: Double
+    let overallExperience: Double
+    let tags: [String]
 }

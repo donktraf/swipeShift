@@ -9,6 +9,12 @@ import Foundation
 import UIKit
 import Combine
 
+enum ApplyError: Error {
+    case shiftTaken
+    case jobUnavailable
+    case schedulingConflict
+}
+
 // Einfacher API-Client fürs MVP (später: Error-Typen, Refresh-Token, etc.)
 final class APIClient {
     static let shared = APIClient()
@@ -47,9 +53,29 @@ final class APIClient {
     }
 
     // MARK: - Calls
+    func fetchJob(jobId: String) async throws -> Job {
+        let req = try makeRequest(path: "/jobs/\(jobId)", method: "GET")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+        struct R: Decodable { let job: JobDTO }
+        return try JSONDecoder().decode(R.self, from: data).job.toDomain()
+    }
+
     func apply(jobId: String) async throws {
         let req = try makeRequest(path: "/jobs/\(jobId)/apply", method: "POST")
-        _ = try await URLSession.shared.data(for: req)
+        let (data, response) = try await URLSession.shared.data(for: req)
+        if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+            if let body = try? JSONDecoder().decode([String: String].self, from: data),
+               let code = body["error"] {
+                switch code {
+                case "SHIFT_TAKEN":          throw ApplyError.shiftTaken
+                case "JOB_UNAVAILABLE":      throw ApplyError.jobUnavailable
+                case "SCHEDULING_CONFLICT":  throw ApplyError.schedulingConflict
+                default: break
+                }
+            }
+            throw URLError(.badServerResponse)
+        }
     }
 
     func skip(jobId: String) async throws {
@@ -250,6 +276,28 @@ final class APIClient {
         req.httpBody = try JSONEncoder().encode(["newPassword": newPassword])
         let (data, response) = try await URLSession.shared.data(for: req)
         try validate(response: response, data: data)
+    }
+
+    func changePassword(current: String, new: String) async throws {
+        var req = try makeRequest(path: "/auth/change-password", method: "POST")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONEncoder().encode(["currentPassword": current, "newPassword": new])
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+    }
+
+    func changeEmail(newEmail: String, password: String) async throws {
+        var req = try makeRequest(path: "/auth/me/email", method: "PATCH")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONEncoder().encode(["newEmail": newEmail, "password": password])
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+    }
+
+    func deleteAccount() async throws {
+        let req = try makeRequest(path: "/auth/me", method: "DELETE")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
     }
 
 
@@ -602,6 +650,22 @@ final class APIClient {
         return try decoder.decode(ChatMessageDTO.self, from: data)
     }
 
+    func fetchMessages(conversationId: String, since: Date? = nil) async throws -> [ChatMessageDTO] {
+        var path = "/messages/\(conversationId)"
+        if let since {
+            let iso = ISO8601DateFormatter().string(from: since)
+            let encoded = iso.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? iso
+            path += "?since=\(encoded)"
+        }
+        let req = try makeRequest(path: path, method: "GET")
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try validate(response: response, data: data)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        struct Wrapper: Decodable { let messages: [ChatMessageDTO] }
+        return try decoder.decode(Wrapper.self, from: data).messages
+    }
+
     func markConversationRead(conversationId: String) async throws {
         let req = try makeRequest(path: "/messages/\(conversationId)/read", method: "PATCH")
         let (data, response) = try await URLSession.shared.data(for: req)
@@ -615,7 +679,26 @@ final class APIClient {
         let req = try makeRequest(path: "/companies/\(encoded)", method: "GET")
         let (data, response) = try await URLSession.shared.data(for: req)
         try validate(response: response, data: data)
-        return try JSONDecoder().decode(CompanyProfileDTO.self, from: data)
+        let dec = JSONDecoder()
+        dec.dateDecodingStrategy = .iso8601
+        return try dec.decode(CompanyProfileDTO.self, from: data)
+    }
+
+    struct EmployerReviewRequest: Encodable {
+        let applyId:                String
+        let communication:          Int
+        let paymentFairness:        Int
+        let workEnvironment:        Int
+        let jobDescriptionAccuracy: Int
+        let overallExperience:      Int
+        let comment:                String?
+    }
+
+    func submitEmployerReview(_ request: EmployerReviewRequest) async throws {
+        var req = try makeRequest(path: "/worker/reviews", method: "POST")
+        req.httpBody = try JSONEncoder().encode(request)
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
     }
 
     // MARK: - Employer Financials
@@ -625,6 +708,199 @@ final class APIClient {
         let (data, response) = try await URLSession.shared.data(for: req)
         try validate(response: response, data: data)
         return try JSONDecoder().decode(EmployerFinancialsDTO.self, from: data)
+    }
+
+    // MARK: - Update Profile
+
+    func updateProfile(_ request: UpdateProfileRequest) async throws {
+        var req = try makeRequest(path: "/auth/me", method: "PATCH")
+        req.httpBody = try JSONEncoder().encode(request)
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+    }
+
+    func updateEmployerProfile(_ request: UpdateEmployerProfileRequest) async throws {
+        var req = try makeRequest(path: "/employer/profile", method: "PATCH")
+        req.httpBody = try JSONEncoder().encode(request)
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+    }
+
+    // MARK: - Worker Profile Data
+
+    func fetchWorkerApplications() async throws -> [WorkerApplicationItem] {
+        let req = try makeRequest(path: "/worker/applications", method: "GET")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+        struct W: Decodable { let applications: [WorkerApplicationItem] }
+        let dec = JSONDecoder(); dec.dateDecodingStrategy = .iso8601
+        return try dec.decode(W.self, from: data).applications
+    }
+
+    func withdrawApplication(applyId: String) async throws {
+        let req = try makeRequest(path: "/worker/applications/\(applyId)", method: "DELETE")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+    }
+
+    func fetchWorkerSaved() async throws -> [WorkerSavedJob] {
+        let req = try makeRequest(path: "/worker/saved", method: "GET")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+        struct W: Decodable { let saved: [WorkerSavedJob] }
+        let dec = JSONDecoder(); dec.dateDecodingStrategy = .iso8601
+        return try dec.decode(W.self, from: data).saved
+    }
+
+    func fetchSavedCompanies() async throws -> [SavedCompanyItem] {
+        let req = try makeRequest(path: "/worker/saved-companies", method: "GET")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+        struct W: Decodable { let savedCompanies: [SavedCompanyItem] }
+        let dec = JSONDecoder(); dec.dateDecodingStrategy = .iso8601
+        return try dec.decode(W.self, from: data).savedCompanies
+    }
+
+    func saveCompany(name: String) async throws {
+        var req = try makeRequest(path: "/worker/saved-companies", method: "POST")
+        struct Body: Encodable { let companyName: String }
+        req.httpBody = try JSONEncoder().encode(Body(companyName: name))
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+    }
+
+    func unsaveCompany(name: String) async throws {
+        let encoded = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
+        let req = try makeRequest(path: "/worker/saved-companies/\(encoded)", method: "DELETE")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+    }
+
+    func fetchWorkerReviews() async throws -> WorkerReviewsResponse {
+        let req = try makeRequest(path: "/worker/reviews", method: "GET")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+        let dec = JSONDecoder(); dec.dateDecodingStrategy = .iso8601
+        return try dec.decode(WorkerReviewsResponse.self, from: data)
+    }
+
+    func fetchWorkerFinancials(period: String = "thisMonth") async throws -> WorkerFinancialsDTO {
+        let req = try makeRequest(path: "/worker/financials?period=\(period)", method: "GET")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+        return try JSONDecoder().decode(WorkerFinancialsDTO.self, from: data)
+    }
+
+    func saveJob(jobId: String) async throws {
+        let req = try makeRequest(path: "/jobs/\(jobId)/save", method: "POST")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+    }
+
+    func unsaveJob(jobId: String) async throws {
+        let req = try makeRequest(path: "/jobs/\(jobId)/save", method: "DELETE")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+    }
+
+    // MARK: - Job Payments
+
+    func fetchJobPayments(jobId: String) async throws -> [PayableWorker] {
+        let req = try makeRequest(path: "/employer/jobs/\(jobId)/payments", method: "GET")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+        struct W: Decodable { let workers: [PayableWorker] }
+        return try JSONDecoder().decode(W.self, from: data).workers
+    }
+
+    func payWorker(jobId: String, applyId: String) async throws {
+        let req = try makeRequest(path: "/employer/jobs/\(jobId)/workers/\(applyId)/pay", method: "POST")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+    }
+
+    func payAllWorkers(jobId: String) async throws {
+        let req = try makeRequest(path: "/employer/jobs/\(jobId)/pay-all", method: "POST")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+    }
+
+    // MARK: - Employer Reviews
+
+    func fetchPendingReviews() async throws -> [PendingReviewItem] {
+        let req = try makeRequest(path: "/employer/reviews/pending", method: "GET")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+        struct W: Decodable { let pending: [PendingReviewItem] }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(W.self, from: data).pending
+    }
+
+    func fetchPastReviews() async throws -> [PastReviewItem] {
+        let req = try makeRequest(path: "/employer/reviews", method: "GET")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+        struct W: Decodable { let reviews: [PastReviewItem] }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(W.self, from: data).reviews
+    }
+
+    func submitReview(_ request: SubmitReviewRequest) async throws {
+        var req = try makeRequest(path: "/employer/reviews", method: "POST")
+        req.httpBody = try JSONEncoder().encode(request)
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+    }
+
+    func fetchNotifications() async throws -> [NotificationDTO] {
+        let req = try makeRequest(path: "/notifications", method: "GET")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode([NotificationDTO].self, from: data)
+    }
+
+    func saveApplicant(applyId: String) async throws {
+        let req = try makeRequest(path: "/employer/applicants/\(applyId)/save", method: "POST")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+    }
+
+    func unsaveApplicant(applyId: String) async throws {
+        let req = try makeRequest(path: "/employer/applicants/\(applyId)/save", method: "DELETE")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+    }
+
+    func fetchSavedApplicants() async throws -> [SavedApplicantItem] {
+        let req = try makeRequest(path: "/employer/saved-applicants", method: "GET")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode([SavedApplicantItem].self, from: data)
+    }
+
+    func fetchEmployerCalendar() async throws -> [EmployerCalendarJobDTO] {
+        let req = try makeRequest(path: "/employer/calendar", method: "GET")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode([EmployerCalendarJobDTO].self, from: data)
+    }
+
+    func fetchPendingApplicantsForJob(jobId: String) async throws -> [JobApplicantDTO] {
+        let req = try makeRequest(path: "/jobs/\(jobId)/applicants?status=pending", method: "GET")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let wrapper = try decoder.decode(JobApplicantsResponse.self, from: data)
+        return wrapper.applicants
     }
 }
 

@@ -9,14 +9,14 @@ import Foundation
 
 // DTO = so wie es aus dem Backend kommt (Decodable)
 struct ShiftDTO: Decodable {
-    let id: String
+    let id: String?
     let date: String
     let timeRange: String
     let duration: String
     let totalPay: String
 
     func toDomain() -> JobShift {
-        JobShift(id: id, date: date, timeRange: timeRange, duration: duration, totalPay: totalPay)
+        JobShift(id: id ?? UUID().uuidString, date: date, timeRange: timeRange, duration: duration, totalPay: totalPay)
     }
 }
 
@@ -51,6 +51,19 @@ struct JobDTO: Decodable, Identifiable {
     let replyTime: String?
     let isVerified: Bool?
     let shifts: [ShiftDTO]?
+    let reviewBreakdown: JobReviewBreakdownDTO?
+    let matchReasons: [String]?
+}
+
+struct JobReviewBreakdownDTO: Decodable {
+    let avgRating: Double
+    let totalReviews: Int
+    let communication: Double
+    let paymentFairness: Double
+    let workEnvironment: Double
+    let jobDescriptionAccuracy: Double
+    let overallExperience: Double
+    let tags: [String]
 }
 
 extension JobDTO {
@@ -69,7 +82,17 @@ extension JobDTO {
             languages: languages, experienceLevel: experienceLevel, minAge: minAge,
             paymentMethod: paymentMethod, contractType: contractType,
             companyRating: companyRating, replyTime: replyTime, isVerified: isVerified,
-            shifts: shifts?.map { $0.toDomain() }
+            shifts: shifts?.map { $0.toDomain() },
+            reviewBreakdown: reviewBreakdown.map {
+                JobReviewSummary(
+                    avgRating: $0.avgRating, totalReviews: $0.totalReviews,
+                    communication: $0.communication, paymentFairness: $0.paymentFairness,
+                    workEnvironment: $0.workEnvironment,
+                    jobDescriptionAccuracy: $0.jobDescriptionAccuracy,
+                    overallExperience: $0.overallExperience, tags: $0.tags
+                )
+            },
+            matchReasons: matchReasons ?? []
         )
     }
 }
