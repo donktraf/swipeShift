@@ -401,9 +401,9 @@ private struct RadarJobCard: View {
         }
         .padding(12)
         .background(Color.white)
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: SS.cardRadius, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: SS.cardRadius, style: .continuous)
                 .stroke(
                     isHighlighted ? SS.primary : Color.gray.opacity(0.12),
                     lineWidth: isHighlighted ? 2 : 1

@@ -122,8 +122,10 @@ struct ChatView: View {
 
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 6) {
-                    // Employer: worker name; Worker: company name
-                    Text(isEmployerMode ? conversation.company : conversation.company)
+                    // `company` wird serverseitig (routes.messages.js) je nach Rolle bereits
+                    // mit dem richtigen Anzeigenamen befuellt (Worker: company name; Employer:
+                    // worker name) — keine clientseitige Fallunterscheidung noetig.
+                    Text(conversation.company)
                         .font(.system(size: 16, weight: .semibold))
                     StatusBadge(status: conversation.status)
                 }

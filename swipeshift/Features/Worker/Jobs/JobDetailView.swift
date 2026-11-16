@@ -46,10 +46,17 @@ struct JobDetailView: View {
             await jobStore.loadSavedJobIds()
         }
         .sheet(isPresented: $showApplySheet) {
-            ApplyFlowView(job: job, onSuccess: {
-                showApplySheet = false
-                dismiss()
-            })
+            ApplyFlowView(
+                job: job,
+                onSuccess: {
+                    showApplySheet = false
+                    dismiss()
+                },
+                onExitToJobList: {
+                    showApplySheet = false
+                    dismiss()
+                }
+            )
             .environmentObject(jobStore)
         }
     }
@@ -257,7 +264,7 @@ struct JobDetailView: View {
                 }
             }
             .background(Color(uiColor: .secondarySystemGroupedBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .clipShape(RoundedRectangle(cornerRadius: SS.cardRadius))
         }
     }
 
@@ -276,7 +283,7 @@ struct JobDetailView: View {
                 }
             }
             .background(Color(uiColor: .secondarySystemGroupedBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .clipShape(RoundedRectangle(cornerRadius: SS.cardRadius))
         }
     }
 
@@ -329,7 +336,7 @@ struct JobDetailView: View {
             }
             .padding(12)
             .background(Color(uiColor: .secondarySystemGroupedBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .clipShape(RoundedRectangle(cornerRadius: SS.cardRadius))
             .overlay {
                 // NavigationLink unsichtbar über die gesamte Karte
                 NavigationLink {
@@ -354,9 +361,9 @@ struct JobDetailView: View {
             }
             .padding(14)
             .background(SS.primary.opacity(0.05))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .clipShape(RoundedRectangle(cornerRadius: SS.cardRadius))
             .overlay(
-                RoundedRectangle(cornerRadius: 12)
+                RoundedRectangle(cornerRadius: SS.cardRadius)
                     .stroke(SS.primary.opacity(0.15), lineWidth: 1)
             )
         }

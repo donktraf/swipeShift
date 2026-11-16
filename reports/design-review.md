@@ -821,3 +821,60 @@ Bezug zu den iOS-Design-Fixes dieser Runde, reiner Vollständigkeits-Check.
 **Fazit:** Kein Syntaxfehler in den 9 geänderten Swift-Dateien feststellbar, Backend-Tests
 unverändert grün. Wie zuvor: keine Aussage über Typkorrektheit/Cross-File-Referenzen ohne echten
 Xcode-Build möglich.
+
+---
+
+## `/design-apply`-Lauf: Strukturelle Findings #3, #11, #8 (optional)
+
+**Zeitstempel:** 2026-08-03. Auswahl laut Nutzer: "strukturelle finding #3 und #11 und #8".
+
+### Finding #3 — Apply-Flow: Fehler-Buttons navigieren nirgendwohin: ✅ Umgesetzt
+
+`ApplyResultView` (`ApplyFlowView.swift`) hat jetzt pro Ergebniszustand eine tatsächliche Aktion statt
+generischem `onDone()`: `.connectionLost` → "Try Again" ruft `submitApplication()` erneut auf;
+`.shiftAlreadyTaken`/`.shiftUnavailable` → Primär-Button schließt über neuen `onExitToJobList`-Callback
+das gesamte Apply-Sheet + JobDetailView (zurück zur Job-Liste); `.schedulingConflict` → "View My Calendar"
+präsentiert `WorkerCalendarView()` als verschachteltes Sheet. Einziger Call-Site (`JobDetailView.swift`)
+angepasst. Reviewer bestätigte: korrekt, vollständig, kein Regressionsrisiko, `swiftc -parse` sauber.
+
+Dateien: `Features/Worker/Jobs/ApplyFlowView.swift`, `Features/Worker/Jobs/JobDetailView.swift`.
+
+### Finding #11 — Chat-Header zeigt Firmenname statt Worker-Name: ✅ Umgesetzt (Befund korrigiert)
+
+**Wichtige Abweichung vom ursprünglichen Finding:** Die Prämisse des Reports ("braucht neues
+Backend-Feld + DTO-Anpassung") war veraltet/falsch. Gegenprüfung von `routes.messages.js`
+(`formatConversation`) zeigte, dass das Feld `company` bereits serverseitig rollenabhängig korrekt
+befüllt wird (Worker-Sicht: Firmenname, Employer-Sicht: Worker-Name) — kein Laufzeit-Bug. Der einzige
+tatsächliche Fehler war eine tote/verwirrende Ternary in `ChatView.swift` (`chatHeader`), bei der beide
+Zweige identisch `conversation.company` zurückgaben. Umgesetzt wurde eine reine Code-Klarheits-Korrektur
+(Ternary entfernt, Kommentar korrigiert) statt der ursprünglich angenommenen Backend-/DTO-Änderung.
+Reviewer bestätigte die Gegenprüfung unabhängig und die Korrektheit der minimalen Änderung.
+
+Dateien: `Features/Worker/Messages/ChatView.swift`.
+
+### Finding #8 (optionaler Teil) — Card-Radius-Token vereinheitlichen: ✅ Umgesetzt
+
+Hardcodierte `cornerRadius`-Werte an den äußeren Karten-Containern durch `SS.cardRadius` ersetzt:
+`DashboardJobCard` (`JobSectionView.swift`, 14→Token), `RadarJobCard` (`RadarView.swift`, 14→Token),
+sowie vier Sektionen in `JobDetailView.swift` (`requirementsSection`, `payDetailsSection`,
+`companySection`, `whatHappensNextSection`, 12→Token). `JobListView.swift` brauchte keine Änderung
+(nutzt bereits `DashboardJobCard`). Dekorative Icon-/Logo-Container, Buttons, Suchfeld und Sheets
+bewusst nicht angefasst (außerhalb des Finding-Scopes).
+
+**Hinweis (vom Reviewer korrigiert):** In `JobSectionView.swift`/`RadarView.swift` war der Hardcode
+bereits 14 (= `SS.cardRadius`), daher optisch neutral. In `JobDetailView.swift` war der Hardcode zuvor
+**12**, nicht 14 — die vier betroffenen Karten werden dort minimal runder (12→14pt), ein kleiner,
+aber echter optischer Effekt, keine reine Wert-Migration ohne visuelle Änderung.
+
+Dateien: `Features/Worker/Dashboard/JobSectionView.swift`, `Features/Worker/Jobs/RadarView.swift`,
+`Features/Worker/Jobs/JobDetailView.swift`.
+
+### Tester: Gesamt-Check dieser 3 Findings
+
+`swiftc -parse` auf allen 5 geänderten Dateien: exit 0, keine Fehler. `git diff --stat` zeigt keine
+unbeabsichtigten Zusatzänderungen. Backend-Tests (`npm test`): weiterhin 4/4 grün (kein inhaltlicher
+Bezug, reiner Vollständigkeits-Check). Kein echter Xcode-Build/Simulator-Lauf möglich (bekannte
+Umgebungseinschränkung, siehe oben).
+
+**Offen bleiben:** Finding #17 (🔵 Strukturell, Post-a-Job-Formular) sowie die 4 🟡
+Diskussionswürdig-Findings (#5, #10, #12, #18) — Letztere weiterhin nur nach Rückfrage/Richtungsentscheidung.

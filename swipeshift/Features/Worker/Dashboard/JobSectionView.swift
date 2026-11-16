@@ -160,9 +160,9 @@ struct DashboardJobCard: View {
         }
         .padding(12)
         .background(Color.white)
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: SS.cardRadius, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: SS.cardRadius, style: .continuous)
                 .stroke(Color.gray.opacity(0.12), lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)

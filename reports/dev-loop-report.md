@@ -364,3 +364,179 @@ bei künftigen Refactors nicht unbemerkt wiederkehrt.
 - Keine Commits erstellt — Fix, Testergänzung und alle vorherigen unstaged Änderungen liegen weiterhin im
   Working Tree und sollten bei Gelegenheit review-/committet werden.
 
+
+## Review-Ergebnis
+
+**Zeitstempel:** 2026-08-03 10:29 CEST
+**Geprüfter Scope:** Umsetzung von Finding #3 ("Apply-Flow: Fehler-Buttons navigieren nirgendwohin",
+🔵 Strukturell) aus `reports/design-review.md`, unabhängig geprüft in
+`swipeshift/Features/Worker/Jobs/ApplyFlowView.swift` und
+`swipeshift/Features/Worker/Jobs/JobDetailView.swift`.
+
+**Ergebnis: Korrekt und vollständig umgesetzt.** Alle 5 Ergebniszustände von `ApplyResultView` führen jetzt zur
+beschriebenen Aktion statt generisch nur zu `dismiss()`:
+
+- `.submitted` → "Done": unverändert (`onSuccess?()` + `dismiss()`) — korrekt, keine Regression.
+- `.connectionLost` → Primär "Try Again" (`ApplyFlowView.swift:97-99`) ruft tatsächlich erneut
+  `submitApplication()` auf (zurück zu `.loading`, echter Retry inkl. erneutem `jobStore.apply`-Call). Sekundär
+  "Cancel" bleibt bei `onDone()` (schließt nur) — korrekt.
+- `.shiftAlreadyTaken` / `.shiftUnavailable` → Primär ("View Other Shifts" / "View Other Jobs", `primaryAction()`
+  in `ApplyFlowView.swift:534-535`) ruft `onExitToJobList()`. Der Callback (`ApplyFlowView.swift:100-103`) ruft
+  zuerst den von außen injizierten `onExitToJobList?()` auf und dann `dismiss()`. Call-Site
+  `JobDetailView.swift:55-58` übergibt `{ showApplySheet = false; dismiss() }` — da `JobDetailView` in allen
+  5 Aufrufstellen (`JobListView.swift`, `CategoryJobListView.swift`, `RadarView.swift`, `JobSectionView.swift`,
+  `ChatView.swift`) per `NavigationLink` gepusht wird, poppt dieses `dismiss()` den Detail-Screen tatsächlich von
+  der Navigation-Stack zurück zur darunterliegenden Job-Liste — Verhalten stimmt mit der Spezifikation überein.
+  Sekundär ("Back to Overview" / "Back") bleibt bei `onDone()` — schließt nur das Apply-Sheet, korrekt.
+- `.schedulingConflict` → Primär "View My Calendar" setzt `showCalendarSheet = true`, wodurch
+  `WorkerCalendarView()` als verschachteltes `.sheet` präsentiert wird (`ApplyFlowView.swift:597-599`), ohne das
+  Apply-Sheet zu dismissen — korrekt. `WorkerCalendarView` ist parameterlos aufrufbar (kein Pflicht-Init-Parameter,
+  lädt Daten selbst via `APIClient.shared` in `.task`, keine `@EnvironmentObject`-Abhängigkeit) und die
+  Sheet-Verschachtelung (Sheet-aus-Sheet) kollidiert mit keinem weiteren `.sheet`-Modifier auf derselben oder
+  einer übergeordneten View. Sekundär "Go Back Anyway" bleibt bei `onDone()` — korrekt.
+
+**Call-Site-Check:** `grep -rn "ApplyFlowView("` liefert genau einen Treffer im gesamten `swipeshift`-Ordner
+(`JobDetailView.swift:49`), der den neuen `onExitToJobList`-Parameter korrekt mitgibt. Keine weitere Stelle, die
+den neuen Parameter vergisst.
+
+**Optik:** Diff beschränkt sich auf neue Parameter/Callbacks, eine neue `@State`-Variable und einen zusätzlichen
+`.sheet`-Modifier. Keine Änderung an Farben, Radius, Spacing oder Layout der bestehenden Buttons/Karten — reines
+Verhaltens-Fix, kein visuelles Redesign, wie gefordert.
+
+**Syntax-Check:** `xcrun swiftc -parse` auf beiden Dateien liefert keine Fehler/Warnungen (leerer Output, Exit 0).
+
+**Kritisch:** Keine.
+
+**Warnung:** Keine.
+
+**Vorschlag (nice to have, kein Blocker):**
+- In `ApplyFlowView.swift:100-103` wird beim `.shiftAlreadyTaken`/`.shiftUnavailable`-Pfad sowohl der injizierte
+  `onExitToJobList?()` (der bereits `showApplySheet = false` setzt und `dismiss()` auf `JobDetailView` aufruft)
+  als auch anschließend explizit `dismiss()` auf `ApplyFlowView` selbst aufgerufen. Das ist harmlos-redundant
+  (dasselbe Muster existiert bereits unverändert im `.submitted`-Pfad und funktioniert dort nachweislich), aber
+  minimal verwirrend beim Lesen, da zwei `dismiss()`-Aufrufe auf zwei verschiedene Presentation-Kontexte im
+  selben Closure-Block landen. Optional: kurzer Kommentar an der Stelle, der klarstellt, dass hier zwei
+  unterschiedliche Sheets (Apply-Sheet vs. Detail-Screen-Navigation) betroffen sind, um künftige Verwirrung zu
+  vermeiden.
+
+## Review-Ergebnis
+
+**Zeitstempel:** 2026-08-03 (unabhängige Prüfung, Folgelauf zu obigem Eintrag)
+**Geprüfter Scope:** Umsetzung des optionalen 🔵 Strukturell-Teils von Finding #8
+("Theme-Radius-Inkonsistenz") aus `reports/design-review.md` — flächendeckende Umstellung der
+äußeren Karten-Container auf `SS.cardRadius` in `JobSectionView.swift`, `RadarView.swift`,
+`JobDetailView.swift`, `JobListView.swift`.
+
+**Ergebnis: Scope-treu und syntaktisch korrekt umgesetzt, mit einer inhaltlichen Warnung zur
+Prämisse "nichts ändert sich optisch".**
+
+### Verifikation der einzelnen Punkte
+
+1. **`swipeshift/Features/Worker/Dashboard/JobSectionView.swift`** (`DashboardJobCard`, Zeilen 163/165):
+   `cornerRadius: 14` → `SS.cardRadius` an genau den 2 erwarteten Stellen (Clip + Stroke der äußeren
+   Karte). Icon-Container (Zeile 96, `cornerRadius: 10`) unangetastet. `SS.cardRadius = 14`
+   (`Theme.swift:19`) → **kein optischer Unterschied**, da 14 = 14.
+
+2. **`swipeshift/Features/Worker/Jobs/RadarView.swift`** (`RadarJobCard`, Zeilen 404/406):
+   `cornerRadius: 14` → `SS.cardRadius` exakt an den 2 erwarteten Stellen. Radius-Filter-Sheet
+   (Zeile 271, `16`) und kleiner Logo-Container (Zeile 373, `12`) unangetastet. Auch hier
+   **kein optischer Unterschied** (14 = 14).
+
+3. **`swipeshift/Features/Worker/Jobs/JobDetailView.swift`**: 4 Sektionen wie beschrieben umgestellt
+   (`requirementsSection` Zeile 267, `payDetailsSection` Zeile 286, `companySection` Zeile 339,
+   `whatHappensNextSection` Clip Zeile 364 + Stroke Zeile 366). Header-Logo (Zeile 108/110, `16`),
+   kleiner Company-Logo-Container (Zeile 298, `12`) und Apply-Now-Button (Zeile 395, `14`) korrekt
+   unangetastet. Verschachtelung `.background → .clipShape → .overlay { NavigationLink { ... } label:
+   { Color.clear } }` in `companySection` ist unverändert korrekt erhalten (keine vertauschten
+   Klammern, geprüft Zeilen 337–351).
+
+   **Warnung:** Diese 4 Stellen waren vorher `cornerRadius: 12`, nicht `14`. Die Aufgabenbeschreibung
+   behauptet, `SS.cardRadius` (14) sei „identisch zu den meisten bisherigen Hardcodes“ und es „sollte
+   sich also NICHTS optisch ändern“ — das trifft nur auf `JobSectionView.swift`/`RadarView.swift`
+   (dort war der Hardcode bereits 14) zu, **nicht** auf `JobDetailView.swift`. Dort bewirkt die
+   Umstellung einen echten, wenn auch kleinen, optischen Effekt: 4 Karten (Requirements, Pay Details,
+   Company-Section, What-happens-next) werden von 12pt auf 14pt Eckradius runder. Fachlich ist das
+   wahrscheinlich sogar gewollt (Konsistenz-Ziel des strukturellen Findings), aber die explizite
+   Prämisse "nichts ändert sich optisch" im Auftrag ist für diese Datei nicht korrekt und sollte nicht
+   unkritisch übernommen werden.
+
+4. **`swipeshift/Features/Worker/Jobs/JobListView.swift`**: Kein Diff vorhanden, bestätigt per
+   `git diff` (leer). Nutzt `DashboardJobCard` für Job-Karten (Zeile 159) — die übrigen
+   `cornerRadius`-Hardcodes in dieser Datei (12/10/10/10, Zeilen 229/253/255/275/277/296) gehören zu
+   Suchfeld/Filter-Pills/Sort-Sheet, nicht zur Job-Karte selbst — "keine Änderung nötig" ist korrekt
+   begründet.
+
+5. **`SS.cardRadius`** ist bestätigt `14` (`swipeshift/utils/Theme.swift:19`).
+
+6. **Syntax-Check:** `xcrun swiftc -parse` auf allen 3 geänderten Dateien (`JobSectionView.swift`,
+   `RadarView.swift`, `JobDetailView.swift`) liefert keinen Output / Exit 0 — keine Syntaxfehler.
+
+### Hinweis zu Diff-Rauschen (kein Fehler dieser Änderung)
+
+`git diff -- JobDetailView.swift` enthält zusätzlich einen Hunk zum `ApplyFlowView`-Sheet-Aufruf
+(neuer `onExitToJobList`-Parameter). Das ist **kein Bestandteil dieser cardRadius-Änderung**, sondern
+bereits unstaged vorhandene Arbeit aus einem früheren, bereits separat geprüften Lauf (siehe
+Review-Eintrag oben, "Finding #3 Apply-Flow"). Keine Aktion nötig, aber erwähnenswert, damit dieser
+Hunk nicht versehentlich der aktuellen Aufgabe zugerechnet wird.
+
+**Kritisch:** Keine.
+
+**Warnung:**
+- Siehe Punkt 3: Die Behauptung "nichts ändert sich optisch" trifft für `JobDetailView.swift` nicht
+  zu (12pt → 14pt an 4 Stellen). Sollte im PR/Commit-Text richtiggestellt werden, damit ein späterer
+  Reviewer nicht fälschlich von reiner Wertquellen-Umstellung ohne visuelle Wirkung ausgeht.
+
+**Vorschlag:**
+- Kein weiterer.
+
+**Ergebnis:** Umsetzung ist vollständig, scope-treu (keine Über- oder Untererfüllung) und
+syntaktisch fehlerfrei. Einzige Beanstandung ist eine Ungenauigkeit in der Aufgabenprämisse
+("kein optischer Unterschied"), die für `JobDetailView.swift` nicht zutrifft — fachlich vermutlich
+unproblematisch, aber transparent zu kommunizieren.
+
+## Test-Ergebnis
+
+**Zeitstempel:** 2026-08-03 10:43 CEST
+**Geprüfter Scope:** Gesamt-Testlauf für die 5 im `/design-apply`-Lauf geänderten Dateien (Findings
+#3, #11, #8-optional): `ApplyFlowView.swift`, `JobDetailView.swift`, `ChatView.swift`,
+`JobSectionView.swift`, `RadarView.swift`.
+
+**Syntax-Check (`xcrun swiftc -parse`, Ersatz für fehlendes XCTest-Target/Xcode-Build):**
+Alle 5 Dateien einzeln geprüft — je Exit-Code 0, kein Fehler-/Warnungs-Output. Grün.
+
+**Diff-Vollständigkeitscheck (`git status` / `git diff --stat`):** Nur die 5 erwarteten Swift-Dateien
+plus `reports/dev-loop-report.md` (vom vorherigen Reviewer-Lauf) und die übliche, irrelevante
+`UserInterfaceState.xcuserstate`-Binärdatei geändert. Keine unbeabsichtigten Datei-Änderungen.
+
+**Backend-Testsuite (`cd swipeshift-backend && npm test`):** 4/4 Tests bestanden, 0 fehlgeschlagen,
+`duration_ms ≈ 65ms`, kein hängender Node-Prozess danach (erwartungsgemäß unberührt von den
+iOS-only-Änderungen dieses Laufs).
+
+**Manuelle Logikprüfung `ApplyFlowView.swift` (kein Simulator/Build verfügbar):**
+- `@State private var showCalendarSheet = false` in `ApplyResultView` korrekt deklariert
+  (Zeile 522), `.sheet(isPresented: $showCalendarSheet) { WorkerCalendarView() }` (Zeilen 597-599)
+  syntaktisch vollständig und schließt korrekt an `primaryAction()`'s `.schedulingConflict`-Fall an.
+- Kein doppelter `dismiss()`-Aufruf mit Crash-Potenzial: Der einzige "doppelte" Callback-Aufruf ist
+  `onExitToJobList: { onExitToJobList?(); dismiss() }` in `ApplyFlowView` (Zeilen 100-103) — das sind
+  zwei `dismiss()`-Aufrufe auf zwei unterschiedliche Presentation-Kontexte (Detail-Screen via
+  `NavigationLink`-Pop in `JobDetailView`, Apply-Sheet via `.sheet`), kein zweifacher Dismiss
+  desselben Kontexts. Bereits als "harmlos-redundant" in einem früheren Review-Eintrag dieses Reports
+  vermerkt — bestätigt, kein Bug.
+- Einziger Call-Site (`grep -rn "ApplyFlowView("`) ist `JobDetailView.swift:49`, übergibt beide neuen
+  Callbacks (`onSuccess`, `onExitToJobList`) korrekt.
+- `ChatView.swift`-Diff verifiziert: beide Ternary-Zweige waren identisch (`conversation.company`),
+  Vereinfachung ist rein kosmetisch und verhaltensneutral.
+- `JobSectionView.swift`/`RadarView.swift`-Diffs: reine Werteersetzung `14` → `SS.cardRadius`
+  (= `14` in `Theme.swift:19`), keine Verhaltensänderung.
+
+**Neue Tests geschrieben:** Keine — Aufgabenscope war Verifikation der bereits umgesetzten Findings,
+kein neuer Produktionscode.
+
+**Ehrlichkeits-Hinweis:** Kein echter Build/Simulator-/UI-Test möglich in dieser Umgebung (kein
+XCTest-Target, `xcodebuild` nicht verfügbar ohne volles Xcode) — wie in `design-review.md` bereits
+dokumentiert. Der `swiftc -parse`-Check deckt nur Syntax ab, keine Typprüfung über Modulgrenzen,
+kein Laufzeitverhalten, keine SwiftUI-Layout-/Preview-Verifikation.
+
+**Gesamtergebnis:** Alle durchführbaren Checks grün (5/5 Dateien Syntax OK, 4/4 Backend-Tests
+bestanden, keine unbeabsichtigten Diffs, keine Logikfehler in `ApplyFlowView.swift` gefunden). Kein
+Fehlschlag.

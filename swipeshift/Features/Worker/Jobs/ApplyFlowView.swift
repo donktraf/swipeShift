@@ -31,13 +31,18 @@ struct ApplyFlowView: View {
 
     // Wird von außen gesetzt um nach Erfolg den Detail-Screen zu schließen
     var onSuccess: (() -> Void)? = nil
+    // Wird von außen gesetzt um bei "Shift Already Taken"/"Shift Unavailable" komplett zurück
+    // zur Job-Liste zu navigieren (schließt Apply-Sheet UND den darunterliegenden Detail-Screen,
+    // ohne den Success-Seiteneffekt auszulösen)
+    var onExitToJobList: (() -> Void)? = nil
 
     @State private var step: ApplyStep
     @State private var selectedShiftIds: Set<String> = []
 
-    init(job: Job, onSuccess: (() -> Void)? = nil) {
+    init(job: Job, onSuccess: (() -> Void)? = nil, onExitToJobList: (() -> Void)? = nil) {
         self.job = job
         self.onSuccess = onSuccess
+        self.onExitToJobList = onExitToJobList
         // Direkt zur Bestätigung wenn 0 oder 1 Schicht
         let hasMultipleShifts = (job.shifts?.count ?? 0) > 1
         self._step = State(initialValue: hasMultipleShifts ? .selectShifts : .confirm)
@@ -87,6 +92,13 @@ struct ApplyFlowView: View {
                     job: job,
                     onDone: {
                         if case .submitted = result { onSuccess?() }
+                        dismiss()
+                    },
+                    onRetry: {
+                        Task { await submitApplication() }
+                    },
+                    onExitToJobList: {
+                        onExitToJobList?()
                         dismiss()
                     }
                 )
@@ -504,8 +516,27 @@ struct ApplyResultView: View {
     let result: ApplyResult
     let job: Job
     let onDone: () -> Void
+    var onRetry: () -> Void = {}
+    var onExitToJobList: () -> Void = {}
+
+    @State private var showCalendarSheet = false
 
     private var config: ResultConfig { ResultConfig(result: result, job: job) }
+
+    /// Primär-Button-Aktion: je nach Ergebniszustand navigiert/handelt der Button tatsächlich,
+    /// statt immer nur das Sheet zu schließen (dismiss)
+    private func primaryAction() {
+        switch result {
+        case .submitted:
+            onDone()
+        case .connectionLost:
+            onRetry()
+        case .shiftAlreadyTaken, .shiftUnavailable:
+            onExitToJobList()
+        case .schedulingConflict:
+            showCalendarSheet = true
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -541,7 +572,7 @@ struct ApplyResultView: View {
 
             VStack(spacing: 10) {
                 // Primär-Aktion
-                Button(config.primaryActionLabel) { onDone() }
+                Button(config.primaryActionLabel) { primaryAction() }
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
@@ -549,7 +580,7 @@ struct ApplyResultView: View {
                     .background(config.primaryActionColor)
                     .clipShape(RoundedRectangle(cornerRadius: 14))
 
-                // Sekundär-Aktion (nur bei Fehlern)
+                // Sekundär-Aktion (nur bei Fehlern) — schließt immer nur das Apply-Sheet
                 if let secondaryLabel = config.secondaryActionLabel {
                     Button(secondaryLabel) { onDone() }
                         .font(.system(size: 15, weight: .medium))
@@ -563,6 +594,9 @@ struct ApplyResultView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 12)
+        .sheet(isPresented: $showCalendarSheet) {
+            WorkerCalendarView()
+        }
     }
 }
 
