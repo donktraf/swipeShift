@@ -17,8 +17,7 @@ struct LeaveReviewsView: View {
     @State private var showSortSheet    = false
     @State private var showFilterSheet  = false
     @State private var selectedSort: ReviewSort     = .mostRecent
-    @State private var filterRating: Int?           = nil
-    @State private var filterWouldRehire: Bool?     = nil
+    @State private var filters = ReviewFilters()
     @State private var reviewToEdit: PendingReviewItem? = nil
 
     enum ReviewTab: String, CaseIterable {
@@ -34,7 +33,10 @@ struct LeaveReviewsView: View {
     }
 
     private var filteredPending: [PendingReviewItem] {
-        var list = pendingList
+        // Pending hat noch kein Rating → nur Kategorie + Schicht-Datum
+        var list = pendingList.filter {
+            filters.matches(category: $0.jobCategory) && filters.matches(shiftDate: $0.shiftDate)
+        }
         switch selectedSort {
         case .mostRecent:    list.sort { $0.shiftDate > $1.shiftDate }
         case .highestRating: list.sort { $0.shiftDate > $1.shiftDate }
@@ -44,9 +46,11 @@ struct LeaveReviewsView: View {
     }
 
     private var filteredPast: [PastReviewItem] {
-        var list = pastList
-        if let min = filterRating      { list = list.filter { $0.avgRating >= Double(min) } }
-        if let rehire = filterWouldRehire { list = list.filter { $0.wouldRehire == rehire } }
+        var list = pastList.filter {
+            filters.matches(category: $0.jobCategory) && filters.matches(shiftDate: $0.shiftDate)
+        }
+        if let min = filters.minRating     { list = list.filter { $0.avgRating >= Double(min) } }
+        if let rehire = filters.wouldRehire { list = list.filter { $0.wouldRehire == rehire } }
         switch selectedSort {
         case .mostRecent:    list.sort { $0.createdAt > $1.createdAt }
         case .highestRating: list.sort { $0.avgRating > $1.avgRating }
@@ -55,8 +59,12 @@ struct LeaveReviewsView: View {
         return list
     }
 
-    private var activeFilters: Int {
-        (filterRating != nil ? 1 : 0) + (filterWouldRehire != nil ? 1 : 0)
+    private var activeFilters: Int { filters.activeCount }
+
+    /// Nur Kategorien, die in den geladenen Reviews vorkommen (keine leeren Filter-Optionen)
+    private var availableCategories: [String] {
+        let all = pendingList.map(\.jobCategory) + pastList.map(\.jobCategory)
+        return Array(Set(all.filter { !$0.isEmpty && $0 != "—" })).sorted()
     }
 
     private var currentCount: Int {
@@ -87,7 +95,9 @@ struct LeaveReviewsView: View {
         }
         .task { await loadData() }
         .sheet(isPresented: $showSortSheet)   { sortSheet }
-        .sheet(isPresented: $showFilterSheet) { filterSheet }
+        .sheet(isPresented: $showFilterSheet) {
+            ReviewFilterSheet(filters: $filters, categories: availableCategories)
+        }
         .sheet(item: $reviewToEdit) { item in
             ReviewFormSheet(review: item) {
                 Task {
@@ -104,7 +114,9 @@ struct LeaveReviewsView: View {
     private var contentList: some View {
         switch selectedTab {
         case .pending:
-            if filteredPending.isEmpty {
+            if filteredPending.isEmpty && !pendingList.isEmpty && activeFilters > 0 {
+                noMatchesView
+            } else if filteredPending.isEmpty {
                 emptyView(icon: "checkmark.seal", message: "No pending reviews.\nAll shifts have been reviewed.")
             } else {
                 ScrollView(showsIndicators: false) {
@@ -120,7 +132,9 @@ struct LeaveReviewsView: View {
         case .drafts:
             emptyView(icon: "doc.text", message: "No drafts saved.\nDrafts are not persisted between sessions.")
         case .past:
-            if filteredPast.isEmpty {
+            if filteredPast.isEmpty && !pastList.isEmpty && activeFilters > 0 {
+                noMatchesView
+            } else if filteredPast.isEmpty {
                 emptyView(icon: "star.slash", message: "No past reviews yet.")
             } else {
                 ScrollView(showsIndicators: false) {
@@ -278,88 +292,26 @@ struct LeaveReviewsView: View {
         .presentationDragIndicator(.visible)
     }
 
-    // MARK: - Filter Sheet
-
-    private var filterSheet: some View {
-        VStack(spacing: 0) {
-            Text("Filter")
-                .font(.system(size: 17, weight: .semibold))
-                .padding(.top, 20).padding(.bottom, 16)
-
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Minimum Rating")
-                    .font(.system(size: 13, weight: .semibold)).foregroundColor(.secondary)
-                    .padding(.horizontal, 20)
-                HStack(spacing: 8) {
-                    ForEach([1, 2, 3, 4, 5], id: \.self) { stars in
-                        Button {
-                            filterRating = filterRating == stars ? nil : stars
-                        } label: {
-                            HStack(spacing: 3) {
-                                Image(systemName: "star.fill").font(.system(size: 11))
-                                Text("\(stars)+").font(.system(size: 13, weight: .semibold))
-                            }
-                            .foregroundColor(filterRating == stars ? .white : SS.primary)
-                            .padding(.horizontal, 12).padding(.vertical, 7)
-                            .background(filterRating == stars ? SS.primary : SS.primary.opacity(0.1))
-                            .clipShape(Capsule())
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, 20)
-            }
-            .padding(.bottom, 20)
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Would Rehire")
-                    .font(.system(size: 13, weight: .semibold)).foregroundColor(.secondary)
-                    .padding(.horizontal, 20).padding(.top, 16)
-                HStack(spacing: 8) {
-                    ForEach([(true, "Yes"), (false, "No")], id: \.0) { (val, label) in
-                        Button {
-                            filterWouldRehire = filterWouldRehire == val ? nil : val
-                        } label: {
-                            Text(label)
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundColor(filterWouldRehire == val ? .white : .primary)
-                                .padding(.horizontal, 20).padding(.vertical, 8)
-                                .background(filterWouldRehire == val ? SS.primary : Color(uiColor: .systemGray5))
-                                .clipShape(Capsule())
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, 20)
-            }
-
-            Spacer()
-
-            HStack(spacing: 12) {
-                Button("Reset") { clearFilters() }
-                    .font(.system(size: 15, weight: .semibold)).foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity).padding(.vertical, 14)
-                    .background(Color(uiColor: .systemGray6))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                Button("Apply") { showFilterSheet = false }
-                    .font(.system(size: 15, weight: .semibold)).foregroundColor(.white)
-                    .frame(maxWidth: .infinity).padding(.vertical, 14)
-                    .background(SS.primary)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-            }
-            .padding(.horizontal, 20).padding(.bottom, 28)
-        }
-        .presentationDetents([.fraction(0.55)])
-        .presentationDragIndicator(.visible)
-    }
-
     // MARK: - Helpers
 
     private func clearFilters() {
-        filterRating = nil
-        filterWouldRehire = nil
+        filters = ReviewFilters()
+    }
+
+    /// Es gibt Reviews, aber keine passt zu den aktiven Filtern
+    private var noMatchesView: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "line.3.horizontal.decrease.circle")
+                .font(.system(size: 36)).foregroundColor(.white.opacity(0.3))
+            Text("No reviews match your filters.")
+                .font(.system(size: 14)).foregroundColor(.white.opacity(0.6))
+            Button("Clear Filters") { clearFilters() }
+                .font(.system(size: 14, weight: .semibold)).foregroundColor(.white)
+                .padding(.horizontal, 16).padding(.vertical, 8)
+                .background(Color.white.opacity(0.2)).clipShape(Capsule())
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 60)
     }
 
     private func sortFilterChip(icon: String, label: String, active: Bool) -> some View {
