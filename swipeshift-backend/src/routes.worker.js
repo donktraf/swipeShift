@@ -4,6 +4,7 @@ const express = require("express");
 const { prisma } = require("./prisma");
 const { requireAuth } = require("./auth");
 const { requireVerifiedEmail } = require("./middlewares/requireVerifiedEmail");
+const { resolvePeriod, prismaRange } = require("./utils/period");
 
 const router = express.Router();
 
@@ -274,22 +275,16 @@ router.get("/financials", requireAuth, requireVerifiedEmail, async (req, res) =>
   try {
     const workerId = req.auth.sub;
     const now      = new Date();
-    const { period = "thisMonth" } = req.query;
-
-    let since = null;
-    if (period === "thisMonth") {
-      since = new Date(now.getFullYear(), now.getMonth(), 1);
-    } else if (period === "last3Months") {
-      since = new Date(now.getFullYear(), now.getMonth() - 3, 1);
-    } else if (period === "thisYear") {
-      since = new Date(now.getFullYear(), 0, 1);
-    }
+    // period = thisMonth | last3Months | thisYear | allTime | custom (&from&to=YYYY-MM-DD)
+    const range = resolvePeriod(req.query, now);
+    if (range.error) return res.status(400).json({ error: range.error });
+    const startTimeRange = prismaRange(range);
 
     const applies = await prisma.apply.findMany({
       where: {
         userId: workerId,
         status: "accepted",
-        ...(since ? { job: { startTime: { gte: since } } } : {}),
+        ...(startTimeRange ? { job: { startTime: startTimeRange } } : {}),
       },
       include: {
         job: {

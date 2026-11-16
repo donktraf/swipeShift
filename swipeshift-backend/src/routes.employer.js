@@ -4,6 +4,7 @@ const express = require("express");
 const { prisma } = require("./prisma");
 const { requireAuth } = require("./auth");
 const { requireVerifiedEmail } = require("./middlewares/requireVerifiedEmail");
+const { resolvePeriod, isInPeriod, buildBuckets } = require("./utils/period");
 
 const router = express.Router();
 
@@ -178,14 +179,18 @@ router.get("/stats", requireAuth, requireVerifiedEmail, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────
-// GET /employer/financials
-// Finanzübersicht: Gesamtausgaben, Upcoming Payments, abgeschlossene Jobs
+// GET /employer/financials?period=thisMonth|last3Months|thisYear|allTime|custom[&from&to]
+// Finanzübersicht: Gesamtausgaben, Upcoming Payments, abgeschlossene Jobs — gefiltert auf
+// Jobs, deren Schicht im Zeitraum beginnt. "Monthly Spend" bleibt immer der laufende Monat.
 // ─────────────────────────────────────────────
 router.get("/financials", requireAuth, requireVerifiedEmail, async (req, res) => {
   try {
     const employerId = req.auth.sub;
     const now        = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    const range = resolvePeriod(req.query, now);
+    if (range.error) return res.status(400).json({ error: range.error });
 
     const myJobs = await prisma.job.findMany({
       where:  { employerId },
@@ -194,36 +199,48 @@ router.get("/financials", requireAuth, requireVerifiedEmail, async (req, res) =>
         openSpots: true, startTime: true, endTime: true,
         shiftText: true, logoEmoji: true, category: true,
       },
+      orderBy: { startTime: "desc" },
     });
-
-    const completedJobs = myJobs.filter(j => j.status === "completed");
-    const upcomingJobs  = myJobs.filter(j => j.status === "published" && j.startTime && new Date(j.startTime) > now);
 
     const calcCost = (j) => (j.payAmount ?? 0) * (j.openSpots ?? 1);
 
-    const totalSpending     = completedJobs.reduce((s, j) => s + calcCost(j), 0);
-    const upcomingPayments  = upcomingJobs.reduce((s, j) => s + calcCost(j), 0);
-    const monthlySpend      = completedJobs
-      .filter(j => j.startTime && new Date(j.startTime) >= monthStart)
+    // Monthly Spend unabhaengig vom gewaehlten Zeitraum (Kachel-Label "Monthly Spend")
+    const monthlySpend = myJobs
+      .filter(j => j.status === "completed" && j.startTime && new Date(j.startTime) >= monthStart)
       .reduce((s, j) => s + calcCost(j), 0);
 
-    // Letzte 7 Tage für Chart
-    const days = Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(now);
-      d.setDate(d.getDate() - (6 - i));
-      d.setHours(0, 0, 0, 0);
-      return d;
-    });
+    // "Upcoming" = veroeffentlicht UND Schicht in der Zukunft — gleiche Regel fuer Kachel,
+    // Liste und Diagramm (vergangene, nie abgeschlossene Jobs zaehlen nicht als offene Zahlung)
+    const isUpcoming = (j) => j.status === "published" && j.startTime && new Date(j.startTime) > now;
 
-    const chartData = days.map(day => {
-      const dayEnd = new Date(day); dayEnd.setHours(23, 59, 59, 999);
-      const label  = day.toLocaleDateString("en-US", { weekday: "short" });
-      const dayJobs = myJobs.filter(j => j.startTime && new Date(j.startTime) >= day && new Date(j.startTime) <= dayEnd);
+    const periodJobs    = myJobs.filter(j => isInPeriod(j.startTime, range));
+    const completedJobs = periodJobs.filter(j => j.status === "completed");
+    const upcomingJobs  = periodJobs.filter(isUpcoming).reverse(); // naechste zuerst
+
+    const totalSpending    = completedJobs.reduce((s, j) => s + calcCost(j), 0);
+    const upcomingPayments = upcomingJobs.reduce((s, j) => s + calcCost(j), 0);
+
+    // Diagramm-Achse: fester Zeitraum, bei "All Time" aus den tatsaechlichen Schichtdaten
+    let { chartStart, chartEnd } = range;
+    if (!chartStart) {
+      const times = periodJobs.filter(j => j.startTime).map(j => new Date(j.startTime).getTime());
+      if (times.length) {
+        chartStart = new Date(Math.min(...times));
+        chartEnd   = new Date(Math.max(...times, now.getTime()));
+      }
+    }
+
+    const chartData = buildBuckets(chartStart, chartEnd).map(bucket => {
+      const inBucket = periodJobs.filter(j => {
+        if (!j.startTime) return false;
+        const t = new Date(j.startTime);
+        return t >= bucket.start && t <= bucket.end;
+      });
       return {
-        day:       label,
-        upcoming:  dayJobs.filter(j => j.status === "published").reduce((s, j) => s + calcCost(j), 0),
-        completed: dayJobs.filter(j => j.status === "completed").reduce((s, j) => s + calcCost(j), 0),
-        paidOut:   0, // Kein echtes Zahlungsmodell im MVP
+        day:       bucket.label,
+        upcoming:  inBucket.filter(isUpcoming).reduce((s, j) => s + calcCost(j), 0),
+        completed: inBucket.filter(j => j.status === "completed").reduce((s, j) => s + calcCost(j), 0),
+        paidOut:   0, // TODO: Apply.isPaid existiert, wird hier noch nicht ausgewertet
       };
     });
 
@@ -234,7 +251,17 @@ router.get("/financials", requireAuth, requireVerifiedEmail, async (req, res) =>
       byCategory[cat] = (byCategory[cat] ?? 0) + calcCost(j);
     });
 
+    const toListItem = (status) => (j) => ({
+      id:        j.id,
+      title:     j.title,
+      logoEmoji: j.logoEmoji,
+      shiftText: j.shiftText,
+      amount:    calcCost(j),
+      status,
+    });
+
     return res.json({
+      period:             range.period,
       totalSpending,
       upcomingPayments,
       completedJobsCount: completedJobs.length,
@@ -242,22 +269,8 @@ router.get("/financials", requireAuth, requireVerifiedEmail, async (req, res) =>
       monthlySpend,
       chartData,
       byCategory,
-      upcomingJobs: upcomingJobs.slice(0, 10).map(j => ({
-        id:        j.id,
-        title:     j.title,
-        logoEmoji: j.logoEmoji,
-        shiftText: j.shiftText,
-        amount:    calcCost(j),
-        status:    "upcoming",
-      })),
-      completedJobsList: completedJobs.slice(0, 10).map(j => ({
-        id:        j.id,
-        title:     j.title,
-        logoEmoji: j.logoEmoji,
-        shiftText: j.shiftText,
-        amount:    calcCost(j),
-        status:    "completed",
-      })),
+      upcomingJobs:       upcomingJobs.slice(0, 10).map(toListItem("upcoming")),
+      completedJobsList:  completedJobs.slice(0, 10).map(toListItem("completed")),
     });
   } catch (err) {
     console.error("GET /employer/financials error:", err);

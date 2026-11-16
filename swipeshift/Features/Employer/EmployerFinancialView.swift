@@ -10,7 +10,9 @@ import SwiftUI
 struct EmployerFinancialView: View {
     @State private var financials: EmployerFinancialsDTO? = nil
     @State private var isLoading  = true
+    @State private var loadFailed = false
     @State private var showBreakdown = false
+    @State private var period: FinancialPeriod = .default
 
     private var maxBarValue: Double {
         financials?.chartData.map { $0.upcoming + $0.completed + $0.paidOut }.max() ?? 1
@@ -18,21 +20,27 @@ struct EmployerFinancialView: View {
 
     var body: some View {
         SubScreenShell(title: "Financial Overview") {
-            if isLoading {
-                VStack { Spacer(); ProgressView(); Spacer() }
-            } else if let f = financials {
-                VStack(spacing: 20) {
+            VStack(spacing: 20) {
+                // Picker bleibt beim Laden sichtbar, damit der Zeitraum direkt wieder wechselbar ist
+                FinancialPeriodPicker(period: $period).padding(.horizontal, 16)
+
+                if isLoading {
+                    ProgressView().tint(.white).frame(maxWidth: .infinity).padding(.top, 40)
+                } else if let f = financials {
                     summaryGrid(f).padding(.horizontal, 16)
                     barChartSection(f)
                     jobListSection(f)
                     breakdownButton
                     Spacer().frame(height: 20)
+                } else if loadFailed {
+                    errorState
+                } else {
+                    emptyState
                 }
-            } else {
-                emptyState
             }
         }
-        .task { await load() }
+        // task(id:) bricht laufende Requests bei Zeitraum-Wechsel ab → keine veralteten Antworten
+        .task(id: period) { await load() }
         .sheet(isPresented: $showBreakdown) {
             if let f = financials { BreakdownSheet(financials: f) }
         }
@@ -42,11 +50,17 @@ struct EmployerFinancialView: View {
 
     private func load() async {
         isLoading = true
+        loadFailed = false
         do {
-            financials = try await APIClient.shared.fetchEmployerFinancials()
+            let result = try await APIClient.shared.fetchEmployerFinancials(period: period)
+            guard !Task.isCancelled else { return }
+            financials = result
         } catch {
+            // Zeitraum gewechselt → alter Request abgebrochen, neuer laeuft bereits
+            if Task.isCancelled || (error as? URLError)?.code == .cancelled { return }
             print("EmployerFinancialView: load error:", error)
             financials = nil
+            loadFailed = true
         }
         isLoading = false
     }
@@ -77,14 +91,17 @@ struct EmployerFinancialView: View {
             }
             .padding(.horizontal, 4)
 
-            if f.chartData.isEmpty {
+            if f.chartData.allSatisfy({ $0.upcoming + $0.completed + $0.paidOut == 0 }) {
                 Text("No data for the selected period.")
                     .font(.system(size: 13)).foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.vertical, 32)
             } else {
-                HStack(alignment: .bottom, spacing: 6) {
-                    ForEach(f.chartData, id: \.day) { day in
+                // Viele Balken (z.B. 30 Tage) → engerer Abstand, nur jedes n-te Label
+                let barSpacing: CGFloat = f.chartData.count > 12 ? 2 : 6
+                let labelEvery = max(1, Int((Double(f.chartData.count) / 8).rounded(.up)))
+                HStack(alignment: .bottom, spacing: barSpacing) {
+                    ForEach(Array(f.chartData.enumerated()), id: \.offset) { index, day in
                         let total = day.upcoming + day.completed + day.paidOut
                         VStack(spacing: 2) {
                             GeometryReader { geo in
@@ -99,7 +116,10 @@ struct EmployerFinancialView: View {
                                 }
                             }
                             .frame(height: 100)
-                            Text(day.day).font(.system(size: 10)).foregroundColor(.secondary)
+                            Text(index % labelEvery == 0 ? day.day : " ")
+                                .font(.system(size: 10)).foregroundColor(.secondary)
+                                .lineLimit(1).fixedSize()
+                                .frame(maxWidth: .infinity)
                         }
                         .opacity(total > 0 ? 1 : 0.3)
                     }
@@ -174,7 +194,18 @@ struct EmployerFinancialView: View {
         .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
     }
 
-    // MARK: - Empty
+    // MARK: - Empty / Error
+
+    private var errorState: some View {
+        VStack(spacing: 12) {
+            Text("Could not load financial data.")
+                .font(.system(size: 13)).foregroundColor(.white.opacity(0.5))
+            Button("Retry") { Task { await load() } }
+                .font(.system(size: 14, weight: .semibold)).foregroundColor(SS.primary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 40)
+    }
 
     private var emptyState: some View {
         VStack(spacing: 16) {

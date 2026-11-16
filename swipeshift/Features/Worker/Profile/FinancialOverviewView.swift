@@ -5,28 +5,10 @@
 
 import SwiftUI
 
-// MARK: - Time Period
-
-private enum TimePeriod: String, CaseIterable {
-    case thisMonth   = "This Month"
-    case last3Months = "Last 3 Months"
-    case thisYear    = "This Year"
-    case allTime     = "All Time"
-
-    var apiKey: String {
-        switch self {
-        case .thisMonth:   return "thisMonth"
-        case .last3Months: return "last3Months"
-        case .thisYear:    return "thisYear"
-        case .allTime:     return "allTime"
-        }
-    }
-}
-
 // MARK: - FinancialOverviewView
 
 struct FinancialOverviewView: View {
-    @State private var selectedPeriod: TimePeriod = .thisMonth
+    @State private var period: FinancialPeriod = .default
     @State private var financials: WorkerFinancialsDTO? = nil
     @State private var isLoading     = false
     @State private var errorMessage: String? = nil
@@ -44,7 +26,7 @@ struct FinancialOverviewView: View {
     var body: some View {
         SubScreenShell(title: "Financial Overview") {
             VStack(spacing: 20) {
-                periodPicker.padding(.horizontal, 16)
+                FinancialPeriodPicker(period: $period).padding(.horizontal, 16)
 
                 if isLoading {
                     ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
@@ -65,29 +47,9 @@ struct FinancialOverviewView: View {
             }
         }
         .sheet(isPresented: $showGoalEditor) { GoalEditorSheet(goal: $incomeGoal) }
-        .task { await load() }
-        .onChange(of: selectedPeriod) { _, _ in Task { await load() } }
+        // task(id:) bricht laufende Requests bei Zeitraum-Wechsel ab → keine veralteten Antworten
+        .task(id: period) { await load() }
         .onChange(of: incomeGoal) { _, new in UserDefaults.standard.set(new, forKey: "incomeGoal") }
-    }
-
-    // MARK: - Period Picker
-
-    private var periodPicker: some View {
-        Menu {
-            ForEach(TimePeriod.allCases, id: \.self) { p in
-                Button(p.rawValue) { selectedPeriod = p }
-            }
-        } label: {
-            HStack {
-                Text(selectedPeriod.rawValue)
-                    .font(.system(size: 14, weight: .semibold)).foregroundColor(.white)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 12, weight: .semibold)).foregroundColor(.white.opacity(0.7))
-            }
-            .padding(.horizontal, 16).padding(.vertical, 8)
-            .background(Color.white.opacity(0.2)).clipShape(Capsule())
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
     }
 
     // MARK: - Summary Cards
@@ -233,8 +195,15 @@ struct FinancialOverviewView: View {
 
     private func load() async {
         isLoading = true; errorMessage = nil
-        do { financials = try await APIClient.shared.fetchWorkerFinancials(period: selectedPeriod.apiKey) }
-        catch { errorMessage = error.localizedDescription }
+        do {
+            let result = try await APIClient.shared.fetchWorkerFinancials(period: period)
+            guard !Task.isCancelled else { return }
+            financials = result
+        } catch {
+            // Zeitraum gewechselt → alter Request abgebrochen, neuer laeuft bereits
+            if Task.isCancelled || (error as? URLError)?.code == .cancelled { return }
+            errorMessage = error.localizedDescription
+        }
         isLoading = false
     }
 }

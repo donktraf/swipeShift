@@ -710,8 +710,16 @@ final class APIClient {
 
     // MARK: - Employer Financials
 
-    func fetchEmployerFinancials() async throws -> EmployerFinancialsDTO {
-        let req = try makeRequest(path: "/employer/financials", method: "GET")
+    /// Haengt Query-Parameter korrekt kodiert an einen relativen Pfad an
+    private static func path(_ base: String, query: [URLQueryItem]) -> String {
+        var comps = URLComponents()
+        comps.path = base
+        comps.queryItems = query.isEmpty ? nil : query
+        return comps.string ?? base
+    }
+
+    func fetchEmployerFinancials(period: FinancialPeriod = .default) async throws -> EmployerFinancialsDTO {
+        let req = try makeRequest(path: Self.path("/employer/financials", query: period.queryItems), method: "GET")
         let (data, response) = try await URLSession.shared.data(for: req)
         try validate(response: response, data: data)
         return try JSONDecoder().decode(EmployerFinancialsDTO.self, from: data)
@@ -791,8 +799,8 @@ final class APIClient {
         return try dec.decode(WorkerReviewsResponse.self, from: data)
     }
 
-    func fetchWorkerFinancials(period: String = "thisMonth") async throws -> WorkerFinancialsDTO {
-        let req = try makeRequest(path: "/worker/financials?period=\(period)", method: "GET")
+    func fetchWorkerFinancials(period: FinancialPeriod = .default) async throws -> WorkerFinancialsDTO {
+        let req = try makeRequest(path: Self.path("/worker/financials", query: period.queryItems), method: "GET")
         let (data, resp) = try await URLSession.shared.data(for: req)
         try validate(response: resp, data: data)
         return try JSONDecoder().decode(WorkerFinancialsDTO.self, from: data)
