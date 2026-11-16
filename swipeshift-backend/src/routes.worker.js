@@ -6,6 +6,7 @@ const { requireAuth } = require("./auth");
 const { requireVerifiedEmail } = require("./middlewares/requireVerifiedEmail");
 const { resolvePeriod, prismaRange } = require("./utils/period");
 const { payPerWorker } = require("./utils/jobCost");
+const { deriveApplicationStatus } = require("./utils/applicationStatus");
 
 const router = express.Router();
 
@@ -26,23 +27,19 @@ router.get("/applications", requireAuth, requireVerifiedEmail, async (req, res) 
             id: true, title: true, company: true, logoEmoji: true,
             location: true, payText: true, shiftText: true,
             startTime: true, endTime: true, category: true,
+            status: true, cancellationReason: true, payAmount: true,
           },
         },
+        conversation: { select: { id: true } },
       },
       orderBy: { createdAt: "desc" },
     });
 
     const applications = applies.map((a) => {
       const job = a.job;
-      // Determine display status
-      let displayStatus;
-      if (a.status === "declined") {
-        displayStatus = "cancelled";
-      } else if (a.status === "accepted") {
-        displayStatus = job?.endTime && new Date(job.endTime) < now ? "completed" : "confirmed";
-      } else {
-        displayStatus = "applied";
-      }
+      // Status inkl. storniertem Job, Stornierungsgrund und Zahlungsstatus (utils/applicationStatus.js)
+      const { displayStatus, cancellationKind, cancellationReason, paymentStatus } =
+        deriveApplicationStatus(a, job, now);
 
       return {
         id:            a.id,
@@ -58,6 +55,13 @@ router.get("/applications", requireAuth, requireVerifiedEmail, async (req, res) 
         endTime:       job?.endTime   ?? null,
         appliedAt:     a.createdAt,
         displayStatus,
+        cancellationKind,
+        cancellationReason,
+        paymentStatus,
+        // Verdienst fuer diese Schicht (gleiche Formel wie Finanz-Uebersicht)
+        earnings:       job ? payPerWorker(job) : 0,
+        // Chat erst nach Annahme sinnvoll — die Conversation existiert aber ab Bewerbung
+        conversationId: a.conversation?.id ?? null,
       };
     });
 
@@ -285,7 +289,8 @@ router.get("/financials", requireAuth, requireVerifiedEmail, async (req, res) =>
       where: {
         userId: workerId,
         status: "accepted",
-        ...(startTimeRange ? { job: { startTime: startTimeRange } } : {}),
+        // Stornierte Jobs bringen keinen Verdienst
+        job: { status: { not: "cancelled" }, ...(startTimeRange ? { startTime: startTimeRange } : {}) },
       },
       include: {
         job: {

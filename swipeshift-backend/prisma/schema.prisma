@@ -157,6 +157,8 @@ model Job {
   contractType    String?
   companyRating   Float?
   replyTime       String?
+  // Optionaler Grund, den der Employer beim Stornieren angibt (Worker-Kalender / Job Applications)
+  cancellationReason String?
   isVerified      Boolean  @default(false)
 
   // Categorisation

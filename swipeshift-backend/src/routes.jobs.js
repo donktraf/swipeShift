@@ -6,6 +6,7 @@ const { requireAuth } = require("./auth");
 const { requireVerifiedEmail } = require("./middlewares/requireVerifiedEmail");
 const { haversineDistance } = require("./utils/haversine");
 const { geocodeLocation }  = require("./utils/geocode");
+const { normalizeCancellationReason } = require("./utils/applicationStatus");
 
 const router = express.Router();
 
@@ -486,7 +487,7 @@ router.patch("/:id/status", requireAuth, requireVerifiedEmail, async (req, res) 
   try {
     const employerId = req.auth.sub;
     const jobId      = req.params.id;
-    const { status } = req.body;
+    const { status, reason } = req.body;
 
     const allowed = ["published", "draft", "cancelled", "completed", "inProgress"];
     if (!allowed.includes(status)) {
@@ -499,7 +500,8 @@ router.patch("/:id/status", requireAuth, requireVerifiedEmail, async (req, res) 
 
     const updated = await prisma.job.update({
       where: { id: jobId },
-      data:  { status },
+      // Grund nur beim Stornieren speichern; bei jedem anderen Status zuruecksetzen
+      data:  { status, cancellationReason: status === "cancelled" ? normalizeCancellationReason(reason) : null },
     });
 
     console.log(`PATCH /jobs/${jobId}/status → ${status}`);
