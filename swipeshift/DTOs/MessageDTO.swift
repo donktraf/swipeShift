@@ -101,6 +101,8 @@ struct CompanyProfileDTO: Decodable {
     let replyTime:        String?
     let about:            String?
     let website:          String?
+    let phone:            String?
+    let email:            String?
     let industry:         String?
     let companySize:      String?
     let openJobs:         [CompanyOpenJobDTO]

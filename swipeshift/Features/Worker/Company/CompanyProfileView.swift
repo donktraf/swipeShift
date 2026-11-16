@@ -38,7 +38,7 @@ struct CompanyProfileView: View {
                     if let about = p.about, !about.isEmpty { aboutSection(about) }
                     ratingsSection(p)
                     if !p.locations.isEmpty { locationsSection(p) }
-                    if let web = p.website, !web.isEmpty { contactSection(web) }
+                    if hasContact(p) { contactSection(p) }
                     viewOpenJobsButton(p)
                     Spacer().frame(height: 20)
                 }
@@ -360,25 +360,56 @@ struct CompanyProfileView: View {
 
     // MARK: - Contact
 
-    private func contactSection(_ website: String) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
+    private func nonEmpty(_ value: String?) -> String? {
+        guard let v = value?.trimmingCharacters(in: .whitespaces), !v.isEmpty else { return nil }
+        return v
+    }
+
+    private func hasContact(_ p: CompanyProfileDTO) -> Bool {
+        nonEmpty(p.phone) != nil || nonEmpty(p.email) != nil || nonEmpty(p.website) != nil
+    }
+
+    private func contactSection(_ p: CompanyProfileDTO) -> some View {
+        let rows: [ContactRow] = [
+            nonEmpty(p.phone).map { ContactRow(icon: "phone.fill", text: $0, url: ContactLink.phone($0)) },
+            nonEmpty(p.email).map { ContactRow(icon: "envelope.fill", text: $0, url: ContactLink.email($0)) },
+            nonEmpty(p.website).map { ContactRow(icon: "globe", text: $0, url: ContactLink.website($0)) }
+        ].compactMap { $0 }
+
+        return VStack(alignment: .leading, spacing: 0) {
             Text("CONTACT")
                 .font(.system(size: 11, weight: .semibold)).foregroundColor(.secondary)
                 .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 4)
-            HStack(spacing: 14) {
-                Image(systemName: "globe")
-                    .font(.system(size: 15)).foregroundColor(SS.primary)
-                    .frame(width: 28).padding(.leading, 14)
-                Text(website)
-                    .font(.system(size: 14)).foregroundColor(SS.primary)
-                Spacer()
+            ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                if index > 0 { Divider().padding(.leading, 56) }
+                contactRow(icon: row.icon, text: row.text, url: row.url)
             }
-            .padding(.vertical, 12)
         }
         .background(Color(uiColor: .systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .padding(.horizontal, 16)
         .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
+    }
+
+    @ViewBuilder
+    private func contactRow(icon: String, text: String, url: URL?) -> some View {
+        let label = HStack(spacing: 14) {
+            Image(systemName: icon)
+                .font(.system(size: 15)).foregroundColor(SS.primary)
+                .frame(width: 28).padding(.leading, 14)
+            Text(text)
+                .font(.system(size: 14)).foregroundColor(url == nil ? .primary : SS.primary)
+                .lineLimit(1)
+            Spacer()
+        }
+        .padding(.vertical, 12)
+        .contentShape(Rectangle())
+
+        if let url {
+            Link(destination: url) { label }
+        } else {
+            label
+        }
     }
 
     // MARK: - Open Jobs Button
@@ -412,5 +443,43 @@ private struct CompanyStatCell: View {
             Text(label).font(.system(size: 11)).foregroundColor(.white.opacity(0.7))
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+// MARK: - Kontakt-Links
+
+private struct ContactRow {
+    let icon: String
+    let text: String
+    let url: URL?
+}
+
+/// Baut tel:/mailto:/https-URLs aus frei eingegebenen Kontaktdaten des Employers.
+enum ContactLink {
+    static func phone(_ raw: String) -> URL? {
+        // Nur Ziffern und fuehrendes "+" behalten (z.B. "+49 711 / 123-45" → "+4971112345")
+        let digits = raw.filter { $0.isNumber }
+        guard !digits.isEmpty else { return nil }
+        let prefix = raw.trimmingCharacters(in: .whitespaces).hasPrefix("+") ? "+" : ""
+        return URL(string: "tel:\(prefix)\(digits)")
+    }
+
+    static func email(_ raw: String) -> URL? {
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+        guard trimmed.contains("@"), !trimmed.contains(" ") else { return nil }
+        return URL(string: "mailto:\(trimmed)")
+    }
+
+    /// Feld heisst "websiteOrInstagram" — "@handle" wird zu instagram.com/handle,
+    /// fehlendes Schema wird zu https:// ergaenzt.
+    static func website(_ raw: String) -> URL? {
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, !trimmed.contains(" ") else { return nil }
+        if trimmed.hasPrefix("@") {
+            return URL(string: "https://instagram.com/\(trimmed.dropFirst())")
+        }
+        let lower = trimmed.lowercased()
+        if lower.hasPrefix("http://") || lower.hasPrefix("https://") { return URL(string: trimmed) }
+        return URL(string: "https://\(trimmed)")
     }
 }

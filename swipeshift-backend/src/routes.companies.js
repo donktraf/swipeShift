@@ -49,6 +49,8 @@ router.get("/:name", async (req, res) => {
         select: {
           companyName: true, companySize: true, industry: true,
           companyLogoUrl: true, websiteOrInstagram: true, companyDescription: true,
+          // Oeffentliche Firmen-Kontaktdaten (vom Employer in "Company Information" gepflegt)
+          companyPhone: true, companyEmail: true,
         },
       });
       if (emp) employerProfile = emp;
@@ -106,6 +108,8 @@ router.get("/:name", async (req, res) => {
       // Aus Employer-Profil (falls vorhanden)
       about:          employerProfile?.companyDescription ?? null,
       website:        employerProfile?.websiteOrInstagram ?? null,
+      phone:          employerProfile?.companyPhone ?? null,
+      email:          employerProfile?.companyEmail ?? null,
       industry:       employerProfile?.industry ?? null,
       companySize:    employerProfile?.companySize ?? null,
       // Offene Jobs für "View Open Jobs"
