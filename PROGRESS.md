@@ -1,6 +1,6 @@
 # SwipeShift — iOS Frontend Progress
 
-_Zuletzt aktualisiert: 2026-11-16 (Paid-Out-Fix + Kostenformel, Rating-Filter)_
+_Zuletzt aktualisiert: 2026-11-16 (Company-Profil: Response Rate + Antwortzeit)_
 
 ---
 
@@ -685,4 +685,12 @@ Lücken aus dem Field-Audit: Employer hatte gar keinen Zeitraum-Filter, Worker k
 - `Features/Employer/ReviewFilterSheet.swift` (neu) — `ReviewFilters` (Rating, Would Rehire, Kategorie, Datum mit Presets + Custom), Filter-Sheet mit Entwurfsmodus, umbrechende Chips
 - `Features/Employer/LeaveReviewsView.swift` — nutzt das neue Sheet; Kategorie + Datum filtern auch "Pending"; "No reviews match your filters"-Zustand
 - Offen: "Drafts"-Tab ist weiterhin ein Platzhalter
+
+### Company Profile: Response Rate + typische Antwortzeit (2026-11-16)
+Notion-Felder "Employer response rate" / "Typical response time" (Detailed Company Profile Screen). Im Field-Audit zunächst fälschlich der Bewerber-Übersicht zugeordnet.
+- Prisma: `Apply.respondedAt` (Migration `20261116180000_add_apply_responded_at`), gesetzt bei der ERSTEN Antwort in `POST /employer/applicants/:id/accept|decline`; Unassign behält es
+- `src/utils/responseStats.js` (+ Tests) — Quote = beantwortet / (beantwortet + offen > 48 h); Antwortzeit = Median; unter 3 Datenpunkten `null`. Altdaten (accepted/declined ohne Zeitstempel) zählen für die Quote, nicht für die Zeit
+- `src/routes.companies.js` — `responseRate`, `typicalResponseHours` (nur aggregierte Zahlen)
+- iOS `CompanyProfileView` — Kennzahl "Response Rate" im Header, "Usually replies within …" aus echten Daten (Fallback: statischer `replyTime`), "New on platform" bei zu wenig Daten
+- Hinweis: Seed-Daten haben deutschen `replyTime`-Fallbacktext in englischer UI
 

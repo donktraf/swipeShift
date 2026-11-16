@@ -23,7 +23,7 @@ Status-Legende: ✅ geprüft | 🔄 in Arbeit | ⬜ noch nicht geprüft
 | 5 | Calendar Screen | ✅ | **Ja** (Worker-Seite) |
 | 6 | Chat Screen | ✅ | ~~Ja~~ → **umgesetzt 2026-11-16** |
 | 7 | Job Detail Screen | ✅ | ~~Ja (klein)~~ → **umgesetzt 2026-11-16** |
-| 8 | Applicants Overview Screen (Company) | ✅ | **Ja** (klein) |
+| 8 | Applicants Overview Screen (Company) | ✅ | Nein (Fund war falsch zugeordnet, siehe #14) |
 | 9 | Add Job Screen (Company) | ✅ (Vorrunde) | **Ja** (groß, siehe oben) |
 | 10 | Setting Screen | ✅ | **Ja** |
 | 11 | Rating Screen | ✅ | ~~Ja~~ → **umgesetzt 2026-11-16** |
@@ -104,7 +104,7 @@ Code: `JobDetailView.swift`. Fast alle Notion-Felder vorhanden (Requirements, Pa
 
 Code: `AllApplicantsView.swift`. Accept/Decline-Buttons rufen echte Backend-Endpunkte auf (`acceptApplicant`/`declineApplicant`), Tabs funktionieren.
 
-**Fehlt:** "Employer response rate" (Notion-Feld unter Applicants-Overview) — kein Treffer im Code, kein entsprechendes Backend-Feld ersichtlich.
+~~**Fehlt:** "Employer response rate"~~ — **Korrektur 2026-11-16:** Das Feld gehört in Notion zum "Detailed Company Profile Screen (Employee)", nicht zur Bewerber-Übersicht. Umgesetzt dort (siehe #14).
 
 ## 10. Setting Screen — ⚠️ Lücke gefunden
 
@@ -136,6 +136,8 @@ Code: `CompanyProfileView.swift`. Rating + Sterne + Review-Breakdown ✓, Review
 
 **Fehlt:** Telefon und E-Mail in den Company-Contact-Details — CLAUDE.md verlangt explizit "Telefon, E-Mail, Website", Code hat nur `website`-Feld, kein `phone`/`email`-Treffer in der Datei.
 
+**✅ Umgesetzt (2026-11-16): "Employer response rate" + "Typical response time"** (Notion-Felder dieses Screens): neues Feld `Apply.respondedAt` (erste Antwort), Berechnung in `src/utils/responseStats.js` (48 h Kulanz für offene Bewerbungen, Median-Antwortzeit, unter 3 Datenpunkten "New on platform"). Im Header als Kennzahl "Response Rate" + "Usually replies within …".
+
 **✅ Umgesetzt (2026-11-16):** `GET /companies/:name` liefert `phone`/`email` (aus `Employer.companyPhone`/`companyEmail`), Kontaktzeilen sind antippbar (tel:/mailto:/https, `@handle` → Instagram).
 
 ## 15. Profile Screen — ✅ keine Lücke (grobe Prüfung)
@@ -163,7 +165,7 @@ Code: `SavedView.swift` (Worker) — Jobs/Companies-Tabs ✓, nach Datum gruppie
 | Calendar (Worker) | Open-Chat-Button, Payment-Status-Badge, Stornierungsgrund+Indikator, Overlap-Warnung |
 | Chat | ~~Typing-Indicator, Online/Offline-Status, echte Read-Receipts~~ ✅ umgesetzt 2026-11-16 |
 | Job Detail | ~~Share-Icon fehlt~~ ✅ umgesetzt 2026-11-16 |
-| Applicants Overview | "Employer response rate" fehlt |
+| Company Profile | ~~"Employer response rate" fehlt~~ ✅ umgesetzt 2026-11-16 (gehörte zum Company-Profil, nicht zur Bewerber-Übersicht) |
 | Settings | 2FA fehlt komplett; Active-Sessions-*Liste* ist hardcodiert (nicht nur das Einzel-Abmelden) |
 | Rating (Employer) | ~~Filter nach Job Category + Date Range fehlen~~ ✅ umgesetzt 2026-11-16 (offen: Drafts-Tab ist Platzhalter) |
 | Company Profile | ~~Telefon + E-Mail fehlen~~ ✅ umgesetzt 2026-11-16 |
