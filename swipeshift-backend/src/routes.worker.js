@@ -5,6 +5,7 @@ const { prisma } = require("./prisma");
 const { requireAuth } = require("./auth");
 const { requireVerifiedEmail } = require("./middlewares/requireVerifiedEmail");
 const { resolvePeriod, prismaRange } = require("./utils/period");
+const { payPerWorker } = require("./utils/jobCost");
 
 const router = express.Router();
 
@@ -297,14 +298,8 @@ router.get("/financials", requireAuth, requireVerifiedEmail, async (req, res) =>
       orderBy: { createdAt: "desc" },
     });
 
-    const calcEarning = (a) => {
-      const job = a.job;
-      if (!job) return 0;
-      const hours = job.startTime && job.endTime
-        ? (new Date(job.endTime) - new Date(job.startTime)) / 3_600_000
-        : 8;
-      return (job.payAmount ?? 0) * hours;
-    };
+    // Gleiche Rechnung wie beim Employer (Stundenlohn × Schichtstunden, utils/jobCost.js)
+    const calcEarning = (a) => (a.job ? payPerWorker(a.job) : 0);
 
     const upcoming   = applies.filter((a) => a.job?.startTime && new Date(a.job.startTime) > now);
     const completed  = applies.filter((a) => a.job?.endTime   && new Date(a.job.endTime)   <= now);

@@ -75,7 +75,9 @@ struct EmployerFinancialView: View {
             EmployerStatCard(label: "Total Spending",     value: "€\(Int(f.totalSpending))",    icon: "eurosign.circle.fill",   color: SS.primary)
             EmployerStatCard(label: "Upcoming Payments",  value: "€\(Int(f.upcomingPayments))", icon: "clock.fill",             color: .orange)
             EmployerStatCard(label: "Completed Jobs",     value: "\(f.completedJobsCount)",     icon: "checkmark.circle.fill",  color: .green)
-            EmployerStatCard(label: "Monthly Spend",      value: "€\(Int(f.monthlySpend))",     icon: "calendar.circle.fill",   color: .teal)
+            // Wireframe: Total Spending, Upcoming Payments, Completed Jobs, Paid Out
+            // (Monthly Spend steht weiterhin auf dem Employer-Dashboard)
+            EmployerStatCard(label: "Paid Out",           value: "€\(Int(f.paidOut))",          icon: "checkmark.seal.fill",    color: .teal)
         }
     }
 
@@ -225,6 +227,23 @@ struct EmployerFinancialView: View {
 private struct FinancialJobCard: View {
     let job: FinancialJobDTO
 
+    /// Backend-Status: upcoming | completed | paid (alle Worker bezahlt)
+    private var statusLabel: String {
+        switch job.status {
+        case "paid":      return "Paid"
+        case "completed": return "Done"
+        default:          return "Upcoming"
+        }
+    }
+
+    private var statusColor: Color {
+        switch job.status {
+        case "paid":      return .teal
+        case "completed": return .green
+        default:          return .orange
+        }
+    }
+
     var body: some View {
         HStack(spacing: 12) {
             Text(job.logoEmoji)
@@ -242,10 +261,10 @@ private struct FinancialJobCard: View {
 
             VStack(alignment: .trailing, spacing: 4) {
                 Text("€\(Int(job.amount))").font(.system(size: 15, weight: .bold)).foregroundColor(.primary)
-                Text(job.status == "completed" ? "Done" : "Upcoming")
+                Text(statusLabel)
                     .font(.system(size: 11, weight: .semibold)).foregroundColor(.white)
                     .padding(.horizontal, 8).padding(.vertical, 2)
-                    .background(job.status == "completed" ? Color.green : Color.orange)
+                    .background(statusColor)
                     .clipShape(Capsule())
             }
         }
@@ -294,10 +313,12 @@ private struct BreakdownSheet: View {
 
     private var rows: [(String, Double, Color)] {
         if mode == .byStatus {
+            // Total Spending enthaelt bereits Bezahltes → "Completed" hier nur der offene Teil,
+            // sonst wuerde Paid Out doppelt in die Summe eingehen
             return [
-                ("Upcoming",  financials.upcomingPayments,   .orange),
-                ("Completed", financials.totalSpending,      SS.primary),
-                ("Paid Out",  financials.paidOut,            .teal),
+                ("Upcoming",            financials.upcomingPayments,                          .orange),
+                ("Completed (unpaid)",  max(0, financials.totalSpending - financials.paidOut), SS.primary),
+                ("Paid Out",            financials.paidOut,                                   .teal)
             ].filter { $0.1 > 0 }
         } else {
             let colors: [Color] = [.purple, .blue, .orange, .green, .pink, .teal]

@@ -5,6 +5,7 @@ const { prisma } = require("./prisma");
 const { requireAuth } = require("./auth");
 const { requireVerifiedEmail } = require("./middlewares/requireVerifiedEmail");
 const { resolvePeriod, isInPeriod, buildBuckets } = require("./utils/period");
+const { jobCosts, shiftHours } = require("./utils/jobCost");
 
 const router = express.Router();
 
@@ -133,7 +134,11 @@ router.get("/stats", requireAuth, requireVerifiedEmail, async (req, res) => {
 
     const myJobs = await prisma.job.findMany({
       where:  { employerId },
-      select: { id: true, status: true, payAmount: true, openSpots: true, category: true, startTime: true },
+      select: {
+        id: true, status: true, payAmount: true, openSpots: true, category: true,
+        startTime: true, endTime: true,
+        applies: { where: { status: "accepted" }, select: { isPaid: true } },
+      },
     });
     const myJobIds = myJobs.map((j) => j.id);
 
@@ -152,9 +157,8 @@ router.get("/stats", requireAuth, requireVerifiedEmail, async (req, res) => {
     const completedThisMonth = myJobs.filter(
       (j) => j.status === "completed" && j.startTime && new Date(j.startTime) >= monthStart
     );
-    const monthlySpend = completedThisMonth.reduce(
-      (sum, j) => sum + (j.payAmount ?? 0) * (j.openSpots ?? 1), 0
-    );
+    // Gleiche Formel wie Finanz-Uebersicht + Payment-Screen (Stundenlohn × Stunden × Worker)
+    const monthlySpend = completedThisMonth.reduce((sum, j) => sum + jobCosts(j, j.applies).completed, 0);
 
     const jobsFilledWeek = myJobs.filter(
       (j) => j.status === "completed" && j.startTime && new Date(j.startTime) >= weekAgo
@@ -198,16 +202,21 @@ router.get("/financials", requireAuth, requireVerifiedEmail, async (req, res) =>
         id: true, title: true, status: true, payAmount: true,
         openSpots: true, startTime: true, endTime: true,
         shiftText: true, logoEmoji: true, category: true,
+        applies: { where: { status: "accepted" }, select: { isPaid: true } },
       },
       orderBy: { startTime: "desc" },
     });
 
-    const calcCost = (j) => (j.payAmount ?? 0) * (j.openSpots ?? 1);
+    // Kosten pro Job: Stundenlohn × Stunden × Worker (siehe utils/jobCost.js)
+    const costOf = new Map(myJobs.map(j => [j.id, jobCosts(j, j.applies)]));
+    const cost   = (j) => costOf.get(j.id);
+    const sum    = (jobs, key) => jobs.reduce((s, j) => s + cost(j)[key], 0);
 
-    // Monthly Spend unabhaengig vom gewaehlten Zeitraum (Kachel-Label "Monthly Spend")
-    const monthlySpend = myJobs
-      .filter(j => j.status === "completed" && j.startTime && new Date(j.startTime) >= monthStart)
-      .reduce((s, j) => s + calcCost(j), 0);
+    // Monthly Spend unabhaengig vom gewaehlten Zeitraum (wie im Dashboard)
+    const monthlySpend = sum(
+      myJobs.filter(j => j.status === "completed" && j.startTime && new Date(j.startTime) >= monthStart),
+      "completed"
+    );
 
     // "Upcoming" = veroeffentlicht UND Schicht in der Zukunft — gleiche Regel fuer Kachel,
     // Liste und Diagramm (vergangene, nie abgeschlossene Jobs zaehlen nicht als offene Zahlung)
@@ -217,8 +226,9 @@ router.get("/financials", requireAuth, requireVerifiedEmail, async (req, res) =>
     const completedJobs = periodJobs.filter(j => j.status === "completed");
     const upcomingJobs  = periodJobs.filter(isUpcoming).reverse(); // naechste zuerst
 
-    const totalSpending    = completedJobs.reduce((s, j) => s + calcCost(j), 0);
-    const upcomingPayments = upcomingJobs.reduce((s, j) => s + calcCost(j), 0);
+    const totalSpending    = sum(completedJobs, "completed"); // inkl. bereits bezahlter Worker
+    const upcomingPayments = sum(upcomingJobs, "planned");
+    const paidOut          = sum(periodJobs, "paidOut");
 
     // Diagramm-Achse: fester Zeitraum, bei "All Time" aus den tatsaechlichen Schichtdaten
     let { chartStart, chartEnd } = range;
@@ -236,11 +246,13 @@ router.get("/financials", requireAuth, requireVerifiedEmail, async (req, res) =>
         const t = new Date(j.startTime);
         return t >= bucket.start && t <= bucket.end;
       });
+      // Gestapelte Balken ohne Doppelzaehlung: completed = abgeschlossen, aber noch offen
+      const done = inBucket.filter(j => j.status === "completed");
       return {
         day:       bucket.label,
-        upcoming:  inBucket.filter(isUpcoming).reduce((s, j) => s + calcCost(j), 0),
-        completed: inBucket.filter(j => j.status === "completed").reduce((s, j) => s + calcCost(j), 0),
-        paidOut:   0, // TODO: Apply.isPaid existiert, wird hier noch nicht ausgewertet
+        upcoming:  sum(inBucket.filter(isUpcoming), "planned"),
+        completed: Math.max(0, sum(done, "completed") - sum(done, "paidOut")),
+        paidOut:   sum(inBucket, "paidOut"),
       };
     });
 
@@ -248,24 +260,28 @@ router.get("/financials", requireAuth, requireVerifiedEmail, async (req, res) =>
     const byCategory = {};
     completedJobs.forEach(j => {
       const cat = j.category ?? "Other";
-      byCategory[cat] = (byCategory[cat] ?? 0) + calcCost(j);
+      byCategory[cat] = (byCategory[cat] ?? 0) + cost(j).completed;
     });
 
-    const toListItem = (status) => (j) => ({
-      id:        j.id,
-      title:     j.title,
-      logoEmoji: j.logoEmoji,
-      shiftText: j.shiftText,
-      amount:    calcCost(j),
-      status,
-    });
+    // status: upcoming | completed | paid (alle angenommenen Worker bezahlt)
+    const toListItem = (kind) => (j) => {
+      const fullyPaid = j.applies.length > 0 && j.applies.every(a => a.isPaid);
+      return {
+        id:        j.id,
+        title:     j.title,
+        logoEmoji: j.logoEmoji,
+        shiftText: j.shiftText,
+        amount:    kind === "upcoming" ? cost(j).planned : cost(j).completed,
+        status:    kind === "completed" && fullyPaid ? "paid" : kind,
+      };
+    };
 
     return res.json({
       period:             range.period,
       totalSpending,
       upcomingPayments,
       completedJobsCount: completedJobs.length,
-      paidOut:            0,
+      paidOut,
       monthlySpend,
       chartData,
       byCategory,
@@ -378,9 +394,7 @@ router.get("/jobs/:jobId/payments", requireAuth, requireVerifiedEmail, async (re
     });
 
     const hourlyRate  = job.payAmount ?? 0;
-    const hoursWorked = job.startTime && job.endTime
-      ? Math.round(((new Date(job.endTime) - new Date(job.startTime)) / 3_600_000) * 10) / 10
-      : 8;
+    const hoursWorked = shiftHours(job); // gleiche Rundung wie Finanz-Uebersicht
 
     const shiftLabel = job.startTime
       ? new Date(job.startTime).toLocaleDateString("en-US", { month: "short", day: "numeric" })
