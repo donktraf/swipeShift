@@ -31,7 +31,7 @@ Status-Legende: ✅ geprüft | 🔄 in Arbeit | ⬜ noch nicht geprüft
 | 13 | Logout Screen | ✅ | Nein (Worker-Seite geprüft) |
 | 14 | Detailed Company Profile Screen (Employee) | ✅ | ~~Ja~~ → **umgesetzt 2026-11-16** |
 | 15 | Profile Screen | ✅ | Nein (grobe Prüfung) |
-| 16 | Financial Overview | ✅ | **Ja** (Employer-Seite) |
+| 16 | Financial Overview | ✅ | ~~Ja~~ → **umgesetzt 2026-11-16** (beide Seiten) |
 | 17 | Saved Screen | ✅ | Nein |
 | 18 | Dashboard Screen - Worker | ✅ (Vorrunde) | Nein |
 
@@ -146,6 +146,8 @@ Code: `FinancialOverviewView.swift` (Worker) — Donut-Diagramm ✓, Zeitraum-Dr
 
 `EmployerFinancialView.swift` (Employer) — 3-Farben-Balkendiagramm (Upcoming/Completed/Paid Out) ✓, "View Breakdown"-Button ✓. **Fehlt komplett:** der Zeitraum-Dropdown selbst — kein `Picker`/`@State`-Feld für Periode gefunden, nur ein Text "No data for the selected period." ohne zugehörige Auswahl-UI. Das ist eine echte, verifizierte Lücke (Employer-Seite ist hier schwächer als Worker-Seite).
 
+**✅ Umgesetzt (2026-11-16), beide Seiten:** Gemeinsamer Zeitraum-Picker (This Month / Last 3 Months / This Year / All Time / Custom Range mit Kalender-Sheet), gemeinsame Backend-Logik in `src/utils/period.js`. Employer-Diagramm passt sich dem Zeitraum an (Tage / Wochen / Monate). Nebenbei korrigiert: vergangene, nie abgeschlossene Jobs zählten im Diagramm als "Upcoming"; feste Zeiträume enden jetzt am Monats-/Jahresende. Offen: "Paid Out" ist beim Employer weiterhin immer 0 (TODO im Code).
+
 ## 17. Saved Screen — ✅ keine Lücke
 
 Code: `SavedView.swift` (Worker) — Jobs/Companies-Tabs ✓, nach Datum gruppierte Jobs ✓, Companies-Liste ✓, Empty-State ✓. `SavedApplicantsView.swift` (Employer) existiert ebenfalls (nicht im Detail geprüft, war schon vorher laut CLAUDE.md als implementiert dokumentiert).
@@ -163,7 +165,7 @@ Code: `SavedView.swift` (Worker) — Jobs/Companies-Tabs ✓, nach Datum gruppie
 | Settings | 2FA fehlt komplett; Active-Sessions-*Liste* ist hardcodiert (nicht nur das Einzel-Abmelden) |
 | Rating (Employer) | Filter nach Job Category + Date Range fehlen |
 | Company Profile | ~~Telefon + E-Mail fehlen~~ ✅ umgesetzt 2026-11-16 |
-| Financial (Worker) | Custom-Range-Option im Zeitraum-Dropdown fehlt |
-| Financial (Employer) | Zeitraum-Dropdown fehlt komplett |
+| Financial (Worker) | ~~Custom-Range-Option fehlt~~ ✅ umgesetzt 2026-11-16 |
+| Financial (Employer) | ~~Zeitraum-Dropdown fehlt~~ ✅ umgesetzt 2026-11-16 |
 
 **Nicht tief geprüft:** Profile Screen (Edit-Profile-Felder für Worker+Employer) — umfangreichste Notion-Struktur, nur grob verifiziert. Bei Bedarf gezielt nachprüfen.

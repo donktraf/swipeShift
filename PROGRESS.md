@@ -1,6 +1,6 @@
 # SwipeShift — iOS Frontend Progress
 
-_Zuletzt aktualisiert: 2026-11-16 (Job-Share-Button, Company-Kontaktdaten)_
+_Zuletzt aktualisiert: 2026-11-16 (Zeitraum-Filter Finanz-Übersichten)_
 
 ---
 
@@ -659,4 +659,18 @@ Lücke aus dem Field-Audit (`reports/app-tracker-field-audit.md`, Chat Screen). 
 - `src/routes.companies.js` — `GET /companies/:name` liefert `phone` / `email` aus `Employer.companyPhone` / `companyEmail`
 - `DTOs/MessageDTO.swift` — `CompanyProfileDTO.phone` / `email`
 - `Features/Worker/Company/CompanyProfileView.swift` — Contact-Sektion mit Telefon, E-Mail, Website; antippbar über `ContactLink` (tel:/mailto:/https, `@handle` → instagram.com)
+
+### Financial Overview: Zeitraum-Filter für beide Seiten (2026-11-16)
+Lücken aus dem Field-Audit: Employer hatte gar keinen Zeitraum-Filter, Worker keine "Custom Range".
+- Backend:
+  - `src/utils/period.js` (+ Tests) — `resolvePeriod` (thisMonth / last3Months / thisYear / allTime / custom mit `from`/`to` = YYYY-MM-DD, inklusive), `buildBuckets` (Tage ≤ 31 Tage, Wochen ≤ 16 Wochen, sonst Monate). Feste Zeiträume enden am Monats- bzw. Jahresende
+  - `src/routes.employer.js` — `GET /employer/financials` filtert nach Zeitraum; Diagramm folgt dem Zeitraum statt fest 7 Tage; "Monthly Spend" bleibt laufender Monat; "Upcoming" überall = veröffentlicht + in der Zukunft (vorher zählte das Diagramm auch vergangene Jobs); 400 bei ungültigem Zeitraum
+  - `src/routes.worker.js` — `GET /worker/financials` nutzt denselben Helper (damit auch `custom`)
+- iOS:
+  - `UI/Components/FinancialPeriodPicker.swift` (neu) — `FinancialPeriod`, Capsule-Dropdown, Custom-Range-Sheet mit Kalender (Start/End)
+  - `Networking/APIClient.swift` — beide Finanz-Calls nehmen `FinancialPeriod`, Query sauber kodiert
+  - `Features/Employer/EmployerFinancialView.swift` — Picker, Fehlerzustand mit Retry, Diagramm für viele Balken (enger, nur jedes n-te Label)
+  - `Features/Worker/Profile/FinancialOverviewView.swift` — eigenes `TimePeriod` durch gemeinsamen Picker ersetzt
+  - Beide Views: `.task(id: period)`, abgebrochene Requests überschreiben keinen Zustand
+- Offen: "Paid Out" beim Employer weiterhin 0, obwohl `Apply.isPaid` existiert (TODO im Code)
 
