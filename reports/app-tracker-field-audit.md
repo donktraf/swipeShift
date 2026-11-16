@@ -22,14 +22,14 @@ Status-Legende: ✅ geprüft | 🔄 in Arbeit | ⬜ noch nicht geprüft
 | 4 | Applied Job Screen Overview (Employee) | ✅ | Nein (grobe Prüfung, Tabs/Withdraw-Flow passt) |
 | 5 | Calendar Screen | ✅ | **Ja** (Worker-Seite) |
 | 6 | Chat Screen | ✅ | ~~Ja~~ → **umgesetzt 2026-11-16** |
-| 7 | Job Detail Screen | ✅ | **Ja** (klein) |
+| 7 | Job Detail Screen | ✅ | ~~Ja (klein)~~ → **umgesetzt 2026-11-16** |
 | 8 | Applicants Overview Screen (Company) | ✅ | **Ja** (klein) |
 | 9 | Add Job Screen (Company) | ✅ (Vorrunde) | **Ja** (groß, siehe oben) |
 | 10 | Setting Screen | ✅ | **Ja** |
 | 11 | Rating Screen | ✅ | **Ja** (Employer-Seite) |
 | 12 | Job List Screen | ✅ | Nein |
 | 13 | Logout Screen | ✅ | Nein (Worker-Seite geprüft) |
-| 14 | Detailed Company Profile Screen (Employee) | ✅ | **Ja** |
+| 14 | Detailed Company Profile Screen (Employee) | ✅ | ~~Ja~~ → **umgesetzt 2026-11-16** |
 | 15 | Profile Screen | ✅ | Nein (grobe Prüfung) |
 | 16 | Financial Overview | ✅ | **Ja** (Employer-Seite) |
 | 17 | Saved Screen | ✅ | Nein |
@@ -98,6 +98,8 @@ Code: `JobDetailView.swift`. Fast alle Notion-Felder vorhanden (Requirements, Pa
 
 **Fehlt:** "Share Icon" (Job extern/intern teilen) — in Notion als eigenes Feld gelistet, im Code kein `Share`/`ShareLink`-Treffer in der Datei.
 
+**✅ Umgesetzt (2026-11-16):** Share-Button im Header (iOS-Share-Sheet mit Kurztext + Deep Link `swipeshift://job/<id>`); Deep Link öffnet beim Worker das Job-Detail. TODO: Universal Link, sobald die Domain live ist.
+
 ## 8. Applicants Overview Screen (Company) — ⚠️ kleine Lücke
 
 Code: `AllApplicantsView.swift`. Accept/Decline-Buttons rufen echte Backend-Endpunkte auf (`acceptApplicant`/`declineApplicant`), Tabs funktionieren.
@@ -132,6 +134,8 @@ Code: `CompanyProfileView.swift`. Rating + Sterne + Review-Breakdown ✓, Review
 
 **Fehlt:** Telefon und E-Mail in den Company-Contact-Details — CLAUDE.md verlangt explizit "Telefon, E-Mail, Website", Code hat nur `website`-Feld, kein `phone`/`email`-Treffer in der Datei.
 
+**✅ Umgesetzt (2026-11-16):** `GET /companies/:name` liefert `phone`/`email` (aus `Employer.companyPhone`/`companyEmail`), Kontaktzeilen sind antippbar (tel:/mailto:/https, `@handle` → Instagram).
+
 ## 15. Profile Screen — ✅ keine Lücke (grobe Prüfung)
 
 Notion-Struktur ist hier mit Abstand am umfangreichsten (Worker: Basic Info/Location & Availability/Work Preferences/Experience & Skills/Ratings & Trust/Legal — Employer: Company Identity/Location & Workplaces/Contact & Communication/Company Preferences/Trust & Reputation/Legal & Compliance/Payment & Billing/Account Settings). Nicht jedes einzelne Unterfeld gegen `WorkerProfileView`/`EditProfileView`/`EditEmployerProfileView` nachverifiziert — laut CLAUDE.md und PRIORITIES.md (#5, #6 "alle neuen Worker-/Employer-Felder ergänzt") sollte das weitgehend abgedeckt sein, aber das ist die am wenigsten tief geprüfte Zeile in dieser Liste. Bei Bedarf gezielt nachprüfen.
@@ -154,11 +158,11 @@ Code: `SavedView.swift` (Worker) — Jobs/Companies-Tabs ✓, nach Datum gruppie
 |---|---|
 | Calendar (Worker) | Open-Chat-Button, Payment-Status-Badge, Stornierungsgrund+Indikator, Overlap-Warnung |
 | Chat | ~~Typing-Indicator, Online/Offline-Status, echte Read-Receipts~~ ✅ umgesetzt 2026-11-16 |
-| Job Detail | Share-Icon fehlt |
+| Job Detail | ~~Share-Icon fehlt~~ ✅ umgesetzt 2026-11-16 |
 | Applicants Overview | "Employer response rate" fehlt |
 | Settings | 2FA fehlt komplett; Active-Sessions-*Liste* ist hardcodiert (nicht nur das Einzel-Abmelden) |
 | Rating (Employer) | Filter nach Job Category + Date Range fehlen |
-| Company Profile | Telefon + E-Mail in Contact Details fehlen (nur Website da) |
+| Company Profile | ~~Telefon + E-Mail fehlen~~ ✅ umgesetzt 2026-11-16 |
 | Financial (Worker) | Custom-Range-Option im Zeitraum-Dropdown fehlt |
 | Financial (Employer) | Zeitraum-Dropdown fehlt komplett |
 

@@ -1,6 +1,6 @@
 # SwipeShift — iOS Frontend Progress
 
-_Zuletzt aktualisiert: 2026-11-16 (Chat Presence: Typing / Online / Lesebestätigungen + Employer-Chatliste-Fix)_
+_Zuletzt aktualisiert: 2026-11-16 (Job-Share-Button, Company-Kontaktdaten)_
 
 ---
 
@@ -649,4 +649,14 @@ Lücke aus dem Field-Audit (`reports/app-tracker-field-audit.md`, Chat Screen). 
 ### Fix: Employer-Chatliste hat das Backend abstürzen lassen (2026-11-16)
 - `src/routes.messages.js` — `GET /messages` enthielt für Employer `include: { worker }`, Conversation hat diese Relation nicht → `PrismaClientValidationError`, unbehandelt in Express 4 → Node-Prozess beendet. Include entfernt (Name wird ohnehin separat geladen), `handle()`-Wrapper für GET-Liste/POST/PATCH ergänzt (500 statt Absturz)
 - `src/routes.messages.test.js` — Regressionstest ohne echte DB
+
+### Job Detail: Share-Button (2026-11-16)
+- `Features/Worker/Jobs/JobDetailView.swift` — `ShareLink` im Header neben dem Bookmark; `JobShareContent` baut Kurztext (Titel, Firma, Lohn, Schicht, Ort) + Deep Link `swipeshift://job/<id>` (TODO: Universal Link sobald Domain live)
+- `App/swipeShiftApp.swift` — `handleDeepLink` erkennt `swipeshift://job/<id>` → `JobStore.pendingDeepLinkJobId`
+- `Features/Worker/Dashboard/WorkerHomeView.swift` — lädt den Job per `fetchJob` und zeigt `JobDetailView` als Sheet (auch bei Kaltstart über den Link)
+
+### Company Profile: Telefon + E-Mail (2026-11-16)
+- `src/routes.companies.js` — `GET /companies/:name` liefert `phone` / `email` aus `Employer.companyPhone` / `companyEmail`
+- `DTOs/MessageDTO.swift` — `CompanyProfileDTO.phone` / `email`
+- `Features/Worker/Company/CompanyProfileView.swift` — Contact-Sektion mit Telefon, E-Mail, Website; antippbar über `ContactLink` (tel:/mailto:/https, `@handle` → instagram.com)
 
