@@ -161,6 +161,14 @@ private struct ApplicationCard: View {
             .padding(.horizontal, 14).padding(.vertical, 10)
             .lineLimit(1)
 
+            // Grund der Stornierung/Ablehnung (Employer-Angabe oder Standardtext vom Backend)
+            if status == .cancelled, let reason = item.cancellationReason {
+                Label(reason, systemImage: "xmark.circle.fill")
+                    .font(.system(size: 12)).foregroundColor(.red.opacity(0.85))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14).padding(.bottom, 10)
+            }
+
             if status == .applied {
                 Divider().padding(.horizontal, 14)
                 Button {

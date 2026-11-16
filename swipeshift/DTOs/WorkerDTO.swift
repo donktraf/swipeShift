@@ -21,6 +21,12 @@ struct WorkerApplicationItem: Identifiable, Decodable {
     let endTime:       Date?
     let appliedAt:     Date
     let displayStatus: String   // "confirmed" | "applied" | "completed" | "cancelled"
+    // Optional, damit aeltere Backend-Antworten weiter dekodieren
+    let cancellationKind:   String?   // "declined" | "jobCancelled"
+    let cancellationReason: String?
+    let paymentStatus:      String?   // "paid" | "pending" (nur completed)
+    let earnings:           Double?
+    let conversationId:     String?
 
 }
 

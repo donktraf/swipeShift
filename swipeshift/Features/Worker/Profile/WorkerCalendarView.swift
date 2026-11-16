@@ -2,6 +2,10 @@
 //  WorkerCalendarView.swift
 //  swipeShift
 //
+//  Kalender des Workers: Monat/Woche, kommende + vergangene Jobs, Detail-Sheet mit
+//  "View Job Details" / "Open Chat", Zahlungsstatus, Stornierungsgrund, Overlap-Warnung.
+//  Bausteine: WorkerCalendarComponents.swift
+//
 
 import SwiftUI
 
@@ -9,74 +13,136 @@ import SwiftUI
 
 private enum CalendarMode { case month, week }
 
-// MARK: - Calendar Job
-
-private struct CalendarJob: Identifiable {
-    let id = UUID()
-    let title: String
-    let company: String
-    let date: Date
-    let timeRange: String
-    let status: ApplicationStatus  // confirmed = grün, applied = grau
-}
-
 // MARK: - WorkerCalendarView
 
 struct WorkerCalendarView: View {
+    @EnvironmentObject var messageStore: MessageStore
+
     @State private var mode: CalendarMode = .month
     @State private var displayedMonth: Date = Date()
-    @State private var calendarJobs: [CalendarJob] = []
+    @State private var weekOffset = 0
+    @State private var entries: [CalendarEntry] = []
     @State private var isLoading = false
+    @State private var loadFailed = false
+
+    // Navigation aus dem Detail-Sheet
+    @State private var selectedEntry: CalendarEntry?
+    @State private var jobDetail: Job?
+    @State private var chatConversation: Conversation?
+    @State private var actionError: String?
 
     private let calendar = Calendar.current
+
+    private var upcomingEntries: [CalendarEntry] {
+        entries.filter { !$0.isPast() }.sorted { $0.start < $1.start }
+    }
+
+    private var pastEntries: [CalendarEntry] {
+        entries.filter { $0.isPast() }.sorted { $0.start > $1.start }
+    }
+
+    private var conflictCount: Int { upcomingEntries.filter(\.hasConflict).count }
 
     var body: some View {
         SubScreenShell(title: "Calendar") {
             VStack(spacing: 20) {
-                modeToggle
-                    .padding(.horizontal, 16)
+                modeToggle.padding(.horizontal, 16)
 
-                if isLoading {
-                    ProgressView()
-                        .tint(.white)
-                        .padding(.top, 40)
-                } else if mode == .month {
-                    monthView
+                if isLoading && entries.isEmpty {
+                    ProgressView().tint(.white).padding(.top, 40)
+                } else if loadFailed && entries.isEmpty {
+                    errorState
+                } else if entries.isEmpty {
+                    emptyState
                 } else {
-                    weekView
+                    if conflictCount > 0 { conflictBanner.padding(.horizontal, 16) }
+                    if mode == .month { monthView } else { weekView }
+                    entryLists
                 }
             }
         }
-        .task { await loadCalendarJobs() }
+        // Bei jedem Erscheinen neu laden → Annahme/Stornierung/Abschluss sind sofort sichtbar
+        .task { await loadEntries() }
+        .sheet(item: $selectedEntry) { entry in
+            CalendarEntryDetailSheet(
+                entry: entry,
+                onViewJob: { openJob(entry) },
+                onOpenChat: { openChat(entry) }
+            )
+        }
+        .sheet(item: $jobDetail) { job in
+            NavigationStack { JobDetailView(job: job) }
+        }
+        .navigationDestination(isPresented: Binding(
+            get: { chatConversation != nil },
+            set: { if !$0 { chatConversation = nil } }
+        )) {
+            if let conversation = chatConversation {
+                ChatView(conversation: conversation)
+            }
+        }
+        .alert("Something went wrong", isPresented: Binding(
+            get: { actionError != nil },
+            set: { if !$0 { actionError = nil } }
+        )) {
+            Button("OK", role: .cancel) { actionError = nil }
+        } message: {
+            Text(actionError ?? "")
+        }
     }
 
-    private func loadCalendarJobs() async {
+    // MARK: - Loading + Actions
+
+    private func loadEntries() async {
         isLoading = true
+        loadFailed = false
         do {
             let items = try await APIClient.shared.fetchWorkerApplications()
-            calendarJobs = items.compactMap { item in
-                guard item.displayStatus != "cancelled" && item.displayStatus != "completed",
-                      let date = item.startTime else { return nil }
-                let status: ApplicationStatus = item.displayStatus == "confirmed" ? .confirmed : .applied
-                return CalendarJob(title: item.jobTitle, company: item.company,
-                                   date: date, timeRange: item.shiftText, status: status)
-            }
-        } catch { }
+            entries = CalendarEntry.markingConflicts(items.compactMap(CalendarEntry.init(item:)))
+        } catch {
+            if (error as? URLError)?.code != .cancelled { loadFailed = true }
+        }
         isLoading = false
+    }
+
+    private func openJob(_ entry: CalendarEntry) {
+        selectedEntry = nil
+        Task {
+            do {
+                jobDetail = try await APIClient.shared.fetchJob(jobId: entry.jobId)
+            } catch {
+                actionError = "The job details could not be loaded."
+            }
+        }
+    }
+
+    private func openChat(_ entry: CalendarEntry) {
+        selectedEntry = nil
+        guard let conversationId = entry.conversationId else { return }
+        Task {
+            if messageStore.conversations.first(where: { $0.id == conversationId }) == nil {
+                await messageStore.loadConversations()
+            }
+            if let conversation = messageStore.conversations.first(where: { $0.id == conversationId }) {
+                chatConversation = conversation
+            } else {
+                actionError = "The chat for this job could not be found."
+            }
+        }
     }
 
     // MARK: - Mode Toggle
 
     private var modeToggle: some View {
         HStack(spacing: 0) {
-            ForEach([(CalendarMode.month, "Monat"), (CalendarMode.week, "Woche")], id: \.0) { m, label in
-                Button { mode = m } label: {
+            ForEach([(CalendarMode.month, "Month"), (CalendarMode.week, "Week")], id: \.0) { item, label in
+                Button { mode = item } label: {
                     Text(label)
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(mode == m ? .white : .secondary)
+                        .foregroundColor(mode == item ? .white : .secondary)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
-                        .background(mode == m ? SS.primary : Color.clear)
+                        .background(mode == item ? SS.primary : Color.clear)
                         .clipShape(Capsule())
                 }
                 .buttonStyle(.plain)
@@ -92,46 +158,16 @@ struct WorkerCalendarView: View {
 
     private var monthView: some View {
         VStack(spacing: 16) {
-            // Month Header
-            HStack {
-                Button {
-                    displayedMonth = calendar.date(byAdding: .month, value: -1, to: displayedMonth)!
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(.white)
-                        .padding(8)
-                        .background(Color.white.opacity(0.15))
-                        .clipShape(Circle())
-                }
+            navigationHeader(
+                title: displayedMonth.formatted(.dateTime.month(.wide).year()),
+                onPrevious: { displayedMonth = calendar.date(byAdding: .month, value: -1, to: displayedMonth) ?? displayedMonth },
+                onNext: { displayedMonth = calendar.date(byAdding: .month, value: 1, to: displayedMonth) ?? displayedMonth }
+            )
 
-                Spacer()
-
-                Text(monthLabel(for: displayedMonth))
-                    .font(.system(size: 17, weight: .bold))
-                    .foregroundColor(.white)
-
-                Spacer()
-
-                Button {
-                    displayedMonth = calendar.date(byAdding: .month, value: 1, to: displayedMonth)!
-                } label: {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(.white)
-                        .padding(8)
-                        .background(Color.white.opacity(0.15))
-                        .clipShape(Circle())
-                }
-            }
-            .padding(.horizontal, 16)
-
-            // Calendar Grid
             VStack(spacing: 0) {
-                // Weekday headers
                 HStack {
-                    ForEach(["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"], id: \.self) { d in
-                        Text(d)
+                    ForEach(["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"], id: \.self) { label in
+                        Text(label)
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundColor(.secondary)
                             .frame(maxWidth: .infinity)
@@ -139,64 +175,58 @@ struct WorkerCalendarView: View {
                 }
                 .padding(.bottom, 8)
 
-                // Days grid
                 let days = daysInMonth(for: displayedMonth)
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 7), spacing: 4) {
                     ForEach(days.indices, id: \.self) { idx in
-                        let (day, date) = days[idx]
-                        if let day, let date {
-                            DayCell(day: day, date: date, jobs: jobsOn(date: date))
+                        if let day = days[idx].0, let date = days[idx].1 {
+                            CalendarDayCell(day: day, date: date, entries: entriesOn(date))
+                                .onTapGesture {
+                                    // Tag mit genau einem Job → direkt Details; sonst Liste unten nutzen
+                                    let dayEntries = entriesOn(date)
+                                    if dayEntries.count == 1 { selectedEntry = dayEntries[0] }
+                                }
                         } else {
                             Color.clear.frame(height: 36)
                         }
                     }
                 }
-
-                Divider().padding(.top, 12)
+                legend.padding(.top, 12)
             }
             .padding(14)
             .background(Color(uiColor: .systemBackground))
             .clipShape(RoundedRectangle(cornerRadius: 16))
             .padding(.horizontal, 16)
             .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
+        }
+    }
 
-            // Upcoming Jobs List
-            let upcoming = calendarJobs.filter { $0.date >= calendar.startOfDay(for: Date()) }
-                                       .sorted { $0.date < $1.date }
-            if !upcoming.isEmpty {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Upcoming Jobs")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 16)
-
-                    ForEach(upcoming) { job in
-                        CalendarJobRow(job: job)
-                    }
-                    .padding(.horizontal, 16)
+    private var legend: some View {
+        HStack(spacing: 12) {
+            ForEach([ApplicationStatus.confirmed, .applied, .completed, .cancelled], id: \.self) { status in
+                HStack(spacing: 4) {
+                    Circle().fill(status.calendarColor).frame(width: 7, height: 7)
+                    Text(status.calendarLabel).font(.system(size: 10)).foregroundColor(.secondary)
                 }
             }
         }
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Week View
 
     private var weekView: some View {
-        let weekDays = currentWeekDays()
+        let weekDays = weekDays(offset: weekOffset)
         return VStack(spacing: 16) {
-            // Week navigation header
-            HStack {
-                Text(weekRangeLabel(days: weekDays))
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundColor(.white)
-                Spacer()
-            }
-            .padding(.horizontal, 16)
+            navigationHeader(
+                title: weekRangeLabel(weekDays),
+                onPrevious: { weekOffset -= 1 },
+                onNext: { weekOffset += 1 }
+            )
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: 12) {
                     ForEach(weekDays, id: \.self) { date in
-                        WeekDayColumn(date: date, jobs: jobsOn(date: date))
+                        CalendarWeekDayColumn(date: date, entries: entriesOn(date)) { selectedEntry = $0 }
                     }
                 }
                 .padding(.horizontal, 16)
@@ -204,176 +234,147 @@ struct WorkerCalendarView: View {
         }
     }
 
-    // MARK: - Helpers
+    // MARK: - Lists (kommend + vergangen getrennt)
 
-    private func jobsOn(date: Date) -> [CalendarJob] {
-        calendarJobs.filter { calendar.isDate($0.date, inSameDayAs: date) }
+    private var entryLists: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            entrySection(title: "Upcoming Jobs", entries: upcomingEntries,
+                         emptyText: "No upcoming jobs. Apply for shifts to fill your calendar.")
+            if !pastEntries.isEmpty {
+                entrySection(title: "Past Jobs", entries: pastEntries, emptyText: nil)
+            }
+        }
     }
 
-    private func monthLabel(for date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US")
-        formatter.dateFormat = "MMMM yyyy"
-        return formatter.string(from: date)
+    private func entrySection(title: String, entries: [CalendarEntry], emptyText: String?) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.system(size: 15, weight: .bold))
+                .foregroundColor(.white)
+            if entries.isEmpty, let emptyText {
+                Text(emptyText)
+                    .font(.system(size: 13))
+                    .foregroundColor(.white.opacity(0.6))
+            }
+            ForEach(entries) { entry in
+                Button { selectedEntry = entry } label: { CalendarEntryRow(entry: entry) }
+                    .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 16)
     }
 
-    /// Returns array of (day number?, date?) with leading nil padding for weekday offset
+}
+
+// MARK: - Helpers (Extension haelt den Struct-Body unter dem SwiftLint-Limit)
+
+extension WorkerCalendarView {
+    // MARK: - Conflict Banner
+
+    private var conflictBanner: some View {
+        Label(
+            conflictCount == 1
+                ? "1 upcoming shift overlaps with another job."
+                : "\(conflictCount) upcoming shifts overlap with other jobs.",
+            systemImage: "exclamationmark.triangle.fill"
+        )
+        .font(.system(size: 13, weight: .semibold))
+        .foregroundColor(.orange)
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(uiColor: .systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    // MARK: - Empty / Error
+
+    private var emptyState: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "calendar.badge.plus")
+                .font(.system(size: 44)).foregroundColor(.white.opacity(0.35))
+            Text("No jobs scheduled yet")
+                .font(.system(size: 16, weight: .semibold)).foregroundColor(.white.opacity(0.8))
+            Text("Apply for shifts and they will show up here.")
+                .font(.system(size: 13)).foregroundColor(.white.opacity(0.55))
+            NavigationLink {
+                JobListView()
+            } label: {
+                Label("Find jobs nearby", systemImage: "location.magnifyingglass")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(SS.primary)
+                    .padding(.horizontal, 20).padding(.vertical, 12)
+                    .background(Color.white)
+                    .clipShape(Capsule())
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 40)
+    }
+
+    private var errorState: some View {
+        VStack(spacing: 12) {
+            Text("Your calendar could not be loaded.")
+                .font(.system(size: 13)).foregroundColor(.white.opacity(0.6))
+            Button("Retry") { Task { await loadEntries() } }
+                .font(.system(size: 14, weight: .semibold)).foregroundColor(.white)
+        }
+        .padding(.top, 40)
+    }
+
+    private func navigationHeader(title: String, onPrevious: @escaping () -> Void, onNext: @escaping () -> Void) -> some View {
+        HStack {
+            chevronButton("chevron.left", label: "Previous", action: onPrevious)
+            Spacer()
+            Text(title).font(.system(size: 17, weight: .bold)).foregroundColor(.white)
+            Spacer()
+            chevronButton("chevron.right", label: "Next", action: onNext)
+        }
+        .padding(.horizontal, 16)
+    }
+
+    private func chevronButton(_ icon: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(.white)
+                .padding(8)
+                .background(Color.white.opacity(0.15))
+                .clipShape(Circle())
+        }
+        .accessibilityLabel(label)
+    }
+
+    private func entriesOn(_ date: Date) -> [CalendarEntry] {
+        entries.filter { calendar.isDate($0.start, inSameDayAs: date) }.sorted { $0.start < $1.start }
+    }
+
+    /// (Tag?, Datum?) mit fuehrenden Leerfeldern fuer den Wochentag-Versatz (Montag zuerst)
     private func daysInMonth(for date: Date) -> [(Int?, Date?)] {
         var components = calendar.dateComponents([.year, .month], from: date)
         components.day = 1
-        guard let firstDay = calendar.date(from: components) else { return [] }
+        guard let firstDay = calendar.date(from: components),
+              let range = calendar.range(of: .day, in: .month, for: firstDay) else { return [] }
 
-        let weekday = (calendar.component(.weekday, from: firstDay) + 5) % 7 // Mon=0
-        let range = calendar.range(of: .day, in: .month, for: firstDay)!
-
+        let weekday = (calendar.component(.weekday, from: firstDay) + 5) % 7
         var result: [(Int?, Date?)] = Array(repeating: (nil, nil), count: weekday)
-        for d in range {
-            var c = components; c.day = d
-            if let dayDate = calendar.date(from: c) {
-                result.append((d, dayDate))
-            }
+        for day in range {
+            var dayComponents = components
+            dayComponents.day = day
+            if let dayDate = calendar.date(from: dayComponents) { result.append((day, dayDate)) }
         }
         return result
     }
 
-    private func currentWeekDays() -> [Date] {
-        let today = Date()
+    private func weekDays(offset: Int) -> [Date] {
+        let today = calendar.startOfDay(for: Date())
         let weekday = (calendar.component(.weekday, from: today) + 5) % 7
-        guard let monday = calendar.date(byAdding: .day, value: -weekday, to: today) else { return [] }
+        guard let monday = calendar.date(byAdding: .day, value: -weekday + offset * 7, to: today) else { return [] }
         return (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: monday) }
     }
 
-    private func weekRangeLabel(days: [Date]) -> String {
+    private func weekRangeLabel(_ days: [Date]) -> String {
         guard let first = days.first, let last = days.last else { return "" }
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US")
-        f.dateFormat = "dd. MMM"
-        return "\(f.string(from: first)) – \(f.string(from: last))"
-    }
-}
-
-// MARK: - Day Cell
-
-private struct DayCell: View {
-    let day: Int
-    let date: Date
-    let jobs: [CalendarJob]
-
-    private var isToday: Bool { Calendar.current.isDateInToday(date) }
-
-    var body: some View {
-        VStack(spacing: 3) {
-            Text("\(day)")
-                .font(.system(size: 13, weight: isToday ? .bold : .regular))
-                .foregroundColor(isToday ? .white : .primary)
-                .frame(width: 32, height: 32)
-                .background(isToday ? SS.primary : Color.clear)
-                .clipShape(Circle())
-
-            if !jobs.isEmpty {
-                HStack(spacing: 2) {
-                    ForEach(jobs.prefix(2)) { job in
-                        Circle()
-                            .fill(job.status == .confirmed ? Color.green : Color.gray.opacity(0.5))
-                            .frame(width: 5, height: 5)
-                    }
-                }
-            }
-        }
-        .frame(height: 44)
-    }
-}
-
-// MARK: - Calendar Job Row
-
-private struct CalendarJobRow: View {
-    let job: CalendarJob
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Rectangle()
-                .fill(job.status == .confirmed ? Color.green : SS.primary)
-                .frame(width: 3)
-                .clipShape(Capsule())
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(job.title)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.primary)
-                Text("\(job.company) · \(job.timeRange)")
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
-            }
-
-            Spacer()
-
-            Text(job.status == .confirmed ? "Confirmed" : "Applied")
-                .font(.system(size: 11, weight: .bold))
-                .foregroundColor(.white)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(job.status == .confirmed ? Color.green : SS.primary)
-                .clipShape(Capsule())
-        }
-        .padding(12)
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
-    }
-}
-
-// MARK: - Week Day Column
-
-private struct WeekDayColumn: View {
-    let date: Date
-    let jobs: [CalendarJob]
-
-    private var isToday: Bool { Calendar.current.isDateInToday(date) }
-
-    private var dayLabel: String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US")
-        f.dateFormat = "EEE"
-        return f.string(from: date)
-    }
-
-    private var dayNumber: String {
-        let f = DateFormatter()
-        f.dateFormat = "d"
-        return f.string(from: date)
-    }
-
-    var body: some View {
-        VStack(spacing: 8) {
-            VStack(spacing: 2) {
-                Text(dayLabel)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(isToday ? SS.primary : .secondary)
-                Text(dayNumber)
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(isToday ? SS.primary : .primary)
-            }
-
-            VStack(spacing: 6) {
-                ForEach(jobs) { job in
-                    Text(job.title)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 6)
-                        .frame(maxWidth: .infinity)
-                        .background(job.status == .confirmed ? Color.green : SS.primary)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                }
-                if jobs.isEmpty {
-                    Color.clear.frame(height: 30)
-                }
-            }
-        }
-        .frame(width: 80)
-        .padding(10)
-        .background(Color(uiColor: .systemBackground).opacity(isToday ? 1 : 0.7))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
+        let style = Date.FormatStyle.dateTime.day().month(.abbreviated)
+        return "\(first.formatted(style)) – \(last.formatted(style))"
     }
 }

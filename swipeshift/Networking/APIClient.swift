@@ -583,9 +583,12 @@ final class APIClient {
     }
 
     // PATCH /jobs/:id/status
-    func updateJobStatus(jobId: String, status: String) async throws {
+    /// `reason` nur beim Stornieren relevant (optional, wird Workern im Kalender angezeigt)
+    func updateJobStatus(jobId: String, status: String, reason: String? = nil) async throws {
         var req = try makeRequest(path: "/jobs/\(jobId)/status", method: "PATCH")
-        req.httpBody = try JSONSerialization.data(withJSONObject: ["status": status])
+        var body: [String: String] = ["status": status]
+        if let reason, !reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { body["reason"] = reason }
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, response) = try await URLSession.shared.data(for: req)
         try validate(response: response, data: data)
     }

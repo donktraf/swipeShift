@@ -67,6 +67,7 @@ struct AllPostedJobsView: View {
 
     // Aktions-Alerts
     @State private var jobToCancel: EmployerJob? = nil
+    @State private var cancelReason = ""
     @State private var jobToPublish: EmployerJob? = nil
 
     // Payment Navigation
@@ -143,14 +144,20 @@ struct AllPostedJobsView: View {
         // Cancel confirmation
         .alert("Cancel job?", isPresented: Binding(
             get: { jobToCancel != nil },
-            set: { if !$0 { jobToCancel = nil } }
+            set: { if !$0 { jobToCancel = nil; cancelReason = "" } }
         )) {
+            // Optionaler Grund — Worker sehen ihn im Kalender und in "Job Applications"
+            TextField("Reason (optional)", text: $cancelReason)
             Button("Cancel Job", role: .destructive) {
-                if let job = jobToCancel { Task { await updateStatus(job, to: "cancelled") } }
+                if let job = jobToCancel {
+                    let reason = cancelReason
+                    Task { await updateStatus(job, to: "cancelled", reason: reason) }
+                }
+                cancelReason = ""
             }
-            Button("Dismiss", role: .cancel) { jobToCancel = nil }
+            Button("Dismiss", role: .cancel) { jobToCancel = nil; cancelReason = "" }
         } message: {
-            Text("The job will be cancelled. Applicants will no longer be shown.")
+            Text("The job will be cancelled. Applicants and assigned workers will see the cancellation and your reason (optional) in their calendar.")
         }
         // Publish confirmation
         .alert("Publish job?", isPresented: Binding(
@@ -256,9 +263,9 @@ struct AllPostedJobsView: View {
     }
 
     @MainActor
-    private func updateStatus(_ job: EmployerJob, to status: String) async {
+    private func updateStatus(_ job: EmployerJob, to status: String, reason: String? = nil) async {
         do {
-            try await APIClient.shared.updateJobStatus(jobId: job.id, status: status)
+            try await APIClient.shared.updateJobStatus(jobId: job.id, status: status, reason: reason)
             await load()
         } catch {
             errorMessage = error.localizedDescription
