@@ -1,6 +1,6 @@
 # SwipeShift — iOS Frontend Progress
 
-_Zuletzt aktualisiert: 2026-07-24 (Chat Auto-Refresh — B1)_
+_Zuletzt aktualisiert: 2026-11-16 (Chat Presence: Typing / Online / Lesebestätigungen + Employer-Chatliste-Fix)_
 
 ---
 
@@ -631,3 +631,22 @@ Alle Mockup-Images analysiert (15 Dateien), neue Lücken identifiziert und imple
   - `displayedJobs` Schritt 3 — wendet `maxDistance`-Filter an; Jobs ohne Koordinaten werden eingeschlossen
   - `displayedJobs` Schritt 5 — `.distance`-Sortierung nutzt `distanceKm(to:)` mit `.greatestFiniteMagnitude` als Fallback
   - `FilterSheet` — Distanz-Sektion mit "Any"-Chip + 5/10/15/20/25 km Chips oberhalb der Kategorie-Chips
+
+### Chat Presence — Typing, Online-Status, Lesebestätigungen (2026-11-16)
+Lücke aus dem Field-Audit (`reports/app-tracker-field-audit.md`, Chat Screen). Weiterhin Polling-basiert, kein WebSocket.
+- Backend:
+  - Prisma: `User.lastSeenAt`, `Conversation.{worker,employer}LastReadAt`, `Conversation.{worker,employer}TypingAt` (Migration `20261116120000_add_chat_presence_read_receipts`)
+  - `src/utils/chatPresence.js` (+ Tests) — Typing-Fenster 6 s, Online-Fenster 2 min, `lastSeenAt`-Drosselung 30 s
+  - `src/auth.js` — `requireAuth` aktualisiert `lastSeenAt` gedrosselt (fire-and-forget)
+  - `src/routes.messages.js` — neuer Endpunkt `POST /messages/:id/typing`; `GET /messages` + `GET /messages/:id` liefern `presence`; Nachrichten tragen `isReadByOther`; `PATCH /read` setzt den Lesezeitpunkt. Typing/Lesen per Raw-SQL, damit `updatedAt` (Listen-Sortierung) unverändert bleibt
+- iOS:
+  - `Models/Conversation.swift` — `ChatPresence`, `ChatMessage.isReadByOther`
+  - `DTOs/MessageDTO.swift` — `ChatPresenceDTO`, `ChatMessagesResponseDTO`
+  - `Stores/MessageStore.swift` — Presence übernehmen, Lesebestätigungen nachziehen, eingehende Nachrichten im offenen Chat sofort als gelesen melden, gedrosselte Typing-Pings (`userIsTyping` / `userStoppedTyping`)
+  - `Features/Worker/Messages/ChatView.swift` — Polling 10 s → 3 s, Header-Status, Typing-Blase
+  - `Features/Worker/Messages/ChatBubbles.swift` (neu) — Nachrichten-Blasen (aus ChatView verschoben), `ReadReceiptIcon` (Uhr → ✓ → ✓✓), `PresenceLine`, `TypingBubble`
+
+### Fix: Employer-Chatliste hat das Backend abstürzen lassen (2026-11-16)
+- `src/routes.messages.js` — `GET /messages` enthielt für Employer `include: { worker }`, Conversation hat diese Relation nicht → `PrismaClientValidationError`, unbehandelt in Express 4 → Node-Prozess beendet. Include entfernt (Name wird ohnehin separat geladen), `handle()`-Wrapper für GET-Liste/POST/PATCH ergänzt (500 statt Absturz)
+- `src/routes.messages.test.js` — Regressionstest ohne echte DB
+
