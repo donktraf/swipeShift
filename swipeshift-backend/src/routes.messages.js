@@ -4,6 +4,19 @@ const router  = express.Router();
 const { prisma } = require("./prisma.js");
 const { requireAuth } = require("./auth");
 
+// Faengt Fehler async Route-Handler ab. Express 4 behandelt abgelehnte Promises nicht —
+// ohne Wrapper bekommt der Client keine Antwort und der Request haengt bis zum Timeout.
+function handle(label, fn) {
+  return async (req, res) => {
+    try {
+      await fn(req, res);
+    } catch (err) {
+      console.error(`${label} error:`, err);
+      if (!res.headersSent) res.status(500).json({ error: "Internal server error" });
+    }
+  };
+}
+
 // ─── Conversation-Status → iOS ConversationStatus ───────────────────────────
 // "active"    → today (shift within 24h) oder upcoming
 // "completed" → completed
@@ -61,7 +74,7 @@ function formatConversation(conv, currentUserId) {
 
 // ─── GET /messages ─────────────────────────────────────────────────────────
 // Gibt alle Konversationen des eingeloggten Users zurück (worker oder employer)
-router.get("/", requireAuth, async (req, res) => {
+router.get("/", requireAuth, handle("GET /messages", async (req, res) => {
   const userId = req.auth.sub;
 
   const user = await prisma.user.findUnique({
@@ -87,11 +100,9 @@ router.get("/", requireAuth, async (req, res) => {
       messages: {
         orderBy: { createdAt: "asc" },
       },
-      ...(isWorker ? {} : {
-        worker: { // brauchen wir für den Employer (zeigt Worker-Name)
-          // Worker ist ein separates Model, wir brauchen den User
-        }
-      }),
+      // Hinweis: Conversation hat KEINE worker-/employer-Relation (nur IDs). Der Worker-Name
+      // fuer die Employer-Sicht wird unten separat ueber prisma.user nachgeladen.
+      // Ein `include: { worker }` hier wirft PrismaClientValidationError.
     },
     orderBy: { updatedAt: "desc" },
   });
@@ -116,11 +127,11 @@ router.get("/", requireAuth, async (req, res) => {
   });
 
   return res.json(result);
-});
+}));
 
 // ─── POST /messages/:conversationId ─────────────────────────────────────────
 // Nachricht senden
-router.post("/:conversationId", requireAuth, async (req, res) => {
+router.post("/:conversationId", requireAuth, handle("POST /messages/:conversationId", async (req, res) => {
   const userId         = req.auth.sub;
   const { conversationId } = req.params;
   const { text } = req.body;
@@ -165,7 +176,7 @@ router.post("/:conversationId", requireAuth, async (req, res) => {
     timestamp:     message.createdAt,
     isSystemMessage: false,
   });
-});
+}));
 
 // ─── GET /messages/:conversationId ──────────────────────────────────────────
 // Gibt einzelne Nachrichten zurück. ?since=<ISO8601> liefert nur neue Nachrichten.
@@ -210,7 +221,7 @@ router.get("/:conversationId", requireAuth, async (req, res) => {
 
 // ─── PATCH /messages/:conversationId/read ────────────────────────────────────
 // Alle ungelesenen Nachrichten einer Konversation als gelesen markieren
-router.patch("/:conversationId/read", requireAuth, async (req, res) => {
+router.patch("/:conversationId/read", requireAuth, handle("PATCH /messages/:conversationId/read", async (req, res) => {
   const userId         = req.auth.sub;
   const { conversationId } = req.params;
 
@@ -235,6 +246,6 @@ router.patch("/:conversationId/read", requireAuth, async (req, res) => {
   });
 
   return res.json({ ok: true });
-});
+}));
 
 module.exports = router;
