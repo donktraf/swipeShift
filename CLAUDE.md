@@ -165,6 +165,15 @@ Der ueberwiegende Teil der Wireframe-Anforderungen ist implementiert. Bekannte o
   (File > New > Target > Unit Testing Bundle) manuell angelegt werden, siehe Abschnitt 12
 • Backend-Testabdeckung ist bewusst minimal (Smoke-Tests fuer reine Utility-Funktionen), keine
   vollstaendige Route-/Integrationstest-Suite
+• Website + Universal Links fehlen (Notion Aufgaben-Tracker: "Website & Universal Links"):
+  Job-Share (JobDetailView, `JobShareContent`) nutzt aktuell den Custom-Scheme-Link
+  `swipeshift://job/<id>` (ausgewertet in swipeShiftApp.handleDeepLink → WorkerHomeView). Der
+  funktioniert nur mit installierter App und ist in manchen Messengern nicht antippbar. Ziel:
+  https://swipeshift.app/jobs/<id> als Universal Link → braucht Domain, Web-Fallback-Seite pro
+  Job (mit App-Store-Button), apple-app-site-association-Datei, Associated-Domains-Entitlement
+  (bezahlter Apple-Developer-Account). Ausserdem verweisen Privacy/Terms/Guide-Links
+  (AccountSettingsView, WorkerProfileView) und support@swipeshift.app bereits auf die Domain,
+  die Seiten existieren aber noch nicht — fuer die App-Store-Einreichung Pflicht.
 • Einige Bereiche nutzen weiterhin vereinfachte MVP-Logik statt echter Business-Regeln (z.B.
   "recommended"-Sortierung basiert auf Worker.preferredCategories + payAmount, kein echtes Scoring;
   Apply-Status-Feld bei manchen Flows minimal gehalten) — kein Blocker, aber erweiterbar
