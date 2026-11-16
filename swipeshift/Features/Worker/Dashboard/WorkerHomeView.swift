@@ -17,6 +17,9 @@ struct WorkerHomeView: View {
     @State private var navigateToCategoryList = false
     @State private var navigateToAllJobs = false
 
+    // Geteilter Job aus Deep Link (swipeshift://job/<id>)
+    @State private var deepLinkJob: Job?
+
     var body: some View {
         NavigationStack {
             ZStack(alignment: .bottom) {
@@ -94,6 +97,19 @@ struct WorkerHomeView: View {
                 JobListView()
                     .environmentObject(jobStore)
                     .environmentObject(userStore)
+            }
+            // initial: true → auch Links, die die App kalt gestartet haben, werden geoeffnet
+            .onChange(of: jobStore.pendingDeepLinkJobId, initial: true) { _, jobId in
+                guard let jobId else { return }
+                jobStore.pendingDeepLinkJobId = nil
+                Task { deepLinkJob = try? await APIClient.shared.fetchJob(jobId: jobId) }
+            }
+            .sheet(item: $deepLinkJob) { job in
+                NavigationStack {
+                    JobDetailView(job: job)
+                        .environmentObject(jobStore)
+                        .environmentObject(userStore)
+                }
             }
         }
     }

@@ -50,6 +50,10 @@ final class JobStore: ObservableObject {
     /// Saved-Status anzeigt und togglen kann.
     @Published var savedJobIds: Set<String> = []
 
+    /// Job-ID aus einem geteilten Deep Link (`swipeshift://job/<id>`), die WorkerHomeView
+    /// als Job-Detail oeffnen soll. Wird nach dem Oeffnen wieder auf nil gesetzt.
+    @Published var pendingDeepLinkJobId: String?
+
     /// Verhindert wiederholtes Neuladen der Saved-IDs bei jedem `.task`-Aufruf.
     private var hasLoadedSavedJobIds = false
 

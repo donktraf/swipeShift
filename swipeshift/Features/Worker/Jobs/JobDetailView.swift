@@ -80,6 +80,24 @@ struct JobDetailView: View {
 
                 Spacer()
 
+                // Teilen: Kurztext + Deep Link (oeffnet den Job direkt in der App)
+                ShareLink(
+                    item: JobShareContent.url(for: job),
+                    subject: Text(job.title),
+                    message: Text(JobShareContent.message(for: job))
+                ) {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.primary)
+                        .frame(width: 36, height: 36)
+                        .background(Color(uiColor: .systemBackground))
+                        .clipShape(Circle())
+                        .shadow(color: .black.opacity(0.06), radius: 4, x: 0, y: 2)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel("Share job")
+
                 Button {
                     Task { await jobStore.toggleSaveJob(job.id) }
                 } label: {
@@ -515,3 +533,24 @@ struct FlowTagsView: View {
     }
 }
 
+// MARK: - Share-Inhalt
+
+/// Baut Text + Link fuer den Share-Button im Job-Detail.
+enum JobShareContent {
+    /// Deep Link `swipeshift://job/<id>` — wird in `swipeShiftApp.handleDeepLink` ausgewertet.
+    /// TODO: Auf Universal Link (z.B. https://swipeshift.app/jobs/<id>) umstellen, sobald die
+    /// Domain live ist + apple-app-site-association hinterlegt ist. Custom-Scheme-Links sind in
+    /// manchen Messengern nicht antippbar und funktionieren nur mit installierter App.
+    static func url(for job: Job) -> URL {
+        URL(string: "swipeshift://job/\(job.id)") ?? URL(string: "swipeshift://")!
+    }
+
+    static func message(for job: Job) -> String {
+        let details = [job.payText, job.shiftText, job.location]
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " · ")
+        let headline = "Check out this job on SwipeShift: \(job.title) at \(job.company)"
+        return details.isEmpty ? headline : "\(headline)\n\(details)"
+    }
+}

@@ -31,6 +31,13 @@ struct swipeShiftApp: App {
         // Google Sign-In redirect
         if GIDSignIn.sharedInstance.handle(url) { return }
 
+        // Geteilter Job: swipeshift://job/<id> → WorkerHomeView oeffnet das Job-Detail
+        if url.scheme == "swipeshift", url.host == "job",
+           let jobId = url.pathComponents.dropFirst().first, !jobId.isEmpty {
+            jobStore.pendingDeepLinkJobId = jobId
+            return
+        }
+
         // Password-Reset Deep Link
         guard url.scheme == "swipeshift",
               url.host == "reset-password" else { return }
