@@ -26,7 +26,7 @@ Status-Legende: ✅ geprüft | 🔄 in Arbeit | ⬜ noch nicht geprüft
 | 8 | Applicants Overview Screen (Company) | ✅ | **Ja** (klein) |
 | 9 | Add Job Screen (Company) | ✅ (Vorrunde) | **Ja** (groß, siehe oben) |
 | 10 | Setting Screen | ✅ | **Ja** |
-| 11 | Rating Screen | ✅ | **Ja** (Employer-Seite) |
+| 11 | Rating Screen | ✅ | ~~Ja~~ → **umgesetzt 2026-11-16** |
 | 12 | Job List Screen | ✅ | Nein |
 | 13 | Logout Screen | ✅ | Nein (Worker-Seite geprüft) |
 | 14 | Detailed Company Profile Screen (Employee) | ✅ | ~~Ja~~ → **umgesetzt 2026-11-16** |
@@ -120,6 +120,8 @@ Code: `ReviewsView.swift` (Worker, zeigt bewertet-zu-werden) + `LeaveReviewsView
 
 **Fehlt auf Employer-Seite:** Filter nach **Job Category** und **Date Range** — CLAUDE.md verlangt "Filter: Rating-Level, Job Category, Would Rehire, Date Range", Code hat nur `filterRating`/`filterWouldRehire`, keine Kategorie- oder Datums-Filter-States.
 
+**✅ Umgesetzt (2026-11-16):** Neues Filter-Sheet (`ReviewFilterSheet.swift`) mit Job-Kategorie (nur vorkommende Kategorien) und Schicht-Datum (Last 7 Days / 30 Days / 3 Months / Custom); Kategorie + Datum filtern auch "Pending". Entwurfsmodus (wirkt erst bei Apply), "Keine Treffer"-Zustand. Rein clientseitig, Backend lieferte die Felder schon. **Neu aufgefallen:** der "Drafts"-Tab ist nur ein Platzhalter (Entwürfe werden nicht gespeichert).
+
 ## 12. Job List Screen — ✅ keine Lücke
 
 Code: `JobListView.swift`. Sticky Header, Suchfeld, Sort-Sheet, Filter-Sheet, aktive-Filter-Zähler — alles vorhanden und deckt die Notion-/CLAUDE.md-Spec gut ab.
@@ -163,7 +165,7 @@ Code: `SavedView.swift` (Worker) — Jobs/Companies-Tabs ✓, nach Datum gruppie
 | Job Detail | ~~Share-Icon fehlt~~ ✅ umgesetzt 2026-11-16 |
 | Applicants Overview | "Employer response rate" fehlt |
 | Settings | 2FA fehlt komplett; Active-Sessions-*Liste* ist hardcodiert (nicht nur das Einzel-Abmelden) |
-| Rating (Employer) | Filter nach Job Category + Date Range fehlen |
+| Rating (Employer) | ~~Filter nach Job Category + Date Range fehlen~~ ✅ umgesetzt 2026-11-16 (offen: Drafts-Tab ist Platzhalter) |
 | Company Profile | ~~Telefon + E-Mail fehlen~~ ✅ umgesetzt 2026-11-16 |
 | Financial (Worker) | ~~Custom-Range-Option fehlt~~ ✅ umgesetzt 2026-11-16 |
 | Financial (Employer) | ~~Zeitraum-Dropdown fehlt~~ ✅ umgesetzt 2026-11-16 |

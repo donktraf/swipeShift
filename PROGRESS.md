@@ -1,6 +1,6 @@
 # SwipeShift — iOS Frontend Progress
 
-_Zuletzt aktualisiert: 2026-11-16 (Zeitraum-Filter Finanz-Übersichten)_
+_Zuletzt aktualisiert: 2026-11-16 (Paid-Out-Fix + Kostenformel, Rating-Filter)_
 
 ---
 
@@ -673,4 +673,16 @@ Lücken aus dem Field-Audit: Employer hatte gar keinen Zeitraum-Filter, Worker k
   - `Features/Worker/Profile/FinancialOverviewView.swift` — eigenes `TimePeriod` durch gemeinsamen Picker ersetzt
   - Beide Views: `.task(id: period)`, abgebrochene Requests überschreiben keinen Zustand
 - Offen: "Paid Out" beim Employer weiterhin 0, obwohl `Apply.isPaid` existiert (TODO im Code)
+
+### Fix: Employer "Paid Out" + einheitliche Kostenformel (2026-11-16)
+- `src/utils/jobCost.js` (+ Tests) — Stundenlohn × Schichtstunden (0,1 h gerundet, Fallback 8 h) × Worker. Abgeschlossen = angenommene Worker, kommend = geplante Plätze, Paid Out = als bezahlt markierte Worker
+- Vorher rechneten Finanz-Übersicht und Dashboard `payAmount × openSpots` (ohne Stunden, obwohl `payAmount` der Stundenlohn ist) → Beträge viel zu niedrig, passten nie zum Job-Payment-Screen; "Paid Out" war fest 0
+- `GET /employer/financials` — echtes `paidOut`, gestapeltes Diagramm ohne Doppelzählung, Liste markiert komplett bezahlte Jobs als `paid`
+- `GET /employer/stats` (Dashboard "Monthly Spend"), `GET /employer/jobs/:id/payments` und `GET /worker/financials` nutzen dieselbe Formel
+- iOS `EmployerFinancialView` — Kachel "Paid Out" (laut Wireframe) statt "Monthly Spend", Breakdown "Completed (unpaid)", "Paid"-Badge
+
+### Leave Reviews: Filter nach Job-Kategorie + Schicht-Datum (2026-11-16)
+- `Features/Employer/ReviewFilterSheet.swift` (neu) — `ReviewFilters` (Rating, Would Rehire, Kategorie, Datum mit Presets + Custom), Filter-Sheet mit Entwurfsmodus, umbrechende Chips
+- `Features/Employer/LeaveReviewsView.swift` — nutzt das neue Sheet; Kategorie + Datum filtern auch "Pending"; "No reviews match your filters"-Zustand
+- Offen: "Drafts"-Tab ist weiterhin ein Platzhalter
 
