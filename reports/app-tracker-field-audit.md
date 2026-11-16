@@ -20,7 +20,7 @@ Status-Legende: ✅ geprüft | 🔄 in Arbeit | ⬜ noch nicht geprüft
 | 2 | Login Screen | ✅ (Vorrunde) | Ja (bekannt, korrekt als "Problem" markiert) |
 | 3 | Landing Page | ✅ | Nein |
 | 4 | Applied Job Screen Overview (Employee) | ✅ | Nein (grobe Prüfung, Tabs/Withdraw-Flow passt) |
-| 5 | Calendar Screen | ✅ | **Ja** (Worker-Seite) |
+| 5 | Calendar Screen | ✅ | ~~Ja~~ → **umgesetzt 2026-11-16** (Worker-Seite) |
 | 6 | Chat Screen | ✅ | ~~Ja~~ → **umgesetzt 2026-11-16** |
 | 7 | Job Detail Screen | ✅ | ~~Ja (klein)~~ → **umgesetzt 2026-11-16** |
 | 8 | Applicants Overview Screen (Company) | ✅ | Nein (Fund war falsch zugeordnet, siehe #14) |
@@ -76,6 +76,9 @@ Code: `WorkerCalendarView.swift` (Month/Week-Toggle ✓, Status-Farbcodierung �
 - Payment-Status-Sichtbarkeit (Pending/Paid) auf Kalender-Einträgen
 - Stornierungsgrund + visueller Indikator bei abgesagten Jobs
 - Warnung bei überlappenden Schichten (Conflict-Indicator)
+
+**✅ Umgesetzt (2026-11-16)** nach den Notion-Notizen zum "Calendar Screen": antippbare Einträge mit Detail-Sheet (Zeit, Ort, Arbeitgeber, Bezahlung) + "View Job Details" / "Open Chat" (nur angenommen), Zahlungsstatus bei abgeschlossenen Jobs, stornierte Jobs mit Symbol + Grund (Employer kann beim Stornieren optional einen Grund angeben), Overlap-Warnung, vergangene Jobs getrennt + ausgegraut, Leerzustand mit "Find jobs nearby", Wochen-Navigation. **Nebenbei behoben:** stornierte Jobs wurden angenommenen Workern weiter als "confirmed" angezeigt und als Verdienst gezählt.
+**Bewusst offen:** "Daily view (default)" aus Notion (Wireframe verlangt Monat/Woche, so belassen), Zeitzonen-Label bei Jobs in anderem Bundesstaat, automatisches Aktualisieren ohne Neuöffnen (lädt bei jedem Öffnen neu).
 
 ## 6. Chat Screen — ⚠️ Lücke gefunden
 
@@ -162,7 +165,7 @@ Code: `SavedView.swift` (Worker) — Jobs/Companies-Tabs ✓, nach Datum gruppie
 
 | Screen | Lücke |
 |---|---|
-| Calendar (Worker) | Open-Chat-Button, Payment-Status-Badge, Stornierungsgrund+Indikator, Overlap-Warnung |
+| Calendar (Worker) | ~~Open-Chat-Button, Payment-Status, Stornierungsgrund, Overlap-Warnung~~ ✅ umgesetzt 2026-11-16 |
 | Chat | ~~Typing-Indicator, Online/Offline-Status, echte Read-Receipts~~ ✅ umgesetzt 2026-11-16 |
 | Job Detail | ~~Share-Icon fehlt~~ ✅ umgesetzt 2026-11-16 |
 | Company Profile | ~~"Employer response rate" fehlt~~ ✅ umgesetzt 2026-11-16 (gehörte zum Company-Profil, nicht zur Bewerber-Übersicht) |

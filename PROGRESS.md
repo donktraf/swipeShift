@@ -1,6 +1,6 @@
 # SwipeShift — iOS Frontend Progress
 
-_Zuletzt aktualisiert: 2026-11-16 (Company-Profil: Response Rate + Antwortzeit)_
+_Zuletzt aktualisiert: 2026-11-16 (Worker-Kalender + Fix stornierte Jobs)_
 
 ---
 
@@ -693,4 +693,16 @@ Notion-Felder "Employer response rate" / "Typical response time" (Detailed Compa
 - `src/routes.companies.js` — `responseRate`, `typicalResponseHours` (nur aggregierte Zahlen)
 - iOS `CompanyProfileView` — Kennzahl "Response Rate" im Header, "Usually replies within …" aus echten Daten (Fallback: statischer `replyTime`), "New on platform" bei zu wenig Daten
 - Hinweis: Seed-Daten haben deutschen `replyTime`-Fallbacktext in englischer UI
+
+### Worker-Kalender nach Notion-Vorgabe + Fix: stornierte Jobs (2026-11-16)
+- **Fix:** `GET /worker/applications` sah nur den Bewerbungsstatus → stornierte Jobs blieben für angenommene Worker "confirmed" (Kalender + Job Applications); `GET /worker/financials` zählte sie als Verdienst
+- Backend:
+  - `src/utils/applicationStatus.js` (+ Tests) — Anzeige-Status inkl. storniertem Job, vom Employer abgeschlossenem Job, Zahlungsstatus, Stornierungsart + -grund
+  - `GET /worker/applications` — neu: `cancellationKind`, `cancellationReason`, `paymentStatus`, `earnings`, `conversationId`
+  - Prisma `Job.cancellationReason` (Migration `20261116200000_add_job_cancellation_reason`); `PATCH /jobs/:id/status` nimmt optional `reason` beim Stornieren (max. 300 Zeichen)
+- iOS:
+  - `WorkerCalendarView.swift` (neu aufgebaut), `WorkerCalendarComponents.swift` (Modell, Overlap-Erkennung, Grid, Zeilen, Wochenleiste), `WorkerCalendarDetailSheet.swift` (Detail-Sheet mit View Job / Open Chat)
+  - Zahlungsstatus, Stornierungsgrund, Overlap-Warnung, vergangene Jobs getrennt, Leerzustand mit "Find jobs nearby", Wochen-Navigation, Legende
+  - `JobApplicationsView` — Grund auf stornierten Karten; `AllPostedJobsView` — optionales Grund-Feld beim Stornieren
+- Bewusst offen: Daily View (Wireframe: Monat/Woche), Zeitzonen-Label, Live-Aktualisierung ohne Neuöffnen
 
