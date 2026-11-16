@@ -1,5 +1,21 @@
 // src/auth.js
 const jwt = require("jsonwebtoken");
+const { shouldTouchLastSeen } = require("./utils/chatPresence");
+
+// In-Memory-Drosselung fuer lastSeenAt-Updates (pro Prozess), damit nicht jeder
+// Request einen DB-Write ausloest. Verlust bei Neustart ist unkritisch.
+const lastSeenTouches = new Map();
+
+function touchLastSeen(userId) {
+  const now = Date.now();
+  if (!shouldTouchLastSeen(lastSeenTouches.get(userId), now)) return;
+  lastSeenTouches.set(userId, now);
+  // Lazy require, um Ladezyklen zu vermeiden; Fire-and-forget, Fehler blockieren nie den Request
+  const { prisma } = require("./prisma.js");
+  prisma.user
+    .update({ where: { id: userId }, data: { lastSeenAt: new Date(now) } })
+    .catch(() => lastSeenTouches.delete(userId));
+}
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev_secret_change_me";
 const JWT_EXPIRES_IN = "7d";
@@ -23,6 +39,7 @@ function requireAuth(req, res, next) {
   try {
     const payload = jwt.verify(token, JWT_SECRET);
     req.auth = payload; // { sub, role, email, iat, exp }
+    if (payload?.sub) touchLastSeen(payload.sub);
     next();
   } catch (err) {
     return res.status(401).json({ error: "Invalid token" });

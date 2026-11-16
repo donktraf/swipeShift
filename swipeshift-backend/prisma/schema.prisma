@@ -36,6 +36,9 @@ model User {
 
   emailVerifiedAt DateTime?
 
+  // Presence fuer Chat: zuletzt aktiv (gedrosselt aktualisiert in requireAuth)
+  lastSeenAt DateTime?
+
   worker   Worker?
   employer Employer?
 
@@ -246,6 +249,13 @@ model Conversation {
   workerId   String
   employerId String?
   status     String   @default("active") // active, completed, cancelled
+
+  // Pro-Teilnehmer Lesebestaetigung + Typing-Indicator (Polling-basiert)
+  workerLastReadAt   DateTime?
+  employerLastReadAt DateTime?
+  workerTypingAt     DateTime?
+  employerTypingAt   DateTime?
+
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 

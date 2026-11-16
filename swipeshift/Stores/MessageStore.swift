@@ -74,6 +74,7 @@ final class MessageStore: ObservableObject {
     // MARK: - Nachricht senden
 
     func sendMessage(conversationId: String, text: String) {
+        lastTypingPing[conversationId] = nil  // Server beendet Typing beim Senden
         optimisticAppend(to: &conversations, conversationId: conversationId, text: text)
         Task {
             do {
@@ -87,6 +88,7 @@ final class MessageStore: ObservableObject {
     }
 
     func sendEmployerMessage(conversationId: String, text: String) {
+        lastTypingPing[conversationId] = nil  // Server beendet Typing beim Senden
         optimisticAppend(to: &employerConversations, conversationId: conversationId, text: text)
         Task {
             do {
@@ -110,31 +112,71 @@ final class MessageStore: ObservableObject {
             .max(by: { $0.timestamp < $1.timestamp })?.timestamp
 
         do {
-            let dtos = try await APIClient.shared.fetchMessages(conversationId: conversationId, since: since)
-            let newMessages = dtos.map { $0.toDomain() }
-            guard !newMessages.isEmpty else { return }
-
+            let response = try await APIClient.shared.fetchMessages(conversationId: conversationId, since: since)
             let knownIds = Set(conv.messages.map(\.id))
-            let incoming = newMessages.filter { !knownIds.contains($0.id) }
-            guard !incoming.isEmpty else { return }
+            let incoming = response.messages.map { $0.toDomain() }.filter { !knownIds.contains($0.id) }
+            let presence = response.presence?.toDomain() ?? conv.presence
 
             if isEmployerMode {
-                appendMessages(&employerConversations, conversationId: conversationId, messages: incoming)
+                applyRefresh(&employerConversations, conversationId: conversationId, messages: incoming, presence: presence)
             } else {
-                appendMessages(&conversations, conversationId: conversationId, messages: incoming)
+                applyRefresh(&conversations, conversationId: conversationId, messages: incoming, presence: presence)
+            }
+
+            // Chat ist offen → neue Nachrichten der Gegenseite sofort als gelesen melden,
+            // damit deren Lesebestaetigung stimmt.
+            if incoming.contains(where: { !$0.isFromUser && !$0.isSystemMessage }) {
+                try? await APIClient.shared.markConversationRead(conversationId: conversationId)
             }
         } catch {
             // Polling-Fehler still ignorieren — nächster Zyklus versucht es erneut
         }
     }
 
-    private func appendMessages(_ list: inout [Conversation], conversationId: String, messages: [ChatMessage]) {
+    private func applyRefresh(
+        _ list: inout [Conversation],
+        conversationId: String,
+        messages: [ChatMessage],
+        presence: ChatPresence
+    ) {
         guard let idx = list.firstIndex(where: { $0.id == conversationId }) else { return }
         list[idx].messages.append(contentsOf: messages)
         if let last = messages.last {
             list[idx].lastMessage     = last.text
             list[idx].lastMessageTime = last.timestamp
         }
+        list[idx].presence = presence
+
+        // Lesebestaetigungen fuer bereits bekannte eigene Nachrichten nachziehen
+        if let readAt = presence.otherLastReadAt {
+            for mIdx in list[idx].messages.indices
+            where list[idx].messages[mIdx].isFromUser
+                && !list[idx].messages[mIdx].isReadByOther
+                && !list[idx].messages[mIdx].id.hasPrefix("optimistic-")
+                && list[idx].messages[mIdx].timestamp <= readAt {
+                list[idx].messages[mIdx].isReadByOther = true
+            }
+        }
+    }
+
+    // MARK: - Typing-Indicator (eigene Seite)
+
+    /// Letzter gesendeter Typing-Ping pro Konversation (Drosselung, Server-Fenster ist 6 s)
+    private var lastTypingPing: [String: Date] = [:]
+    private let typingPingInterval: TimeInterval = 3
+
+    /// Bei jeder Eingabe aufrufen — sendet hoechstens alle 3 s einen Ping.
+    func userIsTyping(conversationId: String) {
+        let now = Date()
+        if let last = lastTypingPing[conversationId], now.timeIntervalSince(last) < typingPingInterval { return }
+        lastTypingPing[conversationId] = now
+        Task { try? await APIClient.shared.sendTypingStatus(conversationId: conversationId, isTyping: true) }
+    }
+
+    /// Beim Leeren des Eingabefelds / Verlassen des Chats aufrufen.
+    func userStoppedTyping(conversationId: String) {
+        guard lastTypingPing.removeValue(forKey: conversationId) != nil else { return }
+        Task { try? await APIClient.shared.sendTypingStatus(conversationId: conversationId, isTyping: false) }
     }
 
     // MARK: - Helpers

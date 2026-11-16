@@ -650,7 +650,7 @@ final class APIClient {
         return try decoder.decode(ChatMessageDTO.self, from: data)
     }
 
-    func fetchMessages(conversationId: String, since: Date? = nil) async throws -> [ChatMessageDTO] {
+    func fetchMessages(conversationId: String, since: Date? = nil) async throws -> ChatMessagesResponseDTO {
         var path = "/messages/\(conversationId)"
         if let since {
             let iso = ISO8601DateFormatter().string(from: since)
@@ -662,8 +662,15 @@ final class APIClient {
         try validate(response: response, data: data)
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        struct Wrapper: Decodable { let messages: [ChatMessageDTO] }
-        return try decoder.decode(Wrapper.self, from: data).messages
+        return try decoder.decode(ChatMessagesResponseDTO.self, from: data)
+    }
+
+    // POST /messages/:conversationId/typing — gedrosselter Typing-Ping
+    func sendTypingStatus(conversationId: String, isTyping: Bool) async throws {
+        var req = try makeRequest(path: "/messages/\(conversationId)/typing", method: "POST")
+        req.httpBody = try JSONEncoder().encode(["isTyping": isTyping])
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try validate(response: response, data: data)
     }
 
     func markConversationRead(conversationId: String) async throws {

@@ -46,6 +46,21 @@ struct Conversation: Identifiable {
     var lastMessageTime: Date
     var isRead: Bool
     var messages: [ChatMessage]
+    var presence: ChatPresence = .unknown
+}
+
+// MARK: - ChatPresence
+/// Status der Gegenseite im Chat (Polling-basiert, kein WebSocket).
+struct ChatPresence: Equatable {
+    var otherIsTyping: Bool
+    var otherIsOnline: Bool
+    var otherLastSeenAt: Date?
+    /// Zeitpunkt, an dem die Gegenseite die Konversation zuletzt gelesen hat → Lesebestaetigungen
+    var otherLastReadAt: Date?
+
+    static let unknown = ChatPresence(
+        otherIsTyping: false, otherIsOnline: false, otherLastSeenAt: nil, otherLastReadAt: nil
+    )
 }
 
 // MARK: - ChatMessage
@@ -55,4 +70,6 @@ struct ChatMessage: Identifiable {
     let isFromUser: Bool       // true = Worker, false = Employer
     let timestamp: Date
     let isSystemMessage: Bool  // Zentriert dargestellt (Job-Update, Stornierung etc.)
+    /// Nur fuer eigene Nachrichten relevant: Gegenseite hat sie gelesen
+    var isReadByOther: Bool = false
 }

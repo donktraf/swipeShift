@@ -20,6 +20,7 @@ struct ConversationDTO: Decodable, Identifiable {
     let lastMessageTime: Date
     let isRead:          Bool
     let messages:        [ChatMessageDTO]
+    let presence:        ChatPresenceDTO?
 
     func toDomain() -> Conversation {
         Conversation(
@@ -34,7 +35,8 @@ struct ConversationDTO: Decodable, Identifiable {
             lastMessage:     lastMessage,
             lastMessageTime: lastMessageTime,
             isRead:          isRead,
-            messages:        messages.map { $0.toDomain() }
+            messages:        messages.map { $0.toDomain() },
+            presence:        presence?.toDomain() ?? .unknown
         )
     }
 }
@@ -47,6 +49,7 @@ struct ChatMessageDTO: Decodable, Identifiable {
     let isFromUser:      Bool
     let timestamp:       Date
     let isSystemMessage: Bool
+    let isReadByOther:   Bool?
 
     func toDomain() -> ChatMessage {
         ChatMessage(
@@ -54,9 +57,34 @@ struct ChatMessageDTO: Decodable, Identifiable {
             text:            text,
             isFromUser:      isFromUser,
             timestamp:       timestamp,
-            isSystemMessage: isSystemMessage
+            isSystemMessage: isSystemMessage,
+            isReadByOther:   isReadByOther ?? false
         )
     }
+}
+
+// MARK: - Presence der Gegenseite (Typing / Online / Lesezeitpunkt)
+
+struct ChatPresenceDTO: Decodable {
+    let otherIsTyping:   Bool
+    let otherIsOnline:   Bool
+    let otherLastSeenAt: Date?
+    let otherLastReadAt: Date?
+
+    func toDomain() -> ChatPresence {
+        ChatPresence(
+            otherIsTyping:   otherIsTyping,
+            otherIsOnline:   otherIsOnline,
+            otherLastSeenAt: otherLastSeenAt,
+            otherLastReadAt: otherLastReadAt
+        )
+    }
+}
+
+/// Antwort von GET /messages/:conversationId
+struct ChatMessagesResponseDTO: Decodable {
+    let messages: [ChatMessageDTO]
+    let presence: ChatPresenceDTO?
 }
 
 // MARK: - Company Profile

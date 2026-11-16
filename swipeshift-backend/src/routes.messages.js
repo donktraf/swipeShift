@@ -3,6 +3,49 @@ const express = require("express");
 const router  = express.Router();
 const { prisma } = require("./prisma.js");
 const { requireAuth } = require("./auth");
+const {
+  isTyping, isOnline, isReadByOther, participantFields,
+} = require("./utils/chatPresence");
+
+// Nachricht → iOS ChatMessageDTO. `otherLastReadAt` bestimmt die Lesebestaetigung
+// fuer eigene Nachrichten (fremde Nachrichten haben kein Lese-Flag fuer uns).
+function formatMessage(m, currentUserId, otherLastReadAt) {
+  const isFromUser = m.senderId === currentUserId;
+  return {
+    id:              m.id,
+    text:            m.text,
+    isFromUser,
+    timestamp:       m.createdAt,
+    isSystemMessage: m.isSystem,
+    isReadByOther:   isFromUser && !m.isSystem ? isReadByOther(m, otherLastReadAt) : false,
+  };
+}
+
+// Setzt ein Presence-Zeitfeld OHNE @updatedAt zu veraendern (Prisma wuerde es sonst bei
+// jedem Update anfassen und Typing-Pings/Lesen wuerden die Konversation "nach oben" schieben).
+// Spaltenname kommt ausschliesslich aus participantFields() → Whitelist-Pruefung.
+const PRESENCE_COLUMNS = new Set([
+  "workerLastReadAt", "employerLastReadAt", "workerTypingAt", "employerTypingAt",
+]);
+async function setPresenceColumn(conversationId, column, value) {
+  if (!PRESENCE_COLUMNS.has(column)) throw new Error(`Invalid presence column: ${column}`);
+  await prisma.$executeRawUnsafe(
+    `UPDATE "Conversation" SET "${column}" = $1 WHERE "id" = $2`,
+    value,
+    conversationId
+  );
+}
+
+// Presence-Block der Gegenseite fuer die Chat-Ansicht
+function formatPresence(conv, currentUserId, otherUser, now = new Date()) {
+  const f = participantFields(conv, currentUserId);
+  return {
+    otherIsTyping:   isTyping(conv[f.otherTypingField], now),
+    otherIsOnline:   isOnline(otherUser?.lastSeenAt, now),
+    otherLastSeenAt: otherUser?.lastSeenAt ?? null,
+    otherLastReadAt: conv[f.otherReadField] ?? null,
+  };
+}
 
 // Faengt Fehler async Route-Handler ab. Express 4 behandelt abgelehnte Promises nicht —
 // ohne Wrapper bekommt der Client keine Antwort und der Request haengt bis zum Timeout.
@@ -62,13 +105,10 @@ function formatConversation(conv, currentUserId) {
     lastMessage:     lastMsg?.text ?? "",
     lastMessageTime: lastMsg?.createdAt ?? conv.createdAt,
     isRead:          unreadCount === 0,
-    messages:        conv.messages.map(m => ({
-      id:            m.id,
-      text:          m.text,
-      isFromUser:    m.senderId === currentUserId,
-      timestamp:     m.createdAt,
-      isSystemMessage: m.isSystem,
-    })),
+    messages:        conv.messages.map(m =>
+      formatMessage(m, currentUserId, conv[participantFields(conv, currentUserId).otherReadField])
+    ),
+    presence:        formatPresence(conv, currentUserId, conv.otherUser),
   };
 }
 
@@ -100,28 +140,29 @@ router.get("/", requireAuth, handle("GET /messages", async (req, res) => {
       messages: {
         orderBy: { createdAt: "asc" },
       },
-      // Hinweis: Conversation hat KEINE worker-/employer-Relation (nur IDs). Der Worker-Name
-      // fuer die Employer-Sicht wird unten separat ueber prisma.user nachgeladen.
+      // Hinweis: Conversation hat KEINE worker-/employer-Relation (nur IDs). Namen und
+      // lastSeenAt der Gegenseite werden unten separat ueber prisma.user nachgeladen.
       // Ein `include: { worker }` hier wirft PrismaClientValidationError.
     },
     orderBy: { updatedAt: "desc" },
   });
 
-  // Worker-User-Daten für Employer-Sicht nachladen
-  let workerMap = {};
-  if (!isWorker) {
-    const workerIds = [...new Set(conversations.map(c => c.workerId))];
-    const workers = await prisma.user.findMany({
-      where: { id: { in: workerIds } },
-      select: { id: true, firstName: true, lastName: true },
-    });
-    workerMap = Object.fromEntries(workers.map(w => [w.id, w]));
-  }
+  // User-Daten der Gegenseite nachladen (Name fuer Employer-Sicht, lastSeenAt fuer Presence)
+  const otherIds = [...new Set(
+    conversations.map(c => (isWorker ? c.employerId : c.workerId)).filter(Boolean)
+  )];
+  const others = await prisma.user.findMany({
+    where: { id: { in: otherIds } },
+    select: { id: true, firstName: true, lastName: true, lastSeenAt: true },
+  });
+  const otherMap = Object.fromEntries(others.map(u => [u.id, u]));
 
   const result = conversations.map(conv => {
     const enriched = { ...conv };
+    const otherId = isWorker ? conv.employerId : conv.workerId;
+    enriched.otherUser = otherId ? (otherMap[otherId] ?? null) : null;
     if (!isWorker) {
-      enriched.worker = workerMap[conv.workerId] ?? null;
+      enriched.worker = enriched.otherUser;
     }
     return formatConversation(enriched, userId);
   });
@@ -163,19 +204,14 @@ router.post("/:conversationId", requireAuth, handle("POST /messages/:conversatio
     },
   });
 
-  // updatedAt der Conversation aktualisieren
+  // updatedAt der Conversation aktualisieren + eigenen Typing-Status beenden
+  const { myTypingField } = participantFields(conv, userId);
   await prisma.conversation.update({
     where: { id: conversationId },
-    data: { updatedAt: new Date() },
+    data: { updatedAt: new Date(), [myTypingField]: null },
   });
 
-  return res.json({
-    id:            message.id,
-    text:          message.text,
-    isFromUser:    true,
-    timestamp:     message.createdAt,
-    isSystemMessage: false,
-  });
+  return res.json(formatMessage(message, userId, null));
 }));
 
 // ─── GET /messages/:conversationId ──────────────────────────────────────────
@@ -188,13 +224,22 @@ router.get("/:conversationId", requireAuth, async (req, res) => {
 
     const conv = await prisma.conversation.findUnique({
       where:  { id: conversationId },
-      select: { workerId: true, employerId: true },
+      select: {
+        workerId: true, employerId: true,
+        workerLastReadAt: true, employerLastReadAt: true,
+        workerTypingAt: true, employerTypingAt: true,
+      },
     });
 
     if (!conv) return res.status(404).json({ error: "Conversation not found" });
     if (conv.workerId !== userId && conv.employerId !== userId) {
       return res.status(403).json({ error: "Not a participant" });
     }
+
+    const { otherUserId, otherReadField } = participantFields(conv, userId);
+    const otherUser = otherUserId
+      ? await prisma.user.findUnique({ where: { id: otherUserId }, select: { lastSeenAt: true } })
+      : null;
 
     const messages = await prisma.message.findMany({
       where: {
@@ -205,13 +250,8 @@ router.get("/:conversationId", requireAuth, async (req, res) => {
     });
 
     return res.json({
-      messages: messages.map(m => ({
-        id:              m.id,
-        text:            m.text,
-        isFromUser:      m.senderId === userId,
-        timestamp:       m.createdAt,
-        isSystemMessage: m.isSystem,
-      })),
+      messages: messages.map(m => formatMessage(m, userId, conv[otherReadField])),
+      presence: formatPresence(conv, userId, otherUser),
     });
   } catch (err) {
     console.error("GET /messages/:conversationId error:", err);
@@ -245,7 +285,43 @@ router.patch("/:conversationId/read", requireAuth, handle("PATCH /messages/:conv
     data: { isRead: true },
   });
 
+  // Pro-Teilnehmer-Lesezeitpunkt fuer Lesebestaetigungen der Gegenseite
+  const { myReadField } = participantFields(conv, userId);
+  await setPresenceColumn(conversationId, myReadField, new Date());
+
   return res.json({ ok: true });
 }));
+
+// ─── POST /messages/:conversationId/typing ───────────────────────────────────
+// Body: { isTyping: boolean }. Client pingt waehrend des Tippens (gedrosselt);
+// der Status laeuft nach TYPING_WINDOW_MS automatisch ab.
+router.post("/:conversationId/typing", requireAuth, async (req, res) => {
+  try {
+    const userId             = req.auth.sub;
+    const { conversationId } = req.params;
+    const typing             = req.body?.isTyping !== false;
+
+    const conv = await prisma.conversation.findUnique({
+      where:  { id: conversationId },
+      select: { workerId: true, employerId: true, status: true },
+    });
+
+    if (!conv) return res.status(404).json({ error: "Conversation not found" });
+    if (conv.workerId !== userId && conv.employerId !== userId) {
+      return res.status(403).json({ error: "Not a participant" });
+    }
+    if (conv.status !== "active") {
+      return res.status(409).json({ error: "Conversation is closed" });
+    }
+
+    const { myTypingField } = participantFields(conv, userId);
+    await setPresenceColumn(conversationId, myTypingField, typing ? new Date() : null);
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("POST /messages/:conversationId/typing error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
 
 module.exports = router;
