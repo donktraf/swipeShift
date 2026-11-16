@@ -4,6 +4,7 @@
 const express = require("express");
 const router  = express.Router();
 const { prisma } = require("./prisma.js");
+const { computeResponseStats } = require("./utils/responseStats");
 
 // GET /companies/:name
 // Gibt Company-Daten aus Jobs + Employer-Profil zurück
@@ -56,6 +57,13 @@ router.get("/:name", async (req, res) => {
       if (emp) employerProfile = emp;
     }
 
+    // Antwortverhalten der Firma (nur aggregierte Zahlen, keine Personendaten)
+    const applies = await prisma.apply.findMany({
+      where:  { jobId: { in: jobs.map(j => j.id) } },
+      select: { status: true, createdAt: true, respondedAt: true },
+    });
+    const responseStats = computeResponseStats(applies);
+
     // Aggregierte Werte
     const activeJobs         = jobs.filter(j => j.status === "published").length;
     const completedJobsCount = jobs.filter(j => j.status === "completed").length;
@@ -104,7 +112,10 @@ router.get("/:name", async (req, res) => {
       activeJobs,
       businessAreas:  categories,
       locations,
-      replyTime:      jobs[0].replyTime ?? null,
+      replyTime:      jobs[0].replyTime ?? null, // statischer Fallback-Text aus dem Job
+      // 0..1 bzw. Stunden; null = zu wenig Daten ("New on platform")
+      responseRate:         responseStats.responseRate,
+      typicalResponseHours: responseStats.typicalResponseHours,
       // Aus Employer-Profil (falls vorhanden)
       about:          employerProfile?.companyDescription ?? null,
       website:        employerProfile?.websiteOrInstagram ?? null,

@@ -99,6 +99,10 @@ struct CompanyProfileDTO: Decodable {
     let businessAreas:    [String]
     let locations:        [String]
     let replyTime:        String?
+    /// 0...1, nil = zu wenig Daten (siehe backend utils/responseStats.js)
+    let responseRate:         Double?
+    /// Median bis zur ersten Antwort in Stunden, nil = zu wenig Daten
+    let typicalResponseHours: Double?
     let about:            String?
     let website:          String?
     let phone:            String?

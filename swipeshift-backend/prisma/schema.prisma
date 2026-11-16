@@ -185,6 +185,8 @@ model Apply {
   status    String   @default("pending") // pending, accepted, declined
   isPaid    Boolean  @default(false)
   createdAt DateTime @default(now())
+  // Erste Antwort des Employers (accept/decline) → Response Rate + Response Time im Company-Profil
+  respondedAt DateTime?
 
   user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   job            Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)

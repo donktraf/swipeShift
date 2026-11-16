@@ -134,10 +134,19 @@ struct CompanyProfileView: View {
                         .font(.system(size: 13))
                         .foregroundColor(.white.opacity(0.7))
                 }
-                if let replyTime = p.replyTime {
-                    Text(replyTime)
+                if let replyText = ResponseTimeText.make(hours: p.typicalResponseHours, fallback: p.replyTime) {
+                    Label(replyText, systemImage: "clock")
                         .font(.system(size: 12))
-                        .foregroundColor(.white.opacity(0.6))
+                        .foregroundColor(.white.opacity(0.7))
+                }
+                // UX-Notiz (Notion): bei wenig Daten "New on platform" statt wackeliger Zahlen
+                if p.responseRate == nil && p.typicalResponseHours == nil {
+                    Text("New on platform")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color.white.opacity(0.2)).clipShape(Capsule())
+                        .accessibilityHint("Not enough applications yet to show response statistics")
                 }
             }
 
@@ -146,6 +155,10 @@ struct CompanyProfileView: View {
                 if let rating = p.rating {
                     Divider().frame(height: 30).background(Color.white.opacity(0.3))
                     CompanyStatCell(value: String(format: "%.1f", rating), label: "Rating")
+                }
+                if let rate = p.responseRate {
+                    Divider().frame(height: 30).background(Color.white.opacity(0.3))
+                    CompanyStatCell(value: "\(Int((rate * 100).rounded()))%", label: "Response Rate")
                 }
                 Divider().frame(height: 30).background(Color.white.opacity(0.3))
                 CompanyStatCell(value: "\(p.activeJobs)", label: "Open Jobs")
@@ -441,6 +454,7 @@ private struct CompanyStatCell: View {
         VStack(spacing: 3) {
             Text(value).font(.system(size: 18, weight: .bold)).foregroundColor(.white)
             Text(label).font(.system(size: 11)).foregroundColor(.white.opacity(0.7))
+                .lineLimit(1).minimumScaleFactor(0.8) // 4 Kennzahlen nebeneinander
         }
         .frame(maxWidth: .infinity)
     }
@@ -481,5 +495,24 @@ enum ContactLink {
         let lower = trimmed.lowercased()
         if lower.hasPrefix("http://") || lower.hasPrefix("https://") { return URL(string: trimmed) }
         return URL(string: "https://\(trimmed)")
+    }
+}
+
+// MARK: - Antwortzeit-Text
+
+/// "Usually replies within …" aus der gemessenen Median-Antwortzeit, sonst statischer Fallback
+enum ResponseTimeText {
+    static func make(hours: Double?, fallback: String?) -> String? {
+        guard let hours else {
+            guard let fallback, !fallback.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+            return fallback
+        }
+        if hours < 1 { return "Usually replies within an hour" }
+        if hours < 24 {
+            let rounded = Int(hours.rounded(.up))
+            return "Usually replies within \(rounded) hours"
+        }
+        let days = Int((hours / 24).rounded(.up))
+        return days == 1 ? "Usually replies within a day" : "Usually replies within \(days) days"
     }
 }

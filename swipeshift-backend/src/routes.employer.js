@@ -87,7 +87,11 @@ router.post("/applicants/:applyId/accept", requireAuth, requireVerifiedEmail, as
     if (!apply)                              return res.status(404).json({ error: "Application not found" });
     if (apply.job.employerId !== employerId) return res.status(403).json({ error: "Forbidden" });
 
-    await prisma.apply.update({ where: { id: applyId }, data: { status: "accepted" } });
+    await prisma.apply.update({
+      where: { id: applyId },
+      // respondedAt nur bei der ERSTEN Antwort setzen (Response Time = Zeit bis zur ersten Reaktion)
+      data:  { status: "accepted", ...(apply.respondedAt ? {} : { respondedAt: new Date() }) },
+    });
     console.log(`ACCEPT apply ${applyId} by employer ${employerId}`);
     return res.json({ ok: true, applyId, action: "accepted" });
   } catch (err) {
@@ -112,7 +116,10 @@ router.post("/applicants/:applyId/decline", requireAuth, requireVerifiedEmail, a
     if (!apply)                              return res.status(404).json({ error: "Application not found" });
     if (apply.job.employerId !== employerId) return res.status(403).json({ error: "Forbidden" });
 
-    await prisma.apply.update({ where: { id: applyId }, data: { status: "declined" } });
+    await prisma.apply.update({
+      where: { id: applyId },
+      data:  { status: "declined", ...(apply.respondedAt ? {} : { respondedAt: new Date() }) },
+    });
     console.log(`DECLINE apply ${applyId} by employer ${employerId}`);
     return res.json({ ok: true, applyId, action: "declined" });
   } catch (err) {
