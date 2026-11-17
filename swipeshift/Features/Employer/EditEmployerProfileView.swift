@@ -77,7 +77,10 @@ private struct CompanyInfoTab: View {
     @State private var paymentResponsibility = false
     @State private var accurateJobInfo = false
     @State private var legalHiring = false
+    /// AGB sind Kontovoraussetzung: einmal zugestimmt, nicht mehr abwaehlbar
+    @State private var termsLocked = false
     @State private var isSaving = false
+    @State private var saveError: String? = nil
 
     private let allAreas = ["Hospitality", "Events", "Logistics", "Retail",
                             "Customer Service", "Warehouse", "Office", "Cleaning"]
@@ -239,7 +242,7 @@ private struct CompanyInfoTab: View {
 
             // Legal
             empSection(title: "Legal Agreements") {
-                legalToggle("I agree to the Terms of Service", isOn: $termsAccepted)
+                legalToggle("I agree to the Terms of Service", isOn: $termsAccepted, locked: termsLocked)
                 legalToggle("I accept the Rating System guidelines", isOn: $ratingSystemAccepted)
                 legalToggle("I take payment responsibility for hired workers", isOn: $paymentResponsibility)
                 legalToggle("I will provide accurate job descriptions", isOn: $accurateJobInfo)
@@ -256,6 +259,11 @@ private struct CompanyInfoTab: View {
             .buttonStyle(SSPrimaryButtonStyle(isEnabled: !isSaving))
             .padding(.horizontal, 16)
             .disabled(isSaving)
+            .alert("Could not save", isPresented: Binding(get: { saveError != nil }, set: { if !$0 { saveError = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(saveError ?? "")
+            }
 
             Spacer().frame(height: 20)
         }
@@ -281,6 +289,14 @@ private struct CompanyInfoTab: View {
         if let locs = u.companyLocations, !locs.isEmpty {
             locations = locs
         }
+
+        let consents = u.legalConsents ?? [:]
+        termsAccepted        = consents["terms"] ?? false
+        termsLocked          = termsAccepted
+        ratingSystemAccepted = consents["ratingSystem"] ?? false
+        paymentResponsibility = consents["paymentResponsibility"] ?? false
+        accurateJobInfo      = consents["accurateJobInfo"] ?? false
+        legalHiring          = consents["legalHiring"] ?? false
     }
 
     private func save() async {
@@ -305,13 +321,21 @@ private struct CompanyInfoTab: View {
                 firstName:             nil,
                 lastName:              nil,
                 jobTitle:              nil,
-                managerRole:           nil
+                managerRole:           nil,
+                legalConsents: [
+                    "terms":                 termsAccepted,
+                    "ratingSystem":          ratingSystemAccepted,
+                    "paymentResponsibility": paymentResponsibility,
+                    "accurateJobInfo":       accurateJobInfo,
+                    "legalHiring":           legalHiring,
+                ]
             ))
             await userStore.refreshMe()
             isSaving = false
             dismiss()
         } catch {
             isSaving = false
+            saveError = error.localizedDescription
         }
     }
 }
@@ -336,6 +360,7 @@ private struct PersonalProfileTab: View {
     @State private var showInviteSheet = false
     @State private var memberToRemove: TeamMember? = nil
     @State private var isSaving = false
+    @State private var saveError: String? = nil
 
     enum ManagerRole: String, CaseIterable {
         case admin         = "Admin"
@@ -495,6 +520,11 @@ private struct PersonalProfileTab: View {
             .buttonStyle(SSPrimaryButtonStyle(isEnabled: !isSaving))
             .padding(.horizontal, 16)
             .disabled(isSaving)
+            .alert("Could not save", isPresented: Binding(get: { saveError != nil }, set: { if !$0 { saveError = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(saveError ?? "")
+            }
 
             Spacer().frame(height: 20)
         }
@@ -607,6 +637,7 @@ private struct PersonalProfileTab: View {
             dismiss()
         } catch {
             isSaving = false
+            saveError = error.localizedDescription
         }
     }
 }
@@ -647,7 +678,7 @@ private func empRow<Content: View>(label: String, @ViewBuilder content: () -> Co
     }
 }
 
-private func legalToggle(_ label: String, isOn: Binding<Bool>) -> some View {
+private func legalToggle(_ label: String, isOn: Binding<Bool>, locked: Bool = false) -> some View {
     VStack(spacing: 0) {
         HStack(spacing: 12) {
             Button { isOn.wrappedValue.toggle() } label: {
@@ -657,6 +688,7 @@ private func legalToggle(_ label: String, isOn: Binding<Bool>) -> some View {
                     .padding(.leading, 14)
             }
             .buttonStyle(.plain)
+            .disabled(locked)
             Text(label)
                 .font(.system(size: 13))
                 .foregroundColor(.primary)
@@ -664,6 +696,7 @@ private func legalToggle(_ label: String, isOn: Binding<Bool>) -> some View {
             Spacer()
         }
         .padding(.vertical, 10)
+        .opacity(locked ? 0.6 : 1)
         Divider().padding(.leading, 14)
     }
 }

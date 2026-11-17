@@ -136,6 +136,7 @@ final class JobStore: ObservableObject {
         try await APIClient.shared.fetchJobs(type: type)
     }
 
+    /// radius in Meilen
     @MainActor
     func loadNearbyJobs(lat: Double, lng: Double, radius: Double = 100) async {
         errorMessage = nil
@@ -143,7 +144,7 @@ final class JobStore: ObservableObject {
             let result = try await APIClient.shared.fetchNearbyJobs(
                 lat: lat,
                 lng: lng,
-                radius: radius
+                radiusMiles: radius
             )
             nearbyJobs = result
             print("Nearby jobs loaded:", nearbyJobs.count)

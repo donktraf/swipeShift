@@ -27,7 +27,7 @@ struct RadarView: View {
     @State private var selectedJobId: String? = nil
     @State private var mapHeightFraction: CGFloat = 0.45
     @State private var showRadiusSheet = false
-    @State private var selectedRadius: Double = 100
+    @State private var selectedRadius: Double = 100   // Meilen
 
     private let radiusOptions: [Double] = [5, 10, 25, 50, 100]
 
@@ -129,7 +129,7 @@ struct RadarView: View {
                         } label: {
                             HStack(spacing: 4) {
                                 Image(systemName: "slider.horizontal.3")
-                                Text("\(Int(selectedRadius)) km")
+                                Text("\(Int(selectedRadius)) mi")
                             }
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundColor(SS.primary)
@@ -249,7 +249,7 @@ struct RadarView: View {
                         Task { await loadJobs() }
                     } label: {
                         HStack {
-                            Text("\(Int(option)) km")
+                            Text("\(Int(option)) mi")
                                 .font(.system(size: 16))
                                 .foregroundColor(.primary)
                             Spacer()
@@ -301,7 +301,7 @@ struct RadarView: View {
             Text("No jobs nearby")
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundColor(.white.opacity(0.7))
-            Text("No jobs found within \(Int(selectedRadius)) km.")
+            Text("No jobs found within \(Int(selectedRadius)) miles.")
                 .font(.system(size: 14))
                 .foregroundColor(.white.opacity(0.5))
                 .multilineTextAlignment(.center)

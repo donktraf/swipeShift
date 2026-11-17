@@ -397,7 +397,8 @@ final class UserStore: ObservableObject {
         jobInterests: [String],
         availability: [AvailabilityDTO],
         bio: String?,
-        profilePhotoUrl: String?
+        profilePhotoUrl: String?,
+        acceptedTerms: Bool
     ) async {
         errorMessage = nil
         do {
@@ -411,7 +412,8 @@ final class UserStore: ObservableObject {
                 jobInterests: jobInterests,
                 availability: availability,
                 bio: bio,
-                profilePhotoUrl: profilePhotoUrl
+                profilePhotoUrl: profilePhotoUrl,
+                acceptedTerms: acceptedTerms
             )
             self.currentUser = user
         } catch {
@@ -431,7 +433,8 @@ final class UserStore: ObservableObject {
         industry: String,
         companyLogoUrl: String?,
         websiteOrInstagram: String?,
-        companyDescription: String?
+        companyDescription: String?,
+        acceptedTerms: Bool
     ) async {
         errorMessage = nil
         do {
@@ -446,7 +449,8 @@ final class UserStore: ObservableObject {
                 industry: industry,
                 companyLogoUrl: companyLogoUrl,
                 websiteOrInstagram: websiteOrInstagram,
-                companyDescription: companyDescription
+                companyDescription: companyDescription,
+                acceptedTerms: acceptedTerms
             )
             self.currentUser = user
         } catch {

@@ -15,18 +15,7 @@ enum JobSortOption: String, CaseIterable {
 
 struct JobFilterOptions {
     var category:    String? = nil
-    var maxDistance: Double? = nil   // km; nil = kein Filter
-}
-
-// Haversine-Distanz in km zwischen zwei Koordinatenpaaren
-private func haversineKm(lat1: Double, lng1: Double, lat2: Double, lng2: Double) -> Double {
-    let R  = 6371.0
-    let φ1 = lat1 * .pi / 180
-    let φ2 = lat2 * .pi / 180
-    let Δφ = (lat2 - lat1) * .pi / 180
-    let Δλ = (lng2 - lng1) * .pi / 180
-    let a  = sin(Δφ/2) * sin(Δφ/2) + cos(φ1) * cos(φ2) * sin(Δλ/2) * sin(Δλ/2)
-    return R * 2 * atan2(sqrt(a), sqrt(1 - a))
+    var maxDistance: Double? = nil   // Meilen; nil = kein Filter
 }
 
 // MARK: - JobListView
@@ -54,11 +43,11 @@ struct JobListView: View {
     private var userLat: Double? { userStore.currentUser?.lat }
     private var userLng: Double? { userStore.currentUser?.lng }
 
-    // Distanz eines Jobs zum User in km (nil wenn Koordinaten fehlen)
-    private func distanceKm(to job: Job) -> Double? {
+    // Distanz eines Jobs zum User in Meilen (nil wenn Koordinaten fehlen)
+    private func distanceMiles(to job: Job) -> Double? {
         guard let uLat = userLat, let uLng = userLng,
               let jLat = job.lat,  let jLng = job.lng else { return nil }
-        return haversineKm(lat1: uLat, lng1: uLng, lat2: jLat, lng2: jLng)
+        return Distance.haversineMiles(lat1: uLat, lng1: uLng, lat2: jLat, lng2: jLng)
     }
 
     // Gefilterte + sortierte Jobs
@@ -84,10 +73,10 @@ struct JobListView: View {
         }
 
         // 3) Distanz-Filter
-        if let maxKm = filterOptions.maxDistance, userLat != nil {
+        if let maxMiles = filterOptions.maxDistance, userLat != nil {
             result = result.filter { job in
-                guard let d = distanceKm(to: job) else { return true }
-                return d <= maxKm
+                guard let d = distanceMiles(to: job) else { return true }
+                return d <= maxMiles
             }
         }
 
@@ -106,8 +95,8 @@ struct JobListView: View {
             result.sort { ($0.payAmount ?? 0) > ($1.payAmount ?? 0) }
         case .distance:
             result.sort { a, b in
-                let dA = distanceKm(to: a) ?? .greatestFiniteMagnitude
-                let dB = distanceKm(to: b) ?? .greatestFiniteMagnitude
+                let dA = distanceMiles(to: a) ?? .greatestFiniteMagnitude
+                let dB = distanceMiles(to: b) ?? .greatestFiniteMagnitude
                 return dA < dB
             }
         }
@@ -384,12 +373,12 @@ struct FilterSheet: View {
                             }
                             .buttonStyle(.plain)
 
-                            ForEach(distanceOptions, id: \.self) { km in
-                                let isSelected = filterOptions.maxDistance == km
+                            ForEach(distanceOptions, id: \.self) { miles in
+                                let isSelected = filterOptions.maxDistance == miles
                                 Button {
-                                    filterOptions.maxDistance = isSelected ? nil : km
+                                    filterOptions.maxDistance = isSelected ? nil : miles
                                 } label: {
-                                    Text("\(Int(km)) km")
+                                    Text("\(Int(miles)) mi")
                                         .font(.system(size: 14, weight: .medium))
                                         .foregroundColor(isSelected ? .white : .primary)
                                         .padding(.horizontal, 14)

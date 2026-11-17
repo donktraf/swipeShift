@@ -243,12 +243,17 @@ struct WorkerOnboardingView: View {
         }
     }
 
+    /// Juengstes erlaubtes Geburtsdatum (18+)
+    private static var latestAllowedBirthDate: Date {
+        Calendar.current.date(byAdding: .year, value: -18, to: Date()) ?? Date()
+    }
+
     private var dobSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Date of birth")
                 .font(.headline)
 
-            DatePicker("", selection: $dateOfBirth, displayedComponents: .date)
+            DatePicker("", selection: $dateOfBirth, in: ...Self.latestAllowedBirthDate, displayedComponents: .date)
                 .datePickerStyle(.wheel)
                 .labelsHidden()
                 .frame(maxWidth: .infinity)
@@ -456,7 +461,8 @@ struct WorkerOnboardingView: View {
                 jobInterests: Array(selectedJobInterests),
                 availability: availability,
                 bio: bio.isEmpty ? nil : bio,
-                profilePhotoUrl: finalProfileUrl
+                profilePhotoUrl: finalProfileUrl,
+                acceptedTerms: acceptedTerms
             )
             isSubmitting = false
         } catch {
@@ -484,9 +490,7 @@ struct WorkerOnboardingView: View {
     }
 
     private func isoDate(_ date: Date) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withFullDate]
-        return formatter.string(from: date)
+        DateOnly.string(from: date)
     }
 
     private func changeRoleLocally() {

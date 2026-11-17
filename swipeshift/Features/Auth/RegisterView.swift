@@ -419,6 +419,7 @@ struct RegisterView: View {
                 DatePicker(
                     "",
                     selection: $dateOfBirth,
+                    in: ...(Calendar.current.date(byAdding: .year, value: -18, to: Date()) ?? Date()), // 18+
                     displayedComponents: .date
                 )
                 .datePickerStyle(.wheel)
@@ -959,9 +960,7 @@ struct RegisterView: View {
     // MARK: - Aktionen
 
     private func isoDate(_ date: Date) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withFullDate]
-        return formatter.string(from: date)
+        DateOnly.string(from: date)
     }
 
     private func handleRegister() {
@@ -1009,7 +1008,8 @@ struct RegisterView: View {
                 industry: nil,
                 companyLogoUrl: nil,
                 websiteOrInstagram: nil,
-                companyDescription: nil
+                companyDescription: nil,
+                acceptedTerms: acceptedTerms
             )
 
             Task {
@@ -1063,7 +1063,8 @@ struct RegisterView: View {
                 industry: employerIndustry,
                 companyLogoUrl: nil,
                 websiteOrInstagram: websiteOrInstagram.isEmpty ? nil : websiteOrInstagram,
-                companyDescription: companyDescription.isEmpty ? nil : companyDescription
+                companyDescription: companyDescription.isEmpty ? nil : companyDescription,
+                acceptedTerms: employerAcceptedTerms
             )
 
             Task {

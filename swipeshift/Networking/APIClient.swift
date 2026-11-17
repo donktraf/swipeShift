@@ -435,7 +435,8 @@ final class APIClient {
             jobInterests: [String],
             availability: [AvailabilityDTO],
             bio: String?,
-            profilePhotoUrl: String?
+            profilePhotoUrl: String?,
+            acceptedTerms: Bool
         ) async throws -> UserDTO {
 
             var req = try makeRequest(path: "/onboarding/worker", method: "PATCH")
@@ -451,12 +452,14 @@ final class APIClient {
                 let availability: [AvailabilityDTO]
                 let bio: String?
                 let profilePhotoUrl: String?
+                let acceptedTerms: Bool
             }
 
             req.httpBody = try JSONEncoder().encode(
                 Body(firstName: firstName, lastName: lastName, location: location, lat: lat, lng: lng,
                      dateOfBirth: dateOfBirthISO, jobInterests: jobInterests,
-                     availability: availability, bio: bio, profilePhotoUrl: profilePhotoUrl)
+                     availability: availability, bio: bio, profilePhotoUrl: profilePhotoUrl,
+                     acceptedTerms: acceptedTerms)
             )
 
             let (data, response) = try await URLSession.shared.data(for: req)
@@ -476,7 +479,8 @@ final class APIClient {
             industry: String,
             companyLogoUrl: String?,
             websiteOrInstagram: String?,
-            companyDescription: String?
+            companyDescription: String?,
+            acceptedTerms: Bool
         ) async throws -> UserDTO {
 
             var req = try makeRequest(path: "/onboarding/employer", method: "PATCH")
@@ -493,6 +497,7 @@ final class APIClient {
                 let companyLogoUrl: String?
                 let websiteOrInstagram: String?
                 let companyDescription: String?
+                let acceptedTerms: Bool
             }
 
             req.httpBody = try JSONEncoder().encode(
@@ -507,7 +512,8 @@ final class APIClient {
                     industry: industry,
                     companyLogoUrl: companyLogoUrl,
                     websiteOrInstagram: websiteOrInstagram,
-                    companyDescription: companyDescription
+                    companyDescription: companyDescription,
+                    acceptedTerms: acceptedTerms
                 )
             )
 
@@ -516,7 +522,8 @@ final class APIClient {
             return try JSONDecoder().decode(UserDTO.self, from: data)
         }
     
-    func fetchNearbyJobs(lat: Double, lng: Double, radius: Double = 100) async throws -> [Job] {
+    /// Radius in Meilen; das Backend rechnet bei unit=mi selbst in km um
+    func fetchNearbyJobs(lat: Double, lng: Double, radiusMiles: Double = 100) async throws -> [Job] {
         var components = URLComponents(
             url: baseURL.appendingPathComponent("jobs/nearby"),
             resolvingAgainstBaseURL: false
@@ -525,7 +532,8 @@ final class APIClient {
         components.queryItems = [
             URLQueryItem(name: "lat",    value: String(lat)),
             URLQueryItem(name: "lng",    value: String(lng)),
-            URLQueryItem(name: "radius", value: String(radius)),
+            URLQueryItem(name: "radius", value: String(radiusMiles)),
+            URLQueryItem(name: "unit",   value: "mi"),
         ]
 
         var request = URLRequest(url: components.url!)
@@ -1065,9 +1073,9 @@ func validate(response: URLResponse, data: Data) throws {
             NotificationCenter.default.post(name: .sessionRevoked, object: nil)
         }
 
-        // Neue Sicherheits-Endpunkte liefern strukturierte Codes → lesbare Meldung durchreichen
-        if let code = body?.code, let message = body?.error {
-            throw APIError(status: http.statusCode, message: message, code: code)
+        // Lesbare Backend-Meldung ({ error }, optional mit code) durchreichen statt rohem JSON
+        if let message = body?.error, !message.isEmpty {
+            throw APIError(status: http.statusCode, message: message, code: body?.code)
         }
 
         let raw = String(data: data, encoding: .utf8) ?? "<no body>"

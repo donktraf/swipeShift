@@ -407,7 +407,8 @@ struct EmployerOnboardingView: View {
                 industry: industry,
                 companyLogoUrl: finalCompanyLogoUrl,
                 websiteOrInstagram: websiteOrInstagram.isEmpty ? nil : websiteOrInstagram,
-                companyDescription: companyDescription.isEmpty ? nil : companyDescription
+                companyDescription: companyDescription.isEmpty ? nil : companyDescription,
+                acceptedTerms: acceptedTerms
             )
             isSubmitting = false
         } catch {

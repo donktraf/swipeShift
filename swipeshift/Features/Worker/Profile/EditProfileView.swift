@@ -42,11 +42,16 @@ struct EditProfileView: View {
     @State private var underPressure: Int = 3
 
     // Legal
-    @State private var ageConfirmed: Bool = false
     @State private var workPermit: Bool = false
     @State private var termsAccepted: Bool = false
+    @State private var ratingSystemAccepted: Bool = false
+    /// AGB sind Kontovoraussetzung: einmal zugestimmt, nicht mehr abwaehlbar
+    @State private var termsLocked: Bool = false
 
     @State private var isSaving: Bool = false
+    @State private var saveError: String? = nil
+    /// Geladenes Geburtsdatum (yyyy-MM-dd); nur bei Aenderung wird es mitgesendet
+    @State private var loadedDOB: String? = nil
 
     @State private var showImagePicker = false
     @State private var selectedImage: UIImage? = nil
@@ -128,11 +133,19 @@ struct EditProfileView: View {
                     .keyboardType(.phonePad)
             }
             EditRow(label: "Date of Birth") {
-                DatePicker("", selection: $dateOfBirth, displayedComponents: .date)
+                DatePicker("", selection: $dateOfBirth, in: ...latestAllowedBirthDate, displayedComponents: .date)
                     .labelsHidden()
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }
+    }
+
+    /// Geburtsdatum liegt mind. 18 Jahre zurueck
+    private var isAdult: Bool { dateOfBirth <= latestAllowedBirthDate }
+
+    /// Juengstes erlaubtes Geburtsdatum (18+)
+    private var latestAllowedBirthDate: Date {
+        Calendar.current.date(byAdding: .year, value: -18, to: Date()) ?? Date()
     }
 
     // MARK: - Location & Mobility
@@ -155,7 +168,7 @@ struct EditProfileView: View {
             EditRow(label: "Max. Travel Distance") {
                 Picker("", selection: $maxDistance) {
                     ForEach(distanceOptions, id: \.self) { d in
-                        Text("\(d) km").tag(d)
+                        Text("\(d) mi").tag(d)
                     }
                 }
                 .pickerStyle(.menu)
@@ -284,9 +297,14 @@ struct EditProfileView: View {
 
     private var legalSection: some View {
         EditSection(title: "Legal") {
-            LegalToggle(label: "I am at least 18 years old",    isOn: $ageConfirmed)
+            if isAdult {
+                AgeConfirmedRow()
+            } else {
+                AgeWarningRow()
+            }
             LegalToggle(label: "I have a valid work permit",    isOn: $workPermit)
-            LegalToggle(label: "I agree to the Terms of Service", isOn: $termsAccepted)
+            LegalToggle(label: "I agree to the Terms of Service", isOn: $termsAccepted, locked: termsLocked)
+            LegalToggle(label: "I accept the Rating System guidelines", isOn: $ratingSystemAccepted)
         }
     }
 
@@ -326,6 +344,11 @@ struct EditProfileView: View {
         .buttonStyle(SSPrimaryButtonStyle(isEnabled: !isSaving))
         .padding(.horizontal, 16)
         .disabled(isSaving)
+        .alert("Could not save", isPresented: Binding(get: { saveError != nil }, set: { if !$0 { saveError = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(saveError ?? "")
+        }
     }
 
     // MARK: - Helpers
@@ -339,9 +362,9 @@ struct EditProfileView: View {
         bio       = user.bio       ?? ""
         phone     = user.phone     ?? ""
 
-        if let dobStr = user.dateOfBirth,
-           let dob = ISO8601DateFormatter().date(from: dobStr) {
+        if let dobStr = user.dateOfBirth, let dob = DateOnly.date(from: dobStr) {
             dateOfBirth = dob
+            loadedDOB = DateOnly.string(from: dob)
         }
 
         if let av = user.availability, !av.isEmpty {
@@ -373,13 +396,19 @@ struct EditProfileView: View {
         }
 
         workPermit = user.workAuthorization ?? false
+
+        let consents = user.legalConsents ?? [:]
+        termsAccepted        = consents["terms"] ?? false
+        termsLocked          = termsAccepted
+        ratingSystemAccepted = consents["ratingSystem"] ?? false
     }
 
     private func save() async {
         isSaving = true
-        let fmt = DateFormatter()
-        fmt.dateFormat = "yyyy-MM-dd"
-        let dobString = fmt.string(from: dateOfBirth)
+        saveError = nil
+        // Nur senden, wenn geaendert (Altnutzer < 18 koennen sonst andere Felder weiter speichern)
+        let currentDOB = DateOnly.string(from: dateOfBirth)
+        let dobString: String? = currentDOB == loadedDOB ? nil : currentDOB
 
         let availability = dayOrder.map { AvailabilityDTO(name: $0, available: availableDays[$0] ?? false) }
         let skills = WorkerSkillsDTO(
@@ -413,13 +442,15 @@ struct EditProfileView: View {
                 payRangeMax:         Double(payRangeMax),
                 skills:              skills,
                 workAuthorization:   workPermit,
-                profilePhotoUrl:     uploadedPhotoUrl
+                profilePhotoUrl:     uploadedPhotoUrl,
+                legalConsents:       ["terms": termsAccepted, "ratingSystem": ratingSystemAccepted]
             ))
             await userStore.refreshMe()
             isSaving = false
             dismiss()
         } catch {
             isSaving = false
+            saveError = error.localizedDescription
         }
     }
 }
@@ -504,9 +535,48 @@ private struct SkillRatingRow: View {
     }
 }
 
+/// Hinweis, wenn das gespeicherte Geburtsdatum unter 18 liegt
+private struct AgeWarningRow: View {
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 20))
+                .foregroundColor(.orange)
+                .padding(.leading, 14)
+            Text("Please check your date of birth – you must be at least 18.")
+                .font(.system(size: 13))
+                .foregroundColor(.primary)
+                .padding(.trailing, 14)
+            Spacer()
+        }
+        .padding(.vertical, 10)
+        Divider().padding(.leading, 14)
+    }
+}
+
+/// Schreibgeschuetzte Zeile: 18+ wird ueber das Geburtsdatum bestaetigt (serverseitig geprueft)
+private struct AgeConfirmedRow: View {
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "checkmark.seal.fill")
+                .font(.system(size: 20))
+                .foregroundColor(SS.primary)
+                .padding(.leading, 14)
+            Text("Age 18+ confirmed via your date of birth")
+                .font(.system(size: 13))
+                .foregroundColor(.primary)
+                .padding(.trailing, 14)
+            Spacer()
+        }
+        .padding(.vertical, 10)
+        Divider().padding(.leading, 14)
+    }
+}
+
 private struct LegalToggle: View {
     let label: String
     @Binding var isOn: Bool
+    var locked: Bool = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -517,6 +587,7 @@ private struct LegalToggle: View {
                     .padding(.leading, 14)
             }
             .buttonStyle(.plain)
+            .disabled(locked)
             Text(label)
                 .font(.system(size: 13))
                 .foregroundColor(.primary)
@@ -524,6 +595,7 @@ private struct LegalToggle: View {
             Spacer()
         }
         .padding(.vertical, 10)
+        .opacity(locked ? 0.6 : 1)
         if true { Divider().padding(.leading, 14) }
     }
 }

@@ -64,6 +64,8 @@ struct UserDTO: Decodable {
     let twoFactorEnabled: Bool?
     /// Konto pausiert (nur in GET /auth/me enthalten)
     let isPaused: Bool?
+    /// Rechtliche Zustimmungen: Key -> zugestimmt (terms, ratingSystem, paymentResponsibility, accurateJobInfo, legalHiring); nur in GET /auth/me
+    let legalConsents: [String: Bool]?
 }
 
 // Login/Register Response
@@ -111,6 +113,7 @@ struct UpdateProfileRequest: Encodable {
     let skills: WorkerSkillsDTO?
     let workAuthorization: Bool?
     let profilePhotoUrl: String?
+    let legalConsents: [String: Bool]?
 
     init(
         firstName: String? = nil, lastName: String? = nil,
@@ -121,7 +124,8 @@ struct UpdateProfileRequest: Encodable {
         transport: String? = nil, availableForSameDay: Bool? = nil,
         preferredCategories: [String]? = nil, payRangeMin: Double? = nil,
         payRangeMax: Double? = nil, skills: WorkerSkillsDTO? = nil,
-        workAuthorization: Bool? = nil, profilePhotoUrl: String? = nil
+        workAuthorization: Bool? = nil, profilePhotoUrl: String? = nil,
+        legalConsents: [String: Bool]? = nil
     ) {
         self.firstName = firstName; self.lastName = lastName
         self.location = location; self.bio = bio
@@ -132,6 +136,7 @@ struct UpdateProfileRequest: Encodable {
         self.preferredCategories = preferredCategories; self.payRangeMin = payRangeMin
         self.payRangeMax = payRangeMax; self.skills = skills
         self.workAuthorization = workAuthorization; self.profilePhotoUrl = profilePhotoUrl
+        self.legalConsents = legalConsents
     }
 }
 
@@ -160,6 +165,8 @@ struct UpdateEmployerProfileRequest: Encodable {
     let lastName: String?
     let jobTitle: String?
     let managerRole: String?
+    // Legal Agreements (Key -> zugestimmt)
+    var legalConsents: [String: Bool]? = nil
 }
 
 struct RegisterRequestDTO: Encodable {
@@ -186,4 +193,7 @@ struct RegisterRequestDTO: Encodable {
     let companyLogoUrl: String?
     let websiteOrInstagram: String?
     let companyDescription: String?
+
+    /// AGB-Zustimmung bei der Registrierung (Backend speichert sie nur, wenn true)
+    var acceptedTerms: Bool? = nil
 }
