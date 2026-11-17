@@ -197,9 +197,9 @@ struct EmployerDashboardView: View {
             ) { onViewApplicants?() }
 
             StatCard(
-                value: "€\(Int(monthlySpend))",
+                value: Money.format(monthlySpend),
                 label: "Monthly Spend",
-                icon: "eurosign.circle.fill",
+                icon: "dollarsign.circle.fill",
                 color: .orange,
                 actionLabel: "Overview"
             ) { showFinancial = true }

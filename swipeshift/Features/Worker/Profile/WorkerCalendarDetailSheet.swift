@@ -87,7 +87,7 @@ struct CalendarEntryDetailSheet: View {
             Divider().padding(.leading, 44)
             detailRow(icon: "building.2", label: "Employer", value: entry.company)
             Divider().padding(.leading, 44)
-            detailRow(icon: "eurosign.circle", label: "Pay", value: payValue)
+            detailRow(icon: "dollarsign.circle", label: "Pay", value: payValue)
             if let payment = entry.paymentStatus {
                 Divider().padding(.leading, 44)
                 detailRow(icon: payment == "paid" ? "checkmark.seal" : "hourglass",
@@ -100,7 +100,7 @@ struct CalendarEntryDetailSheet: View {
 
     private var payValue: String {
         guard let earnings = entry.earnings, earnings > 0 else { return entry.payText }
-        return "\(entry.payText) · €\(Int(earnings.rounded())) for this shift"
+        return "\(entry.payText) · \(Money.format(earnings)) for this shift"
     }
 
     private func detailRow(icon: String, label: String, value: String) -> some View {

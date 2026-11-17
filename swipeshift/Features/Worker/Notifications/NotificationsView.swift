@@ -27,7 +27,7 @@ enum NotificationCategory: String, CaseIterable {
     var icon: String {
         switch self {
         case .jobActivity: return "briefcase.fill"
-        case .payments:    return "eurosign.circle.fill"
+        case .payments:    return "dollarsign.circle.fill"
         case .messages:    return "bubble.left.fill"
         case .reviews:     return "star.fill"
         case .system:      return "bell.fill"

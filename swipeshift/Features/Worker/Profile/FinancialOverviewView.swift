@@ -58,7 +58,7 @@ struct FinancialOverviewView: View {
         HStack(spacing: 10) {
             FinancialStatCard(label: "Upcoming",  amount: upcomingEarnings,  color: .green,    icon: "arrow.up.circle.fill")
             FinancialStatCard(label: "Completed", amount: completedEarnings, color: SS.primary, icon: "checkmark.circle.fill")
-            FinancialStatCard(label: "Paid Out",  amount: paidOut,           color: .orange,   icon: "eurosign.circle.fill")
+            FinancialStatCard(label: "Paid Out",  amount: paidOut,           color: .orange,   icon: "dollarsign.circle.fill")
         }
         .padding(.horizontal, 16)
     }
@@ -92,7 +92,7 @@ struct FinancialOverviewView: View {
                 .frame(width: 160, height: 160)
 
                 VStack(spacing: 2) {
-                    Text("€\(Int(total))")
+                    Text(Money.format(total))
                         .font(.system(size: 22, weight: .bold)).foregroundColor(.primary)
                     Text("Total").font(.system(size: 12)).foregroundColor(.secondary)
                 }
@@ -143,7 +143,7 @@ struct FinancialOverviewView: View {
                     Text("Step to Target")
                         .font(.system(size: 15, weight: .bold))
                         .foregroundColor(.white)
-                    Text("Goal: €\(Int(incomeGoal))")
+                    Text("Goal: \(Money.format(incomeGoal))")
                         .font(.system(size: 12))
                         .foregroundColor(.white.opacity(0.6))
                 }
@@ -170,11 +170,11 @@ struct FinancialOverviewView: View {
                 .frame(height: 10)
 
                 HStack {
-                    Text("€\(Int(total)) earned")
+                    Text("\(Money.format(total)) earned")
                         .font(.system(size: 12)).foregroundColor(.white.opacity(0.7))
                     Spacer()
                     if gap > 0 {
-                        Text("€\(Int(gap)) to go")
+                        Text("\(Money.format(gap)) to go")
                             .font(.system(size: 12, weight: .semibold)).foregroundColor(.orange)
                     } else {
                         Label("Goal reached!", systemImage: "trophy.fill")
@@ -218,7 +218,7 @@ private struct GoalEditorSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Monthly income goal (€)") {
+                Section("Monthly income goal ($)") {
                     TextField("2000", text: $input)
                         .keyboardType(.decimalPad)
                 }
@@ -248,7 +248,7 @@ private struct FinancialStatCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Image(systemName: icon).font(.system(size: 14)).foregroundColor(color)
-            Text("€\(Int(amount))").font(.system(size: 20, weight: .bold)).foregroundColor(.primary)
+            Text(Money.format(amount)).font(.system(size: 20, weight: .bold)).foregroundColor(.primary)
             Text(label).font(.system(size: 11)).foregroundColor(.secondary)
         }
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
@@ -279,7 +279,7 @@ private struct EarningRow: View {
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 2) {
-                Text("€\(Int(item.amount))").font(.system(size: 15, weight: .bold)).foregroundColor(.primary)
+                Text(Money.format(item.amount)).font(.system(size: 15, weight: .bold)).foregroundColor(.primary)
                 Text(item.status == "upcoming" ? "Upcoming" : "Completed")
                     .font(.system(size: 11))
                     .foregroundColor(item.status == "upcoming" ? .green : .secondary)

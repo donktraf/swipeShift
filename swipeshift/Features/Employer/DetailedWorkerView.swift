@@ -410,16 +410,16 @@ struct DetailedWorkerView: View {
                 infoRow(icon: "square.grid.2x2.fill", label: "Preferred Categories",
                         value: categories.isEmpty ? "Not specified" : categories.joined(separator: ", "))
                 Divider().padding(.leading, 52)
-                infoRow(icon: "eurosign.circle", label: "Hourly Rate", value: payRangeText(w))
+                infoRow(icon: "dollarsign.circle", label: "Hourly Rate", value: payRangeText(w))
             }
         }
     }
 
     private func payRangeText(_ w: WorkerProfileInfo) -> String {
         switch (w.payRangeMin, w.payRangeMax) {
-        case let (min?, max?): return "€\(Int(min))–€\(Int(max)) / hour"
-        case let (min?, nil):  return "from €\(Int(min)) / hour"
-        case let (nil, max?):  return "up to €\(Int(max)) / hour"
+        case let (min?, max?): return "\(Money.format(min))–\(Money.hourly(max))"
+        case let (min?, nil):  return "from \(Money.hourly(min))"
+        case let (nil, max?):  return "up to \(Money.hourly(max))"
         default:               return "Not specified"
         }
     }

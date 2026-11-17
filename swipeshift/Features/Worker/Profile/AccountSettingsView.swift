@@ -408,7 +408,7 @@ struct NotificationSettingsView: View {
 
     private let rows: [CategoryRow] = [
         .init(id: \.jobActivity, icon: "briefcase.fill",      color: SS.primary, label: "Job Activity"),
-        .init(id: \.payments,    icon: "eurosign.circle.fill", color: .green,     label: "Payments"),
+        .init(id: \.payments,    icon: "dollarsign.circle.fill", color: .green,     label: "Payments"),
         .init(id: \.messages,    icon: "bubble.left.fill",     color: .blue,      label: "Messages"),
         .init(id: \.account,     icon: "person.fill",          color: .orange,    label: "Account"),
     ]

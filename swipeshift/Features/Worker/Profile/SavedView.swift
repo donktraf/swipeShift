@@ -245,7 +245,7 @@ private struct SavedJobCard: View {
                 Text(job.company).font(.system(size: 12)).foregroundColor(.secondary)
                 HStack(spacing: 8) {
                     Label(job.shiftText, systemImage: "calendar")
-                    Label(job.payText,   systemImage: "eurosign.circle")
+                    Label(job.payText,   systemImage: "dollarsign.circle")
                 }
                 .font(.system(size: 11)).foregroundColor(.secondary)
             }

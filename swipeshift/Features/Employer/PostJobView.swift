@@ -32,7 +32,7 @@ struct DraftShift: Identifiable {
 
     func toRequest(payAmount: Double) -> PostJobShiftRequest {
         let hours = max(0, endTime.timeIntervalSince(startTime) / 3600)
-        let total = String(format: "€%.0f total", hours * payAmount)
+        let total = "\(Money.format(hours * payAmount)) total"
 
         // Combine date + start/end time into full DateTime for the backend
         let cal = Calendar.current
@@ -412,7 +412,7 @@ struct PostJobView: View {
                         .frame(width: 30)
                 }
                 Divider().padding(.leading, 16)
-                FormRow(label: "Hourly Rate (€)") {
+                FormRow(label: "Hourly Rate ($)") {
                     TextField("e.g. 15.00", text: $hourlyRateText)
                         .keyboardType(.decimalPad)
                         .font(.system(size: 15))
@@ -678,7 +678,7 @@ struct PostJobView: View {
             shifts: shiftRequests,
             openSpots: numberOfWorkers,
             payAmount: rate,
-            payText: rate > 0 ? "€\(String(format: "%.0f", rate)) / hr" : "On request",
+            payText: rate > 0 ? "\(Money.format(rate)) / hr" : "On request",
             jobDescription: jobDescription,
             tasks: filteredTasks,
             dressCode: selectedDressCode.isEmpty ? nil : selectedDressCode,

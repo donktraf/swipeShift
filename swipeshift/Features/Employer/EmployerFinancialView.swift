@@ -72,12 +72,12 @@ struct EmployerFinancialView: View {
             columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)],
             spacing: 10
         ) {
-            EmployerStatCard(label: "Total Spending",     value: "€\(Int(f.totalSpending))",    icon: "eurosign.circle.fill",   color: SS.primary)
-            EmployerStatCard(label: "Upcoming Payments",  value: "€\(Int(f.upcomingPayments))", icon: "clock.fill",             color: .orange)
+            EmployerStatCard(label: "Total Spending",     value: Money.format(f.totalSpending),    icon: "dollarsign.circle.fill",   color: SS.primary)
+            EmployerStatCard(label: "Upcoming Payments",  value: Money.format(f.upcomingPayments), icon: "clock.fill",             color: .orange)
             EmployerStatCard(label: "Completed Jobs",     value: "\(f.completedJobsCount)",     icon: "checkmark.circle.fill",  color: .green)
             // Wireframe: Total Spending, Upcoming Payments, Completed Jobs, Paid Out
             // (Monthly Spend steht weiterhin auf dem Employer-Dashboard)
-            EmployerStatCard(label: "Paid Out",           value: "€\(Int(f.paidOut))",          icon: "checkmark.seal.fill",    color: .teal)
+            EmployerStatCard(label: "Paid Out",           value: Money.format(f.paidOut),          icon: "checkmark.seal.fill",    color: .teal)
         }
     }
 
@@ -260,7 +260,7 @@ private struct FinancialJobCard: View {
             Spacer()
 
             VStack(alignment: .trailing, spacing: 4) {
-                Text("€\(Int(job.amount))").font(.system(size: 15, weight: .bold)).foregroundColor(.primary)
+                Text(Money.format(job.amount)).font(.system(size: 15, weight: .bold)).foregroundColor(.primary)
                 Text(statusLabel)
                     .font(.system(size: 11, weight: .semibold)).foregroundColor(.white)
                     .padding(.horizontal, 8).padding(.vertical, 2)
@@ -354,7 +354,7 @@ private struct BreakdownSheet: View {
                         HStack {
                             Text("Total").font(.system(size: 15, weight: .semibold))
                             Spacer()
-                            Text("€\(Int(totalAmount))").font(.system(size: 15, weight: .bold))
+                            Text(Money.format(totalAmount)).font(.system(size: 15, weight: .bold))
                         }
                         .padding(.horizontal, 24).foregroundColor(.primary)
                     }
@@ -385,7 +385,7 @@ private struct BreakdownSheet: View {
                 }
             }
             .frame(width: 80, height: 6)
-            Text("€\(Int(amount))").font(.system(size: 14, weight: .semibold)).foregroundColor(.primary)
+            Text(Money.format(amount)).font(.system(size: 14, weight: .semibold)).foregroundColor(.primary)
                 .frame(width: 58, alignment: .trailing).padding(.trailing, 16)
         }
         .padding(.vertical, 14)

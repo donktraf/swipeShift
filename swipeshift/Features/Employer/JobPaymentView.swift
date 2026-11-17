@@ -91,7 +91,7 @@ struct JobPaymentView: View {
             Button("Cancel", role: .cancel) { workerToPay = nil }
         } message: {
             if let w = workerToPay {
-                Text("You are about to pay €\(String(format: "%.2f", w.totalEarned)) to \(w.name) for \(w.hoursWorked, specifier: "%.0f") hours.")
+                Text("You are about to pay \(Money.format(w.totalEarned, fractionDigits: 2)) to \(w.name) for \(w.hoursWorked, specifier: "%.0f") hours.")
             }
         }
         // Pay all confirmation
@@ -102,7 +102,7 @@ struct JobPaymentView: View {
             }
             Button("Cancel", role: .cancel) { showPayAllConfirm = false }
         } message: {
-            Text("You are about to pay €\(String(format: "%.2f", totalAmount)) to all \(workers.count) workers.")
+            Text("You are about to pay \(Money.format(totalAmount, fractionDigits: 2)) to all \(workers.count) workers.")
         }
         // Pay remaining confirmation
         .alert("Pay Remaining Workers?", isPresented: $showPayRemainingConfirm) {
@@ -112,7 +112,7 @@ struct JobPaymentView: View {
             }
             Button("Cancel", role: .cancel) { showPayRemainingConfirm = false }
         } message: {
-            Text("You are about to pay €\(String(format: "%.2f", remainingAmount)) to \(unpaidWorkers.count) remaining worker\(unpaidWorkers.count == 1 ? "" : "s").")
+            Text("You are about to pay \(Money.format(remainingAmount, fractionDigits: 2)) to \(unpaidWorkers.count) remaining worker\(unpaidWorkers.count == 1 ? "" : "s").")
         }
     }
 
@@ -148,11 +148,11 @@ struct JobPaymentView: View {
 
     private var summaryBar: some View {
         HStack(spacing: 0) {
-            summaryCell(label: "Total", value: "€\(Int(totalAmount))", color: .white)
+            summaryCell(label: "Total", value: Money.format(totalAmount), color: .white)
             Divider().frame(height: 36).opacity(0.2)
-            summaryCell(label: "Paid", value: "€\(Int(paidAmount))", color: .green)
+            summaryCell(label: "Paid", value: Money.format(paidAmount), color: .green)
             Divider().frame(height: 36).opacity(0.2)
-            summaryCell(label: "Remaining", value: "€\(Int(remainingAmount))", color: remainingAmount > 0 ? .orange : .green)
+            summaryCell(label: "Remaining", value: Money.format(remainingAmount), color: remainingAmount > 0 ? .orange : .green)
         }
         .padding(.vertical, 14)
         .background(Color.white.opacity(0.1))
@@ -213,7 +213,7 @@ struct JobPaymentView: View {
                 Text(worker.name)
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(.primary)
-                Text("\(worker.shiftDate) · \(worker.hoursWorked, specifier: "%.0f")h × €\(Int(worker.hourlyRate))/hr")
+                Text("\(worker.shiftDate) · \(worker.hoursWorked, specifier: "%.0f")h × \(Money.hourly(worker.hourlyRate))")
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
             }
@@ -222,7 +222,7 @@ struct JobPaymentView: View {
 
             // Amount + action
             VStack(alignment: .trailing, spacing: 4) {
-                Text("€\(String(format: "%.2f", worker.totalEarned))")
+                Text(Money.format(worker.totalEarned, fractionDigits: 2))
                     .font(.system(size: 15, weight: .bold))
                     .foregroundColor(.primary)
 
@@ -274,7 +274,7 @@ struct JobPaymentView: View {
 
         } else if paidWorkers.isEmpty {
             Button { showPayAllConfirm = true } label: {
-                Text("Pay All Workers  ·  €\(Int(totalAmount))")
+                Text("Pay All Workers  ·  \(Money.format(totalAmount))")
                     .font(.system(size: 15, weight: .semibold))
             }
             .buttonStyle(SSPrimaryButtonStyle())
@@ -282,7 +282,7 @@ struct JobPaymentView: View {
 
         } else {
             Button { showPayRemainingConfirm = true } label: {
-                Text("Pay Remaining \(unpaidWorkers.count) Worker\(unpaidWorkers.count == 1 ? "" : "s")  ·  €\(Int(remainingAmount))")
+                Text("Pay Remaining \(unpaidWorkers.count) Worker\(unpaidWorkers.count == 1 ? "" : "s")  ·  \(Money.format(remainingAmount))")
                     .font(.system(size: 15, weight: .semibold))
             }
             .buttonStyle(SSPrimaryButtonStyle())

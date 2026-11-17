@@ -15,7 +15,7 @@ struct JobShift: Identifiable, Equatable {
     let date: String        // z.B. "Mo, 12. Mai"
     let timeRange: String   // z.B. "18:00–23:00"
     let duration: String    // z.B. "5 Stunden"
-    let totalPay: String    // z.B. "€75 gesamt"
+    let totalPay: String    // z.B. "$75 total"
 }
 
 struct Job: Identifiable, Equatable {

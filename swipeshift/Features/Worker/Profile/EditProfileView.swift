@@ -258,22 +258,22 @@ struct EditProfileView: View {
             .padding(.vertical, 4)
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("Preferred Hourly Pay (€/h)")
+                Text("Preferred Hourly Pay ($/hr)")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(.secondary)
                 HStack(spacing: 16) {
                     VStack(spacing: 2) {
                         Text("Min").font(.system(size: 11)).foregroundColor(.secondary)
-                        Stepper("€\(payRangeMin)", value: $payRangeMin, in: 1...payRangeMax, step: 1)
+                        Stepper(Money.format(payRangeMin), value: $payRangeMin, in: 1...payRangeMax, step: 1)
                             .labelsHidden()
-                        Text("€\(payRangeMin)").font(.system(size: 14, weight: .semibold))
+                        Text(Money.format(payRangeMin)).font(.system(size: 14, weight: .semibold))
                     }
                     Divider().frame(height: 40)
                     VStack(spacing: 2) {
                         Text("Max").font(.system(size: 11)).foregroundColor(.secondary)
-                        Stepper("€\(payRangeMax)", value: $payRangeMax, in: payRangeMin...200, step: 1)
+                        Stepper(Money.format(payRangeMax), value: $payRangeMax, in: payRangeMin...200, step: 1)
                             .labelsHidden()
-                        Text("€\(payRangeMax)").font(.system(size: 14, weight: .semibold))
+                        Text(Money.format(payRangeMax)).font(.system(size: 14, weight: .semibold))
                     }
                     Spacer()
                 }
