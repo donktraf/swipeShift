@@ -161,8 +161,8 @@ Der ueberwiegende Teil der Wireframe-Anforderungen ist implementiert. Bekannte o
 • Active Sessions + 2FA (E-Mail-Code) sind umgesetzt (2026-11-17, siehe PROGRESS.md). Offen: Standort
   pro Geraet (braucht IP-Geolocation), Authenticator-App (TOTP) als Alternative, eigenes
   Employer-"Payments & Billing" (Employer nutzt aktuell die Worker-Account-Settings)
-• DetailedWorkerView (Worker-Profil fuer Arbeitgeber) zeigt noch fest eingetragene Beispieldaten
-  (Rating, Verfuegbarkeit, Erfahrung, Praeferenzen, Legal) statt echter Worker-Daten
+• DetailedWorkerView: seit 2026-11-17 echte Daten (GET /employer/workers/:userId). Offen: Erfahrungslevel
+  pro Kategorie (nicht im Worker-Modell), Sprachen, Zuverlaessigkeit/No-Show-Quote
 • AccountSettingsView: Benachrichtigungen, Quiet Hours, Auszahlung, Konto pausieren, Dark Mode, Sprache
   sind nur lokaler @State (nicht gespeichert, ohne Wirkung)
 • Kein XCTest-Target im Xcode-Projekt vorhanden — iOS-Unit-/UI-Tests muessen ueber Xcode

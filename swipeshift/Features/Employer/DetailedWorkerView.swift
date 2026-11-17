@@ -2,6 +2,9 @@
 //  DetailedWorkerView.swift
 //  swipeShift
 //
+//  Vollstaendiges Worker-Profil aus Arbeitgeber-Sicht. Alle Werte kommen von
+//  GET /employer/workers/:userId (frueher: fest eingetragene Beispieldaten).
+//
 
 import SwiftUI
 
@@ -16,7 +19,13 @@ struct DetailedWorkerView: View {
     @State private var showAcceptAlert  = false
     @State private var showDeclineAlert = false
 
+    @State private var profile: WorkerProfileDTO?
+    @State private var isLoading = true
+    @State private var loadError: String?
+
     private var user: ApplicantUser? { applicant.user }
+    private var worker: WorkerProfileInfo? { profile?.worker }
+    private var stats: WorkerProfileStats? { profile?.stats }
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -26,11 +35,34 @@ struct DetailedWorkerView: View {
                 VStack(spacing: 20) {
                     header
                     if let job = applicant.job { jobSection(job) }
-                    ratingsSection
-                    availabilitySection
-                    experienceSection
-                    preferencesSection
-                    legalSection
+
+                    if let profile {
+                        ratingsSection(profile)
+                        if let bio = profile.worker.bio?.trimmingCharacters(in: .whitespacesAndNewlines), !bio.isEmpty {
+                            aboutSection(bio)
+                        }
+                        availabilitySection(profile.worker)
+                        experienceSection(profile)
+                        preferencesSection(profile.worker)
+                        legalSection(profile.worker)
+                    } else if isLoading {
+                        ProgressView()
+                            .tint(.white)
+                            .padding(.vertical, 40)
+                    } else if let loadError {
+                        VStack(spacing: 12) {
+                            Text(loadError)
+                                .font(.system(size: 14))
+                                .foregroundColor(.white.opacity(0.85))
+                                .multilineTextAlignment(.center)
+                            Button("Try Again") { Task { await load() } }
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.white)
+                        }
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 30)
+                    }
+
                     Spacer().frame(height: 100)
                 }
             }
@@ -39,6 +71,7 @@ struct DetailedWorkerView: View {
             actionFooter
         }
         .navigationBarHidden(true)
+        .task { await load() }
         .alert("Accept applicant?", isPresented: $showAcceptAlert) {
             Button("Accept") { onAccept(); dismiss() }
             Button("Cancel", role: .cancel) {}
@@ -51,6 +84,17 @@ struct DetailedWorkerView: View {
         } message: {
             Text("The application from \(user?.fullName ?? "this applicant") will be declined.")
         }
+    }
+
+    private func load() async {
+        isLoading = true
+        loadError = nil
+        do {
+            profile = try await APIClient.shared.fetchWorkerProfile(userId: applicant.userId)
+        } catch {
+            loadError = "Couldn't load this worker's profile. Check your connection and try again."
+        }
+        isLoading = false
     }
 
     // MARK: - Header
@@ -73,66 +117,87 @@ struct DetailedWorkerView: View {
             .padding(.top, 8)
 
             VStack(spacing: 12) {
-                // Avatar
-                ZStack {
-                    Circle()
-                        .fill(Color.white.opacity(0.15))
-                        .frame(width: 88, height: 88)
-                    if let urlStr = user?.profilePhotoUrl, let url = URL(string: urlStr) {
-                        AsyncImage(url: url) { img in
-                            img.resizable().scaledToFill()
-                        } placeholder: {
-                            Image(systemName: "person.fill")
-                                .font(.system(size: 36))
-                                .foregroundColor(.white.opacity(0.7))
-                        }
-                        .frame(width: 88, height: 88)
-                        .clipShape(Circle())
-                    } else {
-                        Image(systemName: "person.fill")
-                            .font(.system(size: 36))
-                            .foregroundColor(.white.opacity(0.7))
-                    }
-                }
+                avatar
 
-                // Name + Badge
                 VStack(spacing: 4) {
                     HStack(spacing: 6) {
                         Text(user?.fullName ?? "Unknown")
                             .font(.system(size: 22, weight: .bold))
                             .foregroundColor(.white)
-                        Image(systemName: "checkmark.seal.fill")
-                            .foregroundColor(.white.opacity(0.9))
-                            .font(.system(size: 16))
-                    }
-                    Text("Verified Worker")
-                        .font(.system(size: 13))
-                        .foregroundColor(.white.opacity(0.7))
-
-                    // Sterne-Rating (Mock)
-                    HStack(spacing: 3) {
-                        ForEach(0..<5) { i in
-                            Image(systemName: i < 4 ? "star.fill" : "star.leadinghalf.filled")
-                                .font(.system(size: 12))
-                                .foregroundColor(.yellow)
+                        if worker?.isEmailVerified == true {
+                            Image(systemName: "checkmark.seal.fill")
+                                .foregroundColor(.white.opacity(0.9))
+                                .font(.system(size: 16))
                         }
-                        Text("4.6")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(.white)
-                        Text("(18 Jobs)")
-                            .font(.system(size: 12))
-                            .foregroundColor(.white.opacity(0.6))
+                    }
+                    if worker?.isEmailVerified == true {
+                        // Bewusst ehrlich: verifiziert ist bisher nur die E-Mail, keine Identitaet
+                        Text("Verified email")
+                            .font(.system(size: 13))
+                            .foregroundColor(.white.opacity(0.7))
                     }
 
-                    if let location = user?.location {
-                        Label(location, systemImage: "mappin.and.ellipse")
-                            .font(.system(size: 13))
-                            .foregroundColor(.white.opacity(0.75))
-                            .padding(.top, 2)
+                    if let stats {
+                        ratingLine(stats)
                     }
+
+                    HStack(spacing: 12) {
+                        if let location = worker?.location ?? user?.location {
+                            Label(location, systemImage: "mappin.and.ellipse")
+                        }
+                        if let age = worker?.age {
+                            Label("\(age) years", systemImage: "person.crop.circle")
+                        }
+                    }
+                    .font(.system(size: 13))
+                    .foregroundColor(.white.opacity(0.75))
+                    .padding(.top, 2)
                 }
             }
             .padding(.bottom, 20)
+        }
+    }
+
+    private var avatar: some View {
+        ZStack {
+            Circle()
+                .fill(Color.white.opacity(0.15))
+                .frame(width: 88, height: 88)
+            if let urlStr = worker?.profilePhotoUrl ?? user?.profilePhotoUrl, let url = URL(string: urlStr) {
+                AsyncImage(url: url) { img in
+                    img.resizable().scaledToFill()
+                } placeholder: {
+                    Image(systemName: "person.fill")
+                        .font(.system(size: 36))
+                        .foregroundColor(.white.opacity(0.7))
+                }
+                .frame(width: 88, height: 88)
+                .clipShape(Circle())
+            } else {
+                Image(systemName: "person.fill")
+                    .font(.system(size: 36))
+                    .foregroundColor(.white.opacity(0.7))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func ratingLine(_ stats: WorkerProfileStats) -> some View {
+        let jobsText = "\(stats.completedJobs) job\(stats.completedJobs == 1 ? "" : "s") completed"
+        if let rating = stats.overallRating {
+            HStack(spacing: 3) {
+                StarRow(value: rating, size: 12)
+                Text(String(format: "%.1f", rating))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.white)
+                Text("(\(stats.reviewCount) review\(stats.reviewCount == 1 ? "" : "s") · \(jobsText))")
+                    .font(.system(size: 12))
+                    .foregroundColor(.white.opacity(0.6))
+            }
+        } else {
+            Text("New on SwipeShift · \(jobsText)")
+                .font(.system(size: 12))
+                .foregroundColor(.white.opacity(0.7))
         }
     }
 
@@ -142,10 +207,10 @@ struct DetailedWorkerView: View {
         sectionCard("Applying For") {
             HStack(spacing: 12) {
                 Text(job.logoEmoji)
-                    .font(.system(size: 24))
-                    .frame(width: 44, height: 44)
-                    .background(Color.gray.opacity(0.07))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .font(.system(size: 28))
+                    .frame(width: 48, height: 48)
+                    .background(Color.gray.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(job.title)
@@ -165,128 +230,196 @@ struct DetailedWorkerView: View {
 
     // MARK: - Ratings
 
-    private var ratingsSection: some View {
+    private func ratingsSection(_ profile: WorkerProfileDTO) -> some View {
         sectionCard("Ratings & Reviews") {
             VStack(spacing: 0) {
-                ratingRow(label: "Communication",        value: 4.7)
-                Divider().padding(.leading, 16)
-                ratingRow(label: "Teamwork",             value: 4.5)
-                Divider().padding(.leading, 16)
-                ratingRow(label: "Reliability",          value: 4.8)
-                Divider().padding(.leading, 16)
-                ratingRow(label: "Under Pressure",       value: 4.3)
+                if let ratings = profile.stats.ratings, profile.stats.reviewCount > 0 {
+                    ratingRow(label: "Communication",  value: ratings.communication)
+                    Divider().padding(.leading, 16)
+                    ratingRow(label: "Teamwork",       value: ratings.teamwork)
+                    Divider().padding(.leading, 16)
+                    ratingRow(label: "Reliability",    value: ratings.reliability)
+                    Divider().padding(.leading, 16)
+                    ratingRow(label: "Under Pressure", value: ratings.underPressure)
+
+                    if let rehire = profile.stats.wouldRehirePercent {
+                        Divider().padding(.leading, 16)
+                        infoRow(icon: "arrow.triangle.2.circlepath", label: "Would rehire",
+                                value: "\(rehire)% of employers")
+                    }
+
+                    ForEach(profile.recentReviews) { review in
+                        Divider().padding(.leading, 16)
+                        reviewRow(review)
+                    }
+                } else {
+                    Text("No reviews from employers yet.")
+                        .font(.system(size: 14))
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(16)
+                }
+
+                // Selbsteinschaetzung aus dem Worker-Profil — klar als solche gekennzeichnet
+                if let skills = profile.worker.selfRatedSkills {
+                    Divider()
+                    Text("SELF-ASSESSED SKILLS")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 12)
+                    ratingRow(label: "Communication",  value: Double(skills.communication))
+                    ratingRow(label: "Teamwork",       value: Double(skills.teamwork))
+                    ratingRow(label: "Reliability",    value: Double(skills.reliability))
+                    ratingRow(label: "Under Pressure", value: Double(skills.underPressure))
+                }
             }
         }
     }
 
-    private func ratingRow(label: String, value: Double) -> some View {
+    private func ratingRow(label: String, value: Double?) -> some View {
         HStack(spacing: 12) {
             Text(label)
                 .font(.system(size: 14))
                 .foregroundColor(.primary)
-                .frame(width: 140, alignment: .leading)
-                .padding(.leading, 14)
+                .frame(width: 110, alignment: .leading)
 
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 4)
                         .fill(Color.gray.opacity(0.12))
-                        .frame(height: 6)
                     RoundedRectangle(cornerRadius: 4)
                         .fill(SS.primary)
-                        .frame(width: geo.size.width * CGFloat(value / 5.0), height: 6)
+                        .frame(width: geo.size.width * CGFloat(min(max((value ?? 0) / 5, 0), 1)))
                 }
             }
-            .frame(height: 6)
+            .frame(height: 8)
 
-            Text(String(format: "%.1f", value))
+            Text(value.map { String(format: "%.1f", $0) } ?? "–")
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(SS.primary)
-                .frame(width: 30, alignment: .trailing)
-                .padding(.trailing, 14)
+                .foregroundColor(.primary)
+                .frame(width: 28, alignment: .trailing)
         }
+        .padding(.horizontal, 16)
         .padding(.vertical, 12)
+    }
+
+    private func reviewRow(_ review: WorkerProfileReview) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                if let rating = review.rating {
+                    StarRow(value: rating, size: 10)
+                }
+                Text([review.jobTitle, review.createdAt.formatted(date: .abbreviated, time: .omitted)]
+                        .compactMap { $0 }.joined(separator: " · "))
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+            }
+            Text("“\(review.comment)”")
+                .font(.system(size: 13))
+                .foregroundColor(.primary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+    }
+
+    // MARK: - About
+
+    private func aboutSection(_ bio: String) -> some View {
+        sectionCard("About") {
+            Text(bio)
+                .font(.system(size: 14))
+                .foregroundColor(.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(16)
+        }
     }
 
     // MARK: - Availability
 
-    private var availabilitySection: some View {
+    private func availabilitySection(_ w: WorkerProfileInfo) -> some View {
         sectionCard("Availability & Location") {
             VStack(spacing: 0) {
                 infoRow(icon: "calendar.badge.clock", label: "Available Days",
-                        value: "Mon, Tue, Thu, Fri, Sat")
+                        value: w.availableDays.isEmpty ? "Not specified" : w.availableDays.joined(separator: ", "))
                 Divider().padding(.leading, 52)
                 infoRow(icon: "location.circle.fill", label: "Max. Travel Distance",
-                        value: "20 km")
+                        value: w.maxTravelDistance.map { "\($0) mi" } ?? "Not specified")
                 Divider().padding(.leading, 52)
                 infoRow(icon: "bolt.fill", label: "Same-day Jobs",
-                        value: "Yes, available")
+                        value: w.availableForSameDay ? "Yes, available" : "No")
+                Divider().padding(.leading, 52)
+                infoRow(icon: "arrow.left.arrow.right", label: "Works in other cities",
+                        value: w.willingToRelocate ? "Yes" : "No")
+                if let transport = w.transport, !transport.isEmpty {
+                    Divider().padding(.leading, 52)
+                    infoRow(icon: "car.fill", label: "Transport", value: transport.capitalized)
+                }
             }
         }
     }
 
     // MARK: - Experience
 
-    private var experienceSection: some View {
-        sectionCard("Work Experience") {
+    // TODO: Erfahrungslevel pro Kategorie (<3 Monate / 3-12 Monate / 1+ Jahre) wird im
+    // Worker-Profil noch nicht gespeichert — daher hier nur auf SwipeShift abgeschlossene Jobs.
+    private func experienceSection(_ profile: WorkerProfileDTO) -> some View {
+        sectionCard("Work Experience on SwipeShift") {
             VStack(spacing: 0) {
-                experienceRow(category: "Hospitality", level: "1+ year", icon: "🍽️")
-                Divider().padding(.leading, 52)
-                experienceRow(category: "Events",      level: "3–12 months", icon: "🎪")
-                Divider().padding(.leading, 52)
-                experienceRow(category: "Retail",      level: "<3 months", icon: "🛍️")
+                if profile.stats.completedByCategory.isEmpty {
+                    Text("No completed jobs on SwipeShift yet.")
+                        .font(.system(size: 14))
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(16)
+                } else {
+                    ForEach(Array(profile.stats.completedByCategory.enumerated()), id: \.element.id) { index, item in
+                        if index > 0 { Divider().padding(.leading, 52) }
+                        infoRow(icon: "briefcase.fill", label: item.category,
+                                value: "\(item.count) job\(item.count == 1 ? "" : "s")")
+                    }
+                }
             }
         }
-    }
-
-    private func experienceRow(category: String, level: String, icon: String) -> some View {
-        HStack(spacing: 14) {
-            Text(icon)
-                .font(.system(size: 20))
-                .frame(width: 28)
-                .padding(.leading, 14)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(category)
-                    .font(.system(size: 14, weight: .semibold))
-                Text(level)
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
-            }
-            Spacer()
-        }
-        .padding(.vertical, 12)
     }
 
     // MARK: - Preferences
 
-    private var preferencesSection: some View {
-        sectionCard("Job Preferences") {
+    private func preferencesSection(_ w: WorkerProfileInfo) -> some View {
+        let categories = w.preferredCategories.isEmpty ? w.jobInterests : w.preferredCategories
+        return sectionCard("Job Preferences") {
             VStack(spacing: 0) {
-                infoRow(icon: "briefcase.fill",    label: "Preferred Roles",
-                        value: "Bartender, Event Staff")
+                infoRow(icon: "square.grid.2x2.fill", label: "Preferred Categories",
+                        value: categories.isEmpty ? "Not specified" : categories.joined(separator: ", "))
                 Divider().padding(.leading, 52)
-                infoRow(icon: "moon.stars.fill",   label: "Preferred Shifts",
-                        value: "Evening, Night")
-                Divider().padding(.leading, 52)
-                infoRow(icon: "eurosign.circle",   label: "Min. Hourly Rate",
-                        value: "€13 / hour")
+                infoRow(icon: "eurosign.circle", label: "Hourly Rate", value: payRangeText(w))
             }
+        }
+    }
+
+    private func payRangeText(_ w: WorkerProfileInfo) -> String {
+        switch (w.payRangeMin, w.payRangeMax) {
+        case let (min?, max?): return "€\(Int(min))–€\(Int(max)) / hour"
+        case let (min?, nil):  return "from €\(Int(min)) / hour"
+        case let (nil, max?):  return "up to €\(Int(max)) / hour"
+        default:               return "Not specified"
         }
     }
 
     // MARK: - Legal
 
-    private var legalSection: some View {
+    private func legalSection(_ w: WorkerProfileInfo) -> some View {
         sectionCard("Legal & Compliance") {
             VStack(spacing: 0) {
-                legalRow(icon: "checkmark.shield.fill", label: "Work Permit",
-                         ok: true,  value: "EU Citizen")
+                legalRow(icon: "checkmark.shield.fill", label: "Work Authorization",
+                         ok: w.workAuthorization,
+                         value: w.workAuthorization ? "Confirmed by worker" : "Not confirmed")
                 Divider().padding(.leading, 52)
                 legalRow(icon: "person.text.rectangle", label: "Minimum Age (18+)",
-                         ok: true,  value: "Confirmed")
-                Divider().padding(.leading, 52)
-                legalRow(icon: "doc.text.fill",         label: "Terms Accepted",
-                         ok: true,  value: "Yes")
+                         ok: w.isAdult == true,
+                         value: w.isAdult == true ? "Yes" : (w.isAdult == false ? "Under 18" : "Unknown"))
             }
         }
     }
@@ -295,7 +428,7 @@ struct DetailedWorkerView: View {
         HStack(spacing: 14) {
             Image(systemName: icon)
                 .font(.system(size: 16))
-                .foregroundColor(ok ? .green : .red)
+                .foregroundColor(ok ? .green : .orange)
                 .frame(width: 28)
                 .padding(.leading, 14)
             Text(label)
@@ -304,7 +437,7 @@ struct DetailedWorkerView: View {
             Spacer()
             Text(value)
                 .font(.system(size: 13))
-                .foregroundColor(.secondary)
+                .foregroundColor(ok ? .secondary : .orange)
                 .padding(.trailing, 14)
         }
         .padding(.vertical, 13)
@@ -361,9 +494,36 @@ struct DetailedWorkerView: View {
             Text(value)
                 .font(.system(size: 13))
                 .foregroundColor(.secondary)
+                .multilineTextAlignment(.trailing)
                 .padding(.trailing, 14)
         }
         .padding(.vertical, 13)
+    }
+}
+
+// MARK: - Sterne (volle, halbe, leere)
+
+private struct StarRow: View {
+    let value: Double
+    let size: CGFloat
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(0..<5) { i in
+                Image(systemName: symbol(for: i))
+                    .font(.system(size: size))
+                    .foregroundColor(.yellow)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(String(format: "%.1f of 5 stars", value))
+    }
+
+    private func symbol(for index: Int) -> String {
+        let remaining = value - Double(index)
+        if remaining >= 0.75 { return "star.fill" }
+        if remaining >= 0.25 { return "star.leadinghalf.filled" }
+        return "star"
     }
 }
 

@@ -592,6 +592,22 @@ final class APIClient {
         return try JSONDecoder().decode(Resp.self, from: data).applicants
     }
 
+    // GET /employer/workers/:userId — echtes Worker-Profil fuer DetailedWorkerView
+    func fetchWorkerProfile(userId: String) async throws -> WorkerProfileDTO {
+        let req = try makeRequest(path: "/employer/workers/\(userId)", method: "GET")
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try validate(response: response, data: data)
+        let dec = JSONDecoder()
+        dec.dateDecodingStrategy = .custom { decoder in
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            let withFraction = ISO8601DateFormatter()
+            withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = withFraction.date(from: raw) ?? ISO8601DateFormatter().date(from: raw) { return date }
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Bad date \(raw)"))
+        }
+        return try dec.decode(WorkerProfileDTO.self, from: data)
+    }
+
     // POST /employer/applicants/:applyId/accept
     func acceptApplicant(applyId: String) async throws {
         let req = try makeRequest(path: "/employer/applicants/\(applyId)/accept", method: "POST")

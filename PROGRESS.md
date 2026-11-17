@@ -726,3 +726,10 @@ Vorher: Geräteliste hartcodiert, "Sign out of all other devices" hat nur lokal 
   - Employer: Profil-Zeile "Settings" öffnet jetzt die Account Settings (war leer)
 - End-to-End gegen lokale DB + MailHog getestet (28 Checks: Geräte, Abmelden, Logout, 2FA an/aus, Login mit Code, Resend, Brute-Force-Sperre, Passwortwechsel, alte Tokens)
 - Bewusst offen: Standort pro Gerät (bräuchte IP-Geolocation), Authenticator-App (TOTP) als Alternative zur E-Mail, eigenes Employer-"Payments & Billing"
+
+### Worker-Detailprofil (Arbeitgeber-Sicht) mit echten Daten (2026-11-17)
+Vorher waren Bewertung (4.6 / „18 Jobs“), Kategorie-Bewertungen, Verfügbarkeit, Erfahrung, Präferenzen und Legal fest eingetragen — für jeden Bewerber gleich.
+- Backend: `GET /employer/workers/:userId` in `routes.employer.js` — nur wenn sich der Worker auf einen Job dieses Arbeitgebers beworben hat (sonst 404). Liefert Profil (ohne Telefon/E-Mail/Geburtsdatum, nur Alter), Bewertungs-Durchschnitte + Rehire-Quote aus `Review`, abgeschlossene Jobs gesamt/pro Kategorie, bis zu 3 Kommentare
+- `src/utils/workerProfile.js` (+ Tests) — Alter, verfügbare Tage, Review-Zusammenfassung, abgeschlossene Jobs (gleiche Logik wie Worker-Kalender), Bereinigung freier JSON-Felder
+- iOS: `DTOs/WorkerProfileDTO.swift` (neu), `DetailedWorkerView.swift` neu aufgebaut (Lade-/Fehlerzustand, „New on SwipeShift“ ohne Bewertungen, Selbsteinschätzung klar gekennzeichnet, „Verified email“ statt „Verified Worker“)
+- Offen: Erfahrungslevel pro Kategorie (nicht im Datenmodell), Sprachen, Zuverlässigkeit/No-Show-Quote

@@ -6,6 +6,7 @@ const { requireAuth } = require("./auth");
 const { requireVerifiedEmail } = require("./middlewares/requireVerifiedEmail");
 const { resolvePeriod, isInPeriod, buildBuckets } = require("./utils/period");
 const { jobCosts, shiftHours } = require("./utils/jobCost");
+const { ageFromBirthDate, availableDays, summarizeReviews, summarizeCompletedJobs, cleanSelfRatedSkills, stringList } = require("./utils/workerProfile");
 
 const router = express.Router();
 
@@ -67,6 +68,106 @@ router.get("/applicants", requireAuth, requireVerifiedEmail, async (req, res) =>
     return res.json({ applicants });
   } catch (err) {
     console.error("GET /employer/applicants error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─────────────────────────────────────────────
+// GET /employer/workers/:userId
+// Echtes Worker-Profil fuer das Detail-Profil (ersetzt die frueheren Beispieldaten).
+// Nur sichtbar, wenn sich der Worker auf einen Job DIESES Arbeitgebers beworben hat.
+// Bewusst NICHT enthalten: Telefon, E-Mail, genaues Geburtsdatum (nur Alter).
+// ─────────────────────────────────────────────
+router.get("/workers/:userId", requireAuth, requireVerifiedEmail, async (req, res) => {
+  try {
+    const employerId = req.auth.sub;
+    const { userId } = req.params;
+
+    const hasApplied = await prisma.apply.findFirst({
+      where: { userId, job: { employerId } },
+      select: { id: true },
+    });
+    if (!hasApplied) return res.status(404).json({ error: "Worker not found" });
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true, firstName: true, lastName: true, location: true, emailVerifiedAt: true,
+        worker: {
+          select: {
+            dateOfBirth: true, bio: true, profilePhotoUrl: true, jobInterests: true, availability: true,
+            willingToRelocate: true, maxTravelDistance: true, transport: true, availableForSameDay: true,
+            preferredCategories: true, payRangeMin: true, payRangeMax: true, skills: true,
+            workAuthorization: true,
+          },
+        },
+      },
+    });
+    if (!user) return res.status(404).json({ error: "Worker not found" });
+
+    const [reviews, applies] = await Promise.all([
+      prisma.review.findMany({
+        where: { workerId: userId },
+        orderBy: { createdAt: "desc" },
+        select: {
+          communication: true, teamwork: true, reliability: true, underPressure: true,
+          wouldRehire: true, comment: true, createdAt: true,
+          apply: { select: { job: { select: { title: true } } } },
+        },
+      }),
+      prisma.apply.findMany({
+        where: { userId },
+        select: {
+          status: true, isPaid: true,
+          job: { select: { category: true, endTime: true, status: true, cancellationReason: true } },
+        },
+      }),
+    ]);
+
+    const w = user.worker;
+    const age = ageFromBirthDate(w?.dateOfBirth);
+    const summary = summarizeReviews(reviews);
+
+    return res.json({
+      worker: {
+        id: user.id,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        location: user.location,
+        isEmailVerified: !!user.emailVerifiedAt,
+        profilePhotoUrl: w?.profilePhotoUrl ?? null,
+        bio: w?.bio ?? null,
+        age,
+        isAdult: age === null ? null : age >= 18,
+        availableDays: availableDays(w?.availability),
+        maxTravelDistance: w?.maxTravelDistance ?? null,
+        willingToRelocate: w?.willingToRelocate ?? false,
+        availableForSameDay: w?.availableForSameDay ?? false,
+        transport: w?.transport ?? null,
+        preferredCategories: stringList(w?.preferredCategories),
+        jobInterests: stringList(w?.jobInterests),
+        payRangeMin: w?.payRangeMin ?? null,
+        payRangeMax: w?.payRangeMax ?? null,
+        selfRatedSkills: cleanSelfRatedSkills(w?.skills),
+        workAuthorization: w?.workAuthorization ?? false,
+      },
+      stats: {
+        ...summary,
+        ...summarizeCompletedJobs(applies),
+      },
+      recentReviews: reviews
+        .filter((r) => r.comment && r.comment.trim())
+        .slice(0, 3)
+        .map((r) => ({
+          comment: r.comment.trim(),
+          jobTitle: r.apply?.job?.title ?? null,
+          createdAt: r.createdAt,
+          rating: summarizeReviews([r]).overallRating,
+          wouldRehire: r.wouldRehire,
+        })),
+    });
+  } catch (err) {
+    console.error("GET /employer/workers/:userId error:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
 });

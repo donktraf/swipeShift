@@ -186,7 +186,7 @@ Code: `SavedView.swift` (Worker) — Jobs/Companies-Tabs ✓, nach Datum gruppie
 Alle Feldzeilen des App Development Trackers wurden gegen den Code geprüft (außer **Profile Screen**, da steht der Abgleich noch aus — Notion-Abfragelimit erreicht). Regel: gebaut → „Erledigt“; fehlt → bleibt „Nicht begonnen“; Abschnitte/Screens mit offenen Feldern → „In Arbeit“ mit Kommentar, was fehlt. Die offenen Punkte sind gebündelt als Aufgaben im Notion-Aufgaben-Tracker angelegt.
 
 **Neue Funde (vorher als „fertig“ geführt):**
-- `DetailedWorkerView.swift` (Worker-Profil für Arbeitgeber) zeigt **fest eingetragene Beispieldaten**: Bewertung 4.6 / „18 Jobs“, Kategorie-Bewertungen, Verfügbarkeit, Erfahrung, Präferenzen, Legal. Nur Name, Foto, Ort, Job und Accept/Decline sind echt.
+- `DetailedWorkerView.swift` (Worker-Profil für Arbeitgeber) zeigt **fest eingetragene Beispieldaten**: Bewertung 4.6 / „18 Jobs“, Kategorie-Bewertungen, Verfügbarkeit, Erfahrung, Präferenzen, Legal. Nur Name, Foto, Ort, Job und Accept/Decline sind echt. **✅ Behoben 2026-11-17:** neuer Endpunkt `GET /employer/workers/:userId` (nur für Arbeitgeber, bei denen sich der Worker beworben hat); Bewertungen anderer Arbeitgeber, abgeschlossene Jobs pro Kategorie, Verfügbarkeit, Präferenzen, Alter/18+, Arbeitserlaubnis, Bio, Selbsteinschätzung. „Verified Worker“ → ehrlich „Verified email“.
 - `AccountSettingsView.swift`: Benachrichtigungen, Quiet Hours, Auszahlungsdaten, Konto pausieren, Dark Mode und Sprache sind nur lokaler `@State` — werden nicht gespeichert, haben keine Wirkung.
 - Währung ist überall fest „€“ (für US-Launch umstellen).
 - Arbeitgeber-Entwürfe lassen sich nicht bearbeiten oder löschen.
