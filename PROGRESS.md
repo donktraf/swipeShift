@@ -742,3 +742,13 @@ Vorher: Benachrichtigungen, Quiet Hours, Dark Mode, Sprache nur lokaler `@State`
 - iOS: `DTOs/SettingsDTO.swift` (neu); Notifications speichern jede Änderung sofort (bei Fehler zurück auf alten Stand); Payments lädt/speichert, gespeicherte IBAN nur maskiert; Pause über API mit rollenabhängigem Text; Dark Mode via `@AppStorage`, angewendet in `swipeShiftApp`; Sprachauswahl durch Hinweis „English, more coming soon“ ersetzt
 - End-to-End gegen lokale DB getestet (13 Checks)
 - Offen: Push-/Mail-Versand gemäß Einstellungen (keine Push-Infrastruktur), echte Auszahlungen, Lokalisierung, Zeitzone; offene-Jobs-Zähler im Company-Profil zählt Jobs pausierter Arbeitgeber noch mit
+
+### Zustimmungen speichern, 18+ prüfen, Entfernungen in Meilen (2026-11-17)
+Gefunden beim Profile-Screen-Abgleich: Legal-Schalter (Worker + Arbeitgeber) und „I am at least 18“ waren nur lokaler `@State`; km und Meilen gemischt.
+- Backend: `User.legalConsents` (JSON, Key → Zeitstempel; Migration `20261117180000_add_legal_consents`); `src/utils/consents.js` (Whitelist pro Rolle, Terms nicht widerrufbar) + `src/utils/age.js` (`isAtLeast18`) mit Tests
+- Onboarding verlangt `acceptedTerms` und speichert Terms; Registrierung speichert Terms, wenn mitgeschickt; 18+ wird in Onboarding, Registrierung und `PATCH /auth/me` geprüft
+- `GET /auth/me` liefert `legalConsents` (Bool-Map) und `dateOfBirth` als `yyyy-MM-dd`; `PATCH /auth/me` + `PATCH /employer/profile` nehmen `legalConsents` an
+- `/jobs/nearby?unit=mi` (ohne `unit` weiter km), `distanceText` in Meilen, Radius validiert; `kmToMiles`/`milesToKm` in `haversine.js`
+- iOS: `utils/DateOnly.swift`, `utils/Distance.swift` (neu); Edit Profile (Worker) mit Rating-System-Zustimmung, 18+-Zeile aus dem Geburtsdatum, Geburtsdatum wird nicht mehr still überschrieben, Fehler-Alert; Arbeitgeber-Profil speichert alle fünf Zustimmungen; Jobliste-Filter + Radar in Meilen
+- `validate()` reicht jede Backend-Meldung `{ error }` lesbar durch (vorher nur mit `code`)
+- Vor Start: `npx prisma migrate deploy`

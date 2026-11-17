@@ -540,3 +540,17 @@ kein Laufzeitverhalten, keine SwiftUI-Layout-/Preview-Verifikation.
 **Gesamtergebnis:** Alle durchführbaren Checks grün (5/5 Dateien Syntax OK, 4/4 Backend-Tests
 bestanden, keine unbeabsichtigten Diffs, keine Logikfehler in `ApplyFlowView.swift` gefunden). Kein
 Fehlschlag.
+
+---
+
+# Dev-Loop 2026-11-17 — Zustimmungen speichern, 18+ prüfen, Meilen
+
+**Aufgabe:** Fehler aus dem Profile-Screen-Abgleich: (A) Legal-Schalter im Worker- und Arbeitgeber-Profil sowie die 18+-Bestätigung wurden nicht gespeichert/geprüft, (B) Entfernungen gemischt km/mi.
+
+**Runde 1 – implementer:** `User.legalConsents` (Key → Zeitstempel, Rollen-Whitelist), Onboarding verlangt + speichert Terms, 18+-Prüfung serverseitig (Onboarding, PATCH /auth/me), DatePicker ≤ heute−18 J.; Meilen in Profil, Jobliste-Filter, Radar (`/jobs/nearby?unit=mi`, `distanceText` in mi).
+**Review 1:** 2× Kritisch – (1) Edit Profile überschrieb beim Speichern das echte Geburtsdatum (ISO-Format mit Millisekunden nicht geparst, dazu Zeitzonen-Drift; Altfehler, durch 18+-Prüfung verschärft), (2) Speicherfehler wurden still verschluckt. Warnungen: Terms serverseitig widerrufbar, Datum mit Uhrzeit, Radius ungeprüft.
+**Runde 2 – implementer:** DOB als `yyyy-MM-dd` (Backend + `DateOnly`-Helper), DOB nur bei Änderung senden, Fehler-Alerts (Worker + beide Arbeitgeber-Tabs), Terms nicht widerrufbar, Radius 0–500 validiert, Registrierung speichert Terms optional.
+**Review 2:** Keine kritischen Punkte. Warnung: Alert zeigte rohes JSON → vom Orchestrator in `validate()` behoben (Backend-`error` immer lesbar durchreichen). Bewusst offen: 18+-Stichtag kann östlich von UTC kurz nach Mitternacht um einen Tag abweichen (für US-Launch irrelevant).
+**Tester:** `npm test` 77/77 grün (3 neue Consent-Randfall-Tests), iOS-Build erfolgreich (SwiftLint per PATH umgangen – SwiftLint meldet viele Altverstöße). Migration `20261117180000_add_legal_consents` NICHT gegen DB gelaufen (Docker aus) – vor Start `npx prisma migrate deploy`.
+
+**Status:** erfolgreich, 2 Review-Runden, 1 Testrunde. Offen: Migration lokal anwenden + manueller Klick-Test; Radius-Parsing in routes.jobs.js nicht unit-getestet (inline).
