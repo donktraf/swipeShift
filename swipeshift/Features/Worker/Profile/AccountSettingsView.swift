@@ -845,6 +845,7 @@ struct PrivacyDataView: View {
     @State private var isUpdatingPause  = false
     @State private var pauseError: String?
     @State private var isDeletingAccount = false
+    @State private var deleteError: String?
 
     var body: some View {
         SubScreenShell(title: "Privacy & Data") {
@@ -930,7 +931,16 @@ struct PrivacyDataView: View {
             Button("Delete Permanently", role: .destructive) {
                 isDeletingAccount = true
                 Task {
-                    try? await APIClient.shared.deleteAccount()
+                    do {
+                        try await APIClient.shared.deleteAccount()
+                    } catch {
+                        // Konto existiert noch → nicht ausloggen, Fehler anzeigen
+                        isDeletingAccount = false
+                        deleteError = "Your account could not be deleted. Please try again."
+                        return
+                    }
+                    // Hinweis "Last signed in with ..." entfernen
+                    LastLoginMethod.clear()
                     TokenStore.shared.deleteToken()
                     userStore.logout()
                 }
@@ -938,6 +948,14 @@ struct PrivacyDataView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("All your data will be permanently deleted. This action cannot be undone.")
+        }
+        .alert("Couldn't Delete Account", isPresented: Binding(
+            get: { deleteError != nil },
+            set: { if !$0 { deleteError = nil } }
+        )) {
+            Button("OK", role: .cancel) { deleteError = nil }
+        } message: {
+            Text(deleteError ?? "")
         }
         .alert("Pause Account?", isPresented: $showPauseConfirm) {
             Button("Pause") { Task { await setPaused(true) } }

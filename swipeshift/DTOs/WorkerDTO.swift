@@ -27,7 +27,7 @@ struct WorkerApplicationItem: Identifiable, Decodable {
     let paymentStatus:      String?   // "paid" | "pending" (nur completed)
     let earnings:           Double?
     let conversationId:     String?
-
+    let distanceMiles:      Double?   // Worker → Job, nil ohne Koordinaten
 }
 
 // MARK: - Saved Jobs
@@ -43,6 +43,11 @@ struct WorkerSavedJob: Identifiable, Decodable {
     let shiftText:     String
     let savedAt:       Date
     let appliedStatus: String?  // nil | "Applied" | "Confirmed"
+    // Optional, damit aeltere Backend-Antworten weiter dekodieren
+    let category:      String?
+    let tags:          [String]?
+    let distanceMiles: Double?
+    let canApply:      Bool?    // noch nicht beworben und Job offen
 }
 
 // MARK: - Worker Reviews
@@ -86,11 +91,18 @@ struct WorkerEarningItem: Identifiable, Decodable {
     let shiftText: String
     let amount:    Double
     let status:    String   // "upcoming" | "completed"
+    // amount = hourlyRate x hours (Backend utils/jobCost.js); optional fuer aeltere Antworten
+    let hourlyRate: Double?
+    let hours:      Double?
+    let startTime:  Date?
+    let isPaid:     Bool?
 }
 
 struct WorkerFinancialsDTO: Decodable {
     let upcomingEarnings:  Double
     let completedEarnings: Double
     let paidOut:           Double
+    let thisWeekEarnings:  Double?   // laufende Woche Mo–So, unabhaengig vom Zeitraum
+    let earningsTotal:     Int?      // Anzahl Schichten im Zeitraum (Liste ist auf die neuesten begrenzt)
     let earningsList:      [WorkerEarningItem]
 }

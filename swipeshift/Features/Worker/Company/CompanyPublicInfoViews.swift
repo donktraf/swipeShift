@@ -7,7 +7,6 @@
 //
 
 import SwiftUI
-import MapKit
 
 private func clean(_ value: String?) -> String? {
     guard let v = value?.trimmingCharacters(in: .whitespacesAndNewlines), !v.isEmpty else { return nil }
@@ -108,12 +107,6 @@ struct CompanyPeopleAndLinksCard: View {
 struct CompanyAddressCard: View {
     let company: CompanyProfileDTO
 
-    private var coordinate: CLLocationCoordinate2D? {
-        guard let lat = company.addressLat, let lng = company.addressLng,
-              abs(lat) <= 90, abs(lng) <= 180 else { return nil }
-        return CLLocationCoordinate2D(latitude: lat, longitude: lng)
-    }
-
     private var addressText: String {
         [clean(company.streetAddress), clean(company.zipCode)].compactMap { $0 }.joined(separator: ", ")
     }
@@ -132,37 +125,11 @@ struct CompanyAddressCard: View {
             }
             .padding(.vertical, 12)
 
-            if let coordinate {
-                Map(initialPosition: .region(MKCoordinateRegion(
-                    center: coordinate,
-                    span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
-                )), interactionModes: []) {
-                    Marker(company.name, coordinate: coordinate).tint(SS.primary)
-                }
-                .frame(height: 140)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-                .padding(.horizontal, 14)
-                .allowsHitTesting(false)
-
-                Button { openInMaps(coordinate) } label: {
-                    Label("Open in Maps", systemImage: "map")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(SS.primary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                }
-                .buttonStyle(.plain)
-            }
+            LocationMapPreview(lat: company.addressLat, lng: company.addressLng, title: company.name)
         }
         .background(Color(uiColor: .systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .padding(.horizontal, 16)
         .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
-    }
-
-    private func openInMaps(_ coordinate: CLLocationCoordinate2D) {
-        let item = MKMapItem(placemark: MKPlacemark(coordinate: coordinate))
-        item.name = company.name
-        item.openInMaps()
     }
 }

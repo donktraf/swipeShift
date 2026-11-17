@@ -273,6 +273,14 @@ struct CompanyProfileView: View {
                 .padding(.horizontal, 14).padding(.vertical, 12)
             }
 
+            // Rating-Tags (Backend: nur bei >= 3 Bewertungen und Kategorie-Schnitt >= 4.5)
+            if let tags = p.ratingTags, !tags.isEmpty {
+                Divider().padding(.horizontal, 14)
+                FlowTagsView(tags: tags)
+                    .padding(.horizontal, 14).padding(.vertical, 12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
             // Individual review cards
             if let reviews = p.workerReviews, !reviews.isEmpty {
                 Divider().padding(.horizontal, 14)

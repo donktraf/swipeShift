@@ -18,6 +18,8 @@ struct JobApplicationsView: View {
     @State private var applications: [WorkerApplicationItem] = []
     @State private var isLoading    = false
     @State private var errorMessage: String? = nil
+    @StateObject private var navigation = ApplicationNavigation()
+    @EnvironmentObject private var messageStore: MessageStore
 
     private let tabs: [(String, ApplicationStatus)] = [
         ("Confirmed", .confirmed),
@@ -39,6 +41,12 @@ struct JobApplicationsView: View {
         applications.filter { appStatus($0) == selectedTab }
     }
 
+    /// Nach Monat gruppiert; kommende Jobs aufsteigend, vergangene absteigend, Stornierte ohne Summe
+    private var groups: [ApplicationMonthGroup] {
+        let past = selectedTab == .completed || selectedTab == .cancelled
+        return ApplicationMonthGroup.make(from: filtered, newestFirst: past, includeEarnings: selectedTab != .cancelled)
+    }
+
     var body: some View {
         SubScreenShell(title: "Job Applications") {
             VStack(spacing: 16) {
@@ -57,10 +65,21 @@ struct JobApplicationsView: View {
                 } else if filtered.isEmpty {
                     emptyState
                 } else {
-                    VStack(spacing: 12) {
-                        ForEach(filtered) { item in
-                            ApplicationCard(item: item, status: appStatus(item)) {
-                                applications.removeAll { $0.id == item.id }
+                    VStack(spacing: 20) {
+                        ForEach(groups) { group in
+                            VStack(spacing: 10) {
+                                monthHeader(group)
+                                ForEach(group.items) { item in
+                                    ApplicationCard(
+                                        item: item,
+                                        status: appStatus(item),
+                                        onWithdraw: { applications.removeAll { $0.id == item.id } },
+                                        onViewJob: { navigation.openJob(jobId: item.jobId) },
+                                        onOpenChat: {
+                                            navigation.openChat(conversationId: item.conversationId, messageStore: messageStore)
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
@@ -69,6 +88,21 @@ struct JobApplicationsView: View {
             }
         }
         .task { await load() }
+        .applicationNavigation(navigation)
+    }
+
+    // MARK: - Month Header
+
+    private func monthHeader(_ group: ApplicationMonthGroup) -> some View {
+        HStack {
+            Text(group.title)
+                .font(.system(size: 14, weight: .bold)).foregroundColor(.white)
+            Spacer()
+            if let total = group.totalEarnings {
+                Text("\(Money.format(total)) \(selectedTab == .completed ? "earned" : "expected")")
+                    .font(.system(size: 12, weight: .semibold)).foregroundColor(.white.opacity(0.75))
+            }
+        }
     }
 
     // MARK: - Tab Selector
@@ -113,124 +147,5 @@ struct JobApplicationsView: View {
         do { applications = try await APIClient.shared.fetchWorkerApplications() }
         catch { errorMessage = error.localizedDescription }
         isLoading = false
-    }
-}
-
-// MARK: - Application Card
-
-private struct ApplicationCard: View {
-    let item:     WorkerApplicationItem
-    let status:   ApplicationStatus
-    let onWithdraw: () -> Void
-
-    @State private var showWithdrawAlert = false
-    @State private var isWithdrawing     = false
-    @State private var showRatingSheet   = false
-    @State private var hasReviewed       = false
-
-    var body: some View {
-        VStack(spacing: 0) {
-            // Header
-            HStack(spacing: 12) {
-                Text(item.logoEmoji)
-                    .font(.system(size: 28)).frame(width: 48, height: 48)
-                    .background(Color.gray.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(item.jobTitle)
-                        .font(.system(size: 15, weight: .semibold)).foregroundColor(.primary)
-                    Text(item.company)
-                        .font(.system(size: 13)).foregroundColor(.secondary)
-                }
-                Spacer()
-                statusBadge
-            }
-            .padding(14)
-
-            Divider().padding(.horizontal, 14)
-
-            // Details
-            HStack(spacing: 16) {
-                Label(item.shiftText, systemImage: "calendar")
-                Label(item.payText,   systemImage: "dollarsign.circle")
-                Label(item.location,  systemImage: "mappin")
-            }
-            .font(.system(size: 12)).foregroundColor(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 14).padding(.vertical, 10)
-            .lineLimit(1)
-
-            // Grund der Stornierung/Ablehnung (Employer-Angabe oder Standardtext vom Backend)
-            if status == .cancelled, let reason = item.cancellationReason {
-                Label(reason, systemImage: "xmark.circle.fill")
-                    .font(.system(size: 12)).foregroundColor(.red.opacity(0.85))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 14).padding(.bottom, 10)
-            }
-
-            if status == .applied {
-                Divider().padding(.horizontal, 14)
-                Button {
-                    showWithdrawAlert = true
-                } label: {
-                    Text(isWithdrawing ? "Withdrawing…" : "Withdraw Application")
-                        .font(.system(size: 13, weight: .semibold)).foregroundColor(.red)
-                        .frame(maxWidth: .infinity).padding(.vertical, 10)
-                }
-                .buttonStyle(.plain)
-                .disabled(isWithdrawing)
-                .alert("Withdraw Application?", isPresented: $showWithdrawAlert) {
-                    Button("Withdraw", role: .destructive) {
-                        Task {
-                            isWithdrawing = true
-                            try? await APIClient.shared.withdrawApplication(applyId: item.id)
-                            onWithdraw()
-                        }
-                    }
-                    Button("Cancel", role: .cancel) {}
-                } message: {
-                    Text("Your application for \(item.jobTitle) will be removed.")
-                }
-            }
-
-            if status == .completed {
-                Divider().padding(.horizontal, 14)
-                Button { showRatingSheet = true } label: {
-                    Label(hasReviewed ? "Review Submitted" : "Leave a Review",
-                          systemImage: hasReviewed ? "star.fill" : "star")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(hasReviewed ? .secondary : SS.primary)
-                        .frame(maxWidth: .infinity).padding(.vertical, 10)
-                }
-                .buttonStyle(.plain)
-                .disabled(hasReviewed)
-                .sheet(isPresented: $showRatingSheet) {
-                    EmployerRatingSheet(
-                        applyId:     item.id,
-                        companyName: item.company,
-                        jobTitle:    item.jobTitle
-                    ) {
-                        hasReviewed = true
-                    }
-                }
-            }
-        }
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
-    }
-
-    private var statusBadge: some View {
-        let (label, color): (String, Color) = switch status {
-        case .confirmed: ("Confirmed", .green)
-        case .applied:   ("Applied",   SS.primary)
-        case .completed: ("Completed", .gray)
-        case .cancelled: ("Cancelled", .red)
-        }
-        return Text(label)
-            .font(.system(size: 11, weight: .bold)).foregroundColor(.white)
-            .padding(.horizontal, 8).padding(.vertical, 4)
-            .background(color).clipShape(Capsule())
     }
 }

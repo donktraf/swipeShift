@@ -69,6 +69,7 @@ struct LandingView: View {
                                 )
                             }
                             .buttonStyle(.plain)
+                            LastLoginHint(method: .google)
 
                             // Apple
                             SignInWithAppleButton(.continue) { request in
@@ -79,6 +80,7 @@ struct LandingView: View {
                             .signInWithAppleButtonStyle(.black)
                             .frame(height: 54)
                             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                            LastLoginHint(method: .apple)
 
                             // Divider
                             HStack(spacing: 12) {
@@ -101,6 +103,7 @@ struct LandingView: View {
                                 Text("Log in")
                             }
                             .buttonStyle(SSPrimaryButtonStyle())
+                            LastLoginHint(method: .email)
 
                             // ✅ Register per fullScreenCover statt NavigationLink
                             Button {

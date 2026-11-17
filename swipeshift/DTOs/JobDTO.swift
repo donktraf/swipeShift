@@ -53,6 +53,10 @@ struct JobDTO: Decodable, Identifiable {
     let shifts: [ShiftDTO]?
     let reviewBreakdown: JobReviewBreakdownDTO?
     let matchReasons: [String]?
+    // Nur bei GET /jobs/:id
+    let companyIndustry: String?
+    let companyBusinessAreas: [String]?
+    let companyCompletedJobs: Int?
 }
 
 struct JobReviewBreakdownDTO: Decodable {
@@ -72,7 +76,7 @@ extension JobDTO {
         if let iso = startTime {
             parsedStartTime = ISO8601DateFormatter().date(from: iso)
         }
-        return Job(
+        var job = Job(
             id: id, title: title, company: company, location: location,
             payText: payText, distanceText: distanceText ?? "", shiftText: shiftText,
             shortInfo: shortInfo, tags: tags, logoEmoji: logoEmoji,
@@ -94,6 +98,10 @@ extension JobDTO {
             },
             matchReasons: matchReasons ?? []
         )
+        job.companyIndustry = companyIndustry
+        job.companyBusinessAreas = companyBusinessAreas ?? []
+        job.companyCompletedJobs = companyCompletedJobs
+        return job
     }
 }
 

@@ -65,18 +65,26 @@ final class UserStore: ObservableObject {
         signedOutNotice = "You were signed out. Please sign in again."
     }
 
+    /// Login-Weg, dessen 2FA-Code gerade noch aussteht
+    private var pendingLoginMethod: LastLoginMethod?
+
     /// Wertet ein Login-Ergebnis aus (alle Login-Wege inkl. 2FA-Abschluss).
     @MainActor
-    private func applyLoginOutcome(_ outcome: LoginOutcome) {
+    private func applyLoginOutcome(_ outcome: LoginOutcome, method: LastLoginMethod) {
         switch outcome {
         case .signedIn(let user, let isNewUser):
             pendingTwoFactor = nil
+            pendingLoginMethod = nil
+            // Fuer den Hinweis "Last signed in with ..." (nur lokal)
+            LastLoginMethod.save(method)
             signedOutNotice = nil
             currentUser = user
             // Nur neuer Social-User bekommt den Success Screen
             if isNewUser { showSocialSuccess = true }
         case .twoFactorRequired(let challenge):
             pendingTwoFactor = challenge
+            // Erst nach bestandener 2FA gilt der Login als erfolgreich
+            pendingLoginMethod = method
         }
     }
 
@@ -88,7 +96,7 @@ final class UserStore: ObservableObject {
         guard let challenge = pendingTwoFactor else { return "Please sign in again." }
         do {
             let outcome = try await APIClient.shared.verifyTwoFactorLogin(challengeId: challenge.challengeId, code: code)
-            applyLoginOutcome(outcome)
+            applyLoginOutcome(outcome, method: pendingLoginMethod ?? .email)
             if case .signedIn = outcome { showLogin = false }
             return nil
         } catch {
@@ -140,7 +148,7 @@ final class UserStore: ObservableObject {
                 email: emailNorm,
                 password: password
             )
-            applyLoginOutcome(outcome)
+            applyLoginOutcome(outcome, method: .email)
             // Bei 2FA bleibt der Login-Screen offen, bis der Code bestaetigt ist
             if case .signedIn = outcome { self.showLogin = false }
 
@@ -299,7 +307,7 @@ final class UserStore: ObservableObject {
 
             do {
                 let outcome = try await APIClient.shared.loginWithApple(idToken: identityToken)
-                applyLoginOutcome(outcome)
+                applyLoginOutcome(outcome, method: .apple)
             } catch {
                 self.errorMessage = error.localizedDescription
             }
@@ -328,7 +336,7 @@ final class UserStore: ObservableObject {
         }
 
         let outcome = try await APIClient.shared.loginWithGoogle(idToken: idToken)
-        applyLoginOutcome(outcome)
+        applyLoginOutcome(outcome, method: .google)
     }
     
     @MainActor

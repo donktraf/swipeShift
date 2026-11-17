@@ -56,6 +56,11 @@ struct Job: Identifiable, Equatable {
     let shifts: [JobShift]?     // nil oder 1 Eintrag = single-shift, 2+ = multi-shift
     let reviewBreakdown: JobReviewSummary?
     let matchReasons: [String]
+
+    // Firmenblock im Job-Detail (nur von GET /jobs/:id geliefert, sonst nil/leer)
+    var companyIndustry: String? = nil
+    var companyBusinessAreas: [String] = []
+    var companyCompletedJobs: Int? = nil
 }
 
 struct JobReviewSummary: Equatable {

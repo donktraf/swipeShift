@@ -55,10 +55,26 @@ struct FinancialOverviewView: View {
     // MARK: - Summary Cards
 
     private var summaryCards: some View {
-        HStack(spacing: 10) {
-            FinancialStatCard(label: "Upcoming",  amount: upcomingEarnings,  color: .green,    icon: "arrow.up.circle.fill")
-            FinancialStatCard(label: "Completed", amount: completedEarnings, color: SS.primary, icon: "checkmark.circle.fill")
-            FinancialStatCard(label: "Paid Out",  amount: paidOut,           color: .orange,   icon: "dollarsign.circle.fill")
+        VStack(spacing: 10) {
+            // Laufende Woche Mo–So, unabhaengig vom gewaehlten Zeitraum (nur wenn das Backend sie liefert)
+            if let week = financials?.thisWeekEarnings {
+                HStack(spacing: 10) {
+                    Image(systemName: "calendar.badge.clock")
+                        .font(.system(size: 16)).foregroundColor(SS.primary)
+                    Text("This week").font(.system(size: 13)).foregroundColor(.secondary)
+                    Spacer()
+                    Text(Money.format(week)).font(.system(size: 20, weight: .bold)).foregroundColor(.primary)
+                }
+                .padding(12)
+                .background(Color(uiColor: .systemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
+            }
+            HStack(spacing: 10) {
+                FinancialStatCard(label: "Upcoming",  amount: upcomingEarnings,  color: .green,    icon: "arrow.up.circle.fill")
+                FinancialStatCard(label: "Completed", amount: completedEarnings, color: SS.primary, icon: "checkmark.circle.fill")
+                FinancialStatCard(label: "Paid Out",  amount: paidOut,           color: .orange,   icon: "dollarsign.circle.fill")
+            }
         }
         .padding(.horizontal, 16)
     }
@@ -120,9 +136,14 @@ struct FinancialOverviewView: View {
                 .padding(.horizontal, 16)
 
             if let list = financials?.earningsList, !list.isEmpty {
-                VStack(spacing: 8) {
-                    ForEach(list) { item in
-                        EarningRow(item: item)
+                VStack(alignment: .leading, spacing: 14) {
+                    ForEach(EarningMonthGroup.make(from: list)) { group in
+                        EarningMonthSection(group: group)
+                    }
+                    if let total = financials?.earningsTotal, total > list.count {
+                        Text("Showing latest \(list.count) of \(total) jobs")
+                            .font(.system(size: 12)).foregroundColor(.white.opacity(0.6))
+                            .frame(maxWidth: .infinity)
                     }
                 }
                 .padding(.horizontal, 16)
@@ -265,29 +286,5 @@ private struct LegendItem: View {
             Circle().fill(color).frame(width: 10, height: 10)
             Text(label).font(.system(size: 12)).foregroundColor(.secondary)
         }
-    }
-}
-
-private struct EarningRow: View {
-    let item: WorkerEarningItem
-    var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(item.jobTitle).font(.system(size: 14, weight: .semibold)).foregroundColor(.primary)
-                Text("\(item.company) · \(item.shiftText)")
-                    .font(.system(size: 12)).foregroundColor(.secondary)
-            }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(Money.format(item.amount)).font(.system(size: 15, weight: .bold)).foregroundColor(.primary)
-                Text(item.status == "upcoming" ? "Upcoming" : "Completed")
-                    .font(.system(size: 11))
-                    .foregroundColor(item.status == "upcoming" ? .green : .secondary)
-            }
-        }
-        .padding(12)
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
     }
 }

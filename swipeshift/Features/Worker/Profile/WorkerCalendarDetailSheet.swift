@@ -84,6 +84,14 @@ struct CalendarEntryDetailSheet: View {
             detailRow(icon: "clock", label: "Time", value: entry.timeLabel)
             Divider().padding(.leading, 44)
             detailRow(icon: "mappin.and.ellipse", label: "Location", value: entry.location)
+            if let miles = entry.distanceMiles {
+                Divider().padding(.leading, 44)
+                detailRow(icon: "location", label: "Distance", value: String(format: "%.1f mi away", miles))
+            }
+            if let category = entry.category {
+                Divider().padding(.leading, 44)
+                detailRow(icon: "tag", label: "Category", value: category)
+            }
             Divider().padding(.leading, 44)
             detailRow(icon: "building.2", label: "Employer", value: entry.company)
             Divider().padding(.leading, 44)

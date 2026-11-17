@@ -634,13 +634,7 @@ final class APIClient {
         let (data, response) = try await URLSession.shared.data(for: req)
         try validate(response: response, data: data)
         let dec = JSONDecoder()
-        dec.dateDecodingStrategy = .custom { decoder in
-            let raw = try decoder.singleValueContainer().decode(String.self)
-            let withFraction = ISO8601DateFormatter()
-            withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            if let date = withFraction.date(from: raw) ?? ISO8601DateFormatter().date(from: raw) { return date }
-            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Bad date \(raw)"))
-        }
+        dec.dateDecodingStrategy = .flexibleISO8601
         return try dec.decode(WorkerProfileDTO.self, from: data)
     }
 
@@ -681,7 +675,7 @@ final class APIClient {
         let (data, response) = try await URLSession.shared.data(for: req)
         try validate(response: response, data: data)
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .flexibleISO8601
         return try decoder.decode([ConversationDTO].self, from: data)
     }
 
@@ -691,7 +685,7 @@ final class APIClient {
         let (data, response) = try await URLSession.shared.data(for: req)
         try validate(response: response, data: data)
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .flexibleISO8601
         return try decoder.decode(ChatMessageDTO.self, from: data)
     }
 
@@ -706,7 +700,7 @@ final class APIClient {
         let (data, response) = try await URLSession.shared.data(for: req)
         try validate(response: response, data: data)
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .flexibleISO8601
         return try decoder.decode(ChatMessagesResponseDTO.self, from: data)
     }
 
@@ -763,7 +757,7 @@ final class APIClient {
         let (data, response) = try await URLSession.shared.data(for: req)
         try validate(response: response, data: data)
         let dec = JSONDecoder()
-        dec.dateDecodingStrategy = .iso8601
+        dec.dateDecodingStrategy = .flexibleISO8601
         return try dec.decode(CompanyProfileDTO.self, from: data)
     }
 
@@ -826,7 +820,7 @@ final class APIClient {
         let (data, resp) = try await URLSession.shared.data(for: req)
         try validate(response: resp, data: data)
         struct W: Decodable { let applications: [WorkerApplicationItem] }
-        let dec = JSONDecoder(); dec.dateDecodingStrategy = .iso8601
+        let dec = JSONDecoder(); dec.dateDecodingStrategy = .flexibleISO8601
         return try dec.decode(W.self, from: data).applications
     }
 
@@ -841,7 +835,7 @@ final class APIClient {
         let (data, resp) = try await URLSession.shared.data(for: req)
         try validate(response: resp, data: data)
         struct W: Decodable { let saved: [WorkerSavedJob] }
-        let dec = JSONDecoder(); dec.dateDecodingStrategy = .iso8601
+        let dec = JSONDecoder(); dec.dateDecodingStrategy = .flexibleISO8601
         return try dec.decode(W.self, from: data).saved
     }
 
@@ -850,7 +844,7 @@ final class APIClient {
         let (data, resp) = try await URLSession.shared.data(for: req)
         try validate(response: resp, data: data)
         struct W: Decodable { let savedCompanies: [SavedCompanyItem] }
-        let dec = JSONDecoder(); dec.dateDecodingStrategy = .iso8601
+        let dec = JSONDecoder(); dec.dateDecodingStrategy = .flexibleISO8601
         return try dec.decode(W.self, from: data).savedCompanies
     }
 
@@ -873,7 +867,7 @@ final class APIClient {
         let req = try makeRequest(path: "/worker/reviews", method: "GET")
         let (data, resp) = try await URLSession.shared.data(for: req)
         try validate(response: resp, data: data)
-        let dec = JSONDecoder(); dec.dateDecodingStrategy = .iso8601
+        let dec = JSONDecoder(); dec.dateDecodingStrategy = .flexibleISO8601
         return try dec.decode(WorkerReviewsResponse.self, from: data)
     }
 
@@ -881,7 +875,8 @@ final class APIClient {
         let req = try makeRequest(path: Self.path("/worker/financials", query: period.queryItems), method: "GET")
         let (data, resp) = try await URLSession.shared.data(for: req)
         try validate(response: resp, data: data)
-        return try JSONDecoder().decode(WorkerFinancialsDTO.self, from: data)
+        let dec = JSONDecoder(); dec.dateDecodingStrategy = .flexibleISO8601
+        return try dec.decode(WorkerFinancialsDTO.self, from: data)
     }
 
     func saveJob(jobId: String) async throws {
@@ -926,7 +921,7 @@ final class APIClient {
         try validate(response: resp, data: data)
         struct W: Decodable { let pending: [PendingReviewItem] }
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .flexibleISO8601
         return try decoder.decode(W.self, from: data).pending
     }
 
@@ -936,7 +931,7 @@ final class APIClient {
         try validate(response: resp, data: data)
         struct W: Decodable { let reviews: [PastReviewItem] }
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .flexibleISO8601
         return try decoder.decode(W.self, from: data).reviews
     }
 
@@ -946,7 +941,7 @@ final class APIClient {
         try validate(response: resp, data: data)
         struct W: Decodable { let drafts: [ReviewDraftItem] }
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .flexibleISO8601
         return try decoder.decode(W.self, from: data).drafts
     }
 
@@ -975,7 +970,7 @@ final class APIClient {
         let (data, resp) = try await URLSession.shared.data(for: req)
         try validate(response: resp, data: data)
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .flexibleISO8601
         return try decoder.decode([NotificationDTO].self, from: data)
     }
 
@@ -996,7 +991,7 @@ final class APIClient {
         let (data, resp) = try await URLSession.shared.data(for: req)
         try validate(response: resp, data: data)
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .flexibleISO8601
         return try decoder.decode([SavedApplicantItem].self, from: data)
     }
 
@@ -1005,7 +1000,7 @@ final class APIClient {
         let (data, resp) = try await URLSession.shared.data(for: req)
         try validate(response: resp, data: data)
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .flexibleISO8601
         return try decoder.decode([EmployerCalendarJobDTO].self, from: data)
     }
 
@@ -1014,7 +1009,7 @@ final class APIClient {
         let (data, resp) = try await URLSession.shared.data(for: req)
         try validate(response: resp, data: data)
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .flexibleISO8601
         let wrapper = try decoder.decode(JobApplicantsResponse.self, from: data)
         return wrapper.applicants
     }
@@ -1036,13 +1031,7 @@ extension APIClient {
         let (data, resp) = try await URLSession.shared.data(for: req)
         try validate(response: resp, data: data)
         let dec = JSONDecoder()
-        dec.dateDecodingStrategy = .custom { decoder in
-            let raw = try decoder.singleValueContainer().decode(String.self)
-            let withFraction = ISO8601DateFormatter()
-            withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            if let date = withFraction.date(from: raw) ?? ISO8601DateFormatter().date(from: raw) { return date }
-            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Bad date \(raw)"))
-        }
+        dec.dateDecodingStrategy = .flexibleISO8601
         return try dec.decode(DeviceSessionsResponseDTO.self, from: data).sessions
     }
 
@@ -1187,3 +1176,21 @@ struct JobDTO: Decodable, Identifiable {
     let tags: [String]
     let logoEmoji: String
 }*/
+
+// MARK: - Shared date decoding
+
+extension JSONDecoder.DateDecodingStrategy {
+    private static let withFraction: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    private static let plain = ISO8601DateFormatter()
+
+    /// ISO-8601 mit oder ohne Millisekunden (Prisma/Express liefert "2026-11-17T10:00:00.000Z").
+    static let flexibleISO8601: JSONDecoder.DateDecodingStrategy = .custom { decoder in
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        if let date = withFraction.date(from: raw) ?? plain.date(from: raw) { return date }
+        throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Bad date \(raw)"))
+    }
+}

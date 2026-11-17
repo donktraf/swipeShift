@@ -27,9 +27,7 @@ struct WorkerCalendarView: View {
 
     // Navigation aus dem Detail-Sheet
     @State private var selectedEntry: CalendarEntry?
-    @State private var jobDetail: Job?
-    @State private var chatConversation: Conversation?
-    @State private var actionError: String?
+    @StateObject private var navigation = ApplicationNavigation()
 
     private let calendar = Calendar.current
 
@@ -70,25 +68,7 @@ struct WorkerCalendarView: View {
                 onOpenChat: { openChat(entry) }
             )
         }
-        .sheet(item: $jobDetail) { job in
-            NavigationStack { JobDetailView(job: job) }
-        }
-        .navigationDestination(isPresented: Binding(
-            get: { chatConversation != nil },
-            set: { if !$0 { chatConversation = nil } }
-        )) {
-            if let conversation = chatConversation {
-                ChatView(conversation: conversation)
-            }
-        }
-        .alert("Something went wrong", isPresented: Binding(
-            get: { actionError != nil },
-            set: { if !$0 { actionError = nil } }
-        )) {
-            Button("OK", role: .cancel) { actionError = nil }
-        } message: {
-            Text(actionError ?? "")
-        }
+        .applicationNavigation(navigation)
     }
 
     // MARK: - Loading + Actions
@@ -107,28 +87,12 @@ struct WorkerCalendarView: View {
 
     private func openJob(_ entry: CalendarEntry) {
         selectedEntry = nil
-        Task {
-            do {
-                jobDetail = try await APIClient.shared.fetchJob(jobId: entry.jobId)
-            } catch {
-                actionError = "The job details could not be loaded."
-            }
-        }
+        navigation.openJob(jobId: entry.jobId)
     }
 
     private func openChat(_ entry: CalendarEntry) {
         selectedEntry = nil
-        guard let conversationId = entry.conversationId else { return }
-        Task {
-            if messageStore.conversations.first(where: { $0.id == conversationId }) == nil {
-                await messageStore.loadConversations()
-            }
-            if let conversation = messageStore.conversations.first(where: { $0.id == conversationId }) {
-                chatConversation = conversation
-            } else {
-                actionError = "The chat for this job could not be found."
-            }
-        }
+        navigation.openChat(conversationId: entry.conversationId, messageStore: messageStore)
     }
 
     // MARK: - Mode Toggle

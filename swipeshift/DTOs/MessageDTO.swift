@@ -151,6 +151,7 @@ struct CompanyProfileDTO: Decodable {
     let contactRole:      String?
     let openJobs:         [CompanyOpenJobDTO]
     let reviewBreakdown:  ReviewBreakdownDTO?
+    let ratingTags:       [String]?   // Backend utils/ratingTags.js
     let workerReviews:    [WorkerReviewDTO]?
 }
 
@@ -193,6 +194,9 @@ struct SavedCompanyItem: Identifiable, Decodable {
     let openJobs:    Int
     let rating:      Double?
     let savedAt:     Date
+    let location:    String?
+    let industry:    String?
+    let about:       String?
 }
 
 // MARK: - Employer Financials

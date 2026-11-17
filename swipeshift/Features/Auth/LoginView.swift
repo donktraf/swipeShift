@@ -47,6 +47,7 @@ struct LoginView: View {
                         Text("Login to your account")
                             .font(.system(size: 16))
                             .foregroundColor(.secondary)
+                        LastLoginHint(method: .email)
 
                         VStack(alignment: .leading, spacing: 10) {
                             Text("Email")

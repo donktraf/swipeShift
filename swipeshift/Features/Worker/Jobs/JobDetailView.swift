@@ -6,7 +6,13 @@
 import SwiftUI
 
 struct JobDetailView: View {
-    let job: Job
+    /// Job wie uebergeben; `job` (computed) ergaenzt ihn um den Firmenblock aus GET /jobs/:id
+    private let initialJob: Job
+    @State private var detailedJob: Job?
+
+    init(job: Job) { self.initialJob = job }
+
+    private var job: Job { detailedJob ?? initialJob }
 
     @EnvironmentObject var jobStore: JobStore
     @Environment(\.dismiss) private var dismiss
@@ -30,6 +36,7 @@ struct JobDetailView: View {
                     tasksSection
                     requirementsSection
                     payDetailsSection
+                    locationSection
                     companySection
                     whatHappensNextSection
 
@@ -44,6 +51,12 @@ struct JobDetailView: View {
         .navigationBarHidden(true)
         .task {
             await jobStore.loadSavedJobIds()
+        }
+        .task(id: initialJob.id) {
+            // Firmenblock (Branche, abgeschlossene Schichten) kommt nur vom Einzel-Endpunkt.
+            // Schlaegt das fehl, bleibt der Job wie uebergeben sichtbar; der Block fehlt dann nur.
+            guard initialJob.companyCompletedJobs == nil else { return }
+            detailedJob = try? await APIClient.shared.fetchJob(jobId: initialJob.id)
         }
         .sheet(isPresented: $showApplySheet) {
             ApplyFlowView(
@@ -305,6 +318,27 @@ struct JobDetailView: View {
         }
     }
 
+    // MARK: - Adresse + Kartenvorschau
+    private var locationSection: some View {
+        DetailSection(title: "Location") {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "mappin.and.ellipse")
+                        .foregroundColor(SS.primary).frame(width: 20)
+                    Text(job.location)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.primary)
+                    Spacer()
+                }
+                .padding(14)
+                // Nur mit gueltigen Koordinaten; geteilt mit dem Firmenprofil
+                LocationMapPreview(lat: job.lat, lng: job.lng, title: job.company)
+            }
+            .background(Color(uiColor: .secondarySystemGroupedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: SS.cardRadius))
+        }
+    }
+
     // MARK: - Unternehmen
     private var companySection: some View {
         DetailSection(title: "Company") {
@@ -344,6 +378,12 @@ struct JobDetailView: View {
                             .font(.system(size: 12))
                             .foregroundColor(.secondary)
                     }
+
+                    if let facts = companyFacts {
+                        Text(facts)
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                    }
                 }
 
                 Spacer()
@@ -367,6 +407,19 @@ struct JobDetailView: View {
                 }
             }
         }
+    }
+
+    /// "Hospitality, Events · 12 completed shifts" aus Branche/Business Areas + Zaehlung des Backends
+    private var companyFacts: String? {
+        var parts: [String] = []
+        let areas = job.companyBusinessAreas.isEmpty
+            ? [job.companyIndustry].compactMap { $0 }
+            : job.companyBusinessAreas
+        if !areas.isEmpty { parts.append(areas.joined(separator: ", ")) }
+        if let done = job.companyCompletedJobs {
+            parts.append("\(done) completed shift\(done == 1 ? "" : "s")")
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     // MARK: - Was passiert als Nächstes?
