@@ -103,4 +103,13 @@ function buildBuckets(start, end) {
   return buckets;
 }
 
-module.exports = { PERIODS, resolvePeriod, isInPeriod, prismaRange, buildBuckets, parseDay };
+// Laufende Woche Montag 00:00 bis Sonntag 23:59:59.999 in SERVER-Lokalzeit (wie resolvePeriod),
+// nicht in der Zeitzone des Geraets
+function currentWeekRange(now = new Date()) {
+  const daysSinceMonday = (now.getDay() + 6) % 7; // So=0 → 6, Mo=1 → 0
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - daysSinceMonday);
+  const end = endOfDay(new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6));
+  return { since: start, until: end };
+}
+
+module.exports = { PERIODS, currentWeekRange, resolvePeriod, isInPeriod, prismaRange, buildBuckets, parseDay };

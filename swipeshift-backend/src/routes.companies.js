@@ -7,6 +7,8 @@ const { prisma } = require("./prisma.js");
 const { cleanSocialLinks } = require("./utils/profileFields");
 const { computeResponseStats } = require("./utils/responseStats");
 const { computeWouldWorkAgain } = require("./utils/reviewLogic");
+const { companyJobsWhere, countCompletedJobs } = require("./utils/companyStats");
+const { deriveRatingTags, averageCategories } = require("./utils/ratingTags");
 
 // GET /companies/:name
 // Gibt Company-Daten aus Jobs + Employer-Profil zurück
@@ -17,7 +19,7 @@ router.get("/:name", async (req, res) => {
     // Alle Jobs + Worker-Reviews für dieses Unternehmen parallel laden
     const [jobs, workerReviews] = await Promise.all([
     prisma.job.findMany({
-      where:   { company: { equals: companyName, mode: "insensitive" } },
+      where:   companyJobsWhere(companyName),
       select:  {
         id: true, title: true, category: true, location: true,
         payAmount: true, payText: true, shiftText: true, status: true,
@@ -28,7 +30,7 @@ router.get("/:name", async (req, res) => {
     }),
     // Worker-Reviews werden nach employerId gefiltert (nach jobs.load)
     prisma.workerReview.findMany({
-      where:   { apply: { job: { company: { equals: companyName, mode: "insensitive" } } } },
+      where:   { apply: { job: companyJobsWhere(companyName) } },
       include: {
         apply: {
           include: {
@@ -71,14 +73,18 @@ router.get("/:name", async (req, res) => {
     // Anteil "would work here again" (nur nicht-null Werte; null bei < 3 Antworten)
     // (eigene Abfrage ueber alle Reviews, da workerReviews oben auf 20 begrenzt ist)
     const workAgainRows = await prisma.workerReview.findMany({
-      where:  { apply: { job: { company: { equals: companyName, mode: "insensitive" } } } },
-      select: { wouldWorkAgain: true },
+      where:  { apply: { job: companyJobsWhere(companyName) } },
+      select: {
+        wouldWorkAgain: true,
+        communication: true, paymentFairness: true, workEnvironment: true,
+        jobDescriptionAccuracy: true, overallExperience: true,
+      },
     });
     const wouldWorkAgain = computeWouldWorkAgain(workAgainRows);
 
     // Aggregierte Werte
     const activeJobs         = jobs.filter(j => j.status === "published").length;
-    const completedJobsCount = jobs.filter(j => j.status === "completed").length;
+    const completedJobsCount = countCompletedJobs(jobs);
 
     // Rating: Worker-Reviews bevorzugt, sonst Job-companyRating als Fallback
     const avg = (arr) => arr.length ? Math.round((arr.reduce((s, v) => s + v, 0) / arr.length) * 10) / 10 : null;
@@ -154,6 +160,8 @@ router.get("/:name", async (req, res) => {
           shiftText: j.shiftText, category: j.category,
         })),
       reviewBreakdown,
+      // Ueber ALLE Bewertungen der Firma (nicht nur die 20 angezeigten); >= 3 Bewertungen, Schnitt >= 4.5, siehe utils/ratingTags.js
+      ratingTags: deriveRatingTags(averageCategories(workAgainRows)),
       workerReviews: reviewsList,
     });
   } catch (err) {

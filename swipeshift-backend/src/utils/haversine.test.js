@@ -32,3 +32,12 @@ test("kmToMiles / milesToKm rechnen korrekt um und sind invers", () => {
   assert.ok(Math.abs(milesToKm(10) - 16.09344) < 1e-9);
   assert.ok(Math.abs(kmToMiles(milesToKm(25)) - 25) < 1e-9);
 });
+
+test("distanceMilesBetween rundet auf 0,1 Meilen und liefert null bei fehlenden Koordinaten", () => {
+  const { distanceMilesBetween } = require("./haversine");
+  // 1 Breitengrad ≈ 69.1 Meilen
+  assert.equal(distanceMilesBetween(40, -74, 41, -74), 69.1);
+  assert.equal(distanceMilesBetween(40, -74, 40, -74), 0);
+  assert.equal(distanceMilesBetween(null, -74, 41, -74), null);
+  assert.equal(distanceMilesBetween(40, -74, undefined, -74), null);
+});

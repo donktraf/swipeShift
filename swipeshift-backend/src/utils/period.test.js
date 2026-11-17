@@ -96,3 +96,18 @@ test("buildBuckets: Jahresuebergreifend mit Jahr im Label", () => {
   assert.equal(b[0].unit, "month");
   assert.equal(b[0].label, "Nov 25");
 });
+
+test("currentWeekRange: Montag bis Sonntag der laufenden Woche", () => {
+  const { currentWeekRange } = require("./period");
+  // Mo 16. Nov 2026 12:00 → Woche 16.–22. Nov
+  const mon = currentWeekRange(new Date(2026, 10, 16, 12));
+  assert.deepEqual(mon.since, new Date(2026, 10, 16));
+  assert.deepEqual(mon.until, new Date(2026, 10, 22, 23, 59, 59, 999));
+  // So 22. Nov gehoert noch zur selben Woche, Mo 23. Nov zur naechsten
+  assert.deepEqual(currentWeekRange(new Date(2026, 10, 22, 23, 0)).since, new Date(2026, 10, 16));
+  assert.deepEqual(currentWeekRange(new Date(2026, 10, 23, 0, 0)).since, new Date(2026, 10, 23));
+  // Monats-/Jahreswechsel: Mi 30. Dez 2026 → Woche 28. Dez – 3. Jan
+  const wrap = currentWeekRange(new Date(2026, 11, 30, 9));
+  assert.deepEqual(wrap.since, new Date(2026, 11, 28));
+  assert.deepEqual(wrap.until, new Date(2027, 0, 3, 23, 59, 59, 999));
+});

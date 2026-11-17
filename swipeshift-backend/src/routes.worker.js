@@ -4,10 +4,14 @@ const express = require("express");
 const { prisma } = require("./prisma");
 const { requireAuth } = require("./auth");
 const { requireVerifiedEmail } = require("./middlewares/requireVerifiedEmail");
-const { resolvePeriod, prismaRange } = require("./utils/period");
-const { payPerWorker } = require("./utils/jobCost");
+const { resolvePeriod, prismaRange, currentWeekRange } = require("./utils/period");
+const { payPerWorker, shiftHours } = require("./utils/jobCost");
+const { distanceMilesBetween } = require("./utils/haversine");
+const { companyJobsWhere, truncateText } = require("./utils/companyStats");
 const { deriveApplicationStatus } = require("./utils/applicationStatus");
 const { reviewOverall, summarizeEmployerReviews, computeWouldWorkAgain, validateWorkerReviewBody } = require("./utils/reviewLogic");
+
+const EARNINGS_LIST_LIMIT = 100;
 
 const router = express.Router();
 
@@ -20,13 +24,16 @@ router.get("/applications", requireAuth, requireVerifiedEmail, async (req, res) 
     const workerId = req.auth.sub;
     const now      = new Date();
 
+    // Worker-Standort fuer die Entfernungsangabe (Kalender-Detail)
+    const me = await prisma.user.findUnique({ where: { id: workerId }, select: { lat: true, lng: true } });
+
     const applies = await prisma.apply.findMany({
       where:   { userId: workerId },
       include: {
         job: {
           select: {
             id: true, title: true, company: true, logoEmoji: true,
-            location: true, payText: true, shiftText: true,
+            location: true, payText: true, shiftText: true, lat: true, lng: true,
             startTime: true, endTime: true, category: true,
             status: true, cancellationReason: true, payAmount: true,
           },
@@ -61,6 +68,8 @@ router.get("/applications", requireAuth, requireVerifiedEmail, async (req, res) 
         paymentStatus,
         // Verdienst fuer diese Schicht (gleiche Formel wie Finanz-Uebersicht)
         earnings:       job ? payPerWorker(job) : 0,
+        // Entfernung Worker → Job in Meilen (null ohne Koordinaten)
+        distanceMiles:  distanceMilesBetween(me?.lat, me?.lng, job?.lat, job?.lng),
         // Chat erst nach Annahme sinnvoll — die Conversation existiert aber ab Bewerbung
         conversationId: a.conversation?.id ?? null,
       };
@@ -104,6 +113,8 @@ router.get("/saved", requireAuth, requireVerifiedEmail, async (req, res) => {
   try {
     const workerId = req.auth.sub;
 
+    const me = await prisma.user.findUnique({ where: { id: workerId }, select: { lat: true, lng: true } });
+
     const saves = await prisma.save.findMany({
       where:   { userId: workerId },
       include: {
@@ -111,6 +122,7 @@ router.get("/saved", requireAuth, requireVerifiedEmail, async (req, res) => {
           select: {
             id: true, title: true, company: true, logoEmoji: true,
             location: true, payText: true, shiftText: true, category: true,
+            tags: true, lat: true, lng: true, status: true, openSpots: true, startTime: true,
           },
         },
       },
@@ -133,9 +145,20 @@ router.get("/saved", requireAuth, requireVerifiedEmail, async (req, res) => {
       if (applyStatus === "pending")   appliedStatus = "Applied";
       if (applyStatus === "accepted")  appliedStatus = "Confirmed";
 
+      // Bewerben nur, wenn noch nicht beworben (egal welcher Status), der Job offen ist,
+      // noch freie Plaetze hat und noch nicht gestartet ist (sonst kaeme sofort SHIFT_TAKEN/JOB_UNAVAILABLE)
+      const j = s.job;
+      const canApply = applyStatus === undefined && j?.status === "published"
+        && (j.openSpots ?? 1) > 0
+        && (!j.startTime || new Date(j.startTime) > new Date());
+
       return {
         id:            s.id,
         jobId:         s.jobId,
+        category:      s.job?.category  ?? null,
+        tags:          s.job?.tags      ?? [],
+        distanceMiles: distanceMilesBetween(me?.lat, me?.lng, s.job?.lat, s.job?.lng),
+        canApply,
         title:         s.job?.title     ?? "—",
         company:       s.job?.company   ?? "—",
         logoEmoji:     s.job?.logoEmoji ?? "🏢",
@@ -318,6 +341,19 @@ router.get("/financials", requireAuth, requireVerifiedEmail, async (req, res) =>
       orderBy: { createdAt: "desc" },
     });
 
+    // "This week": Verdienst der laufenden Woche Mo–So (in SERVER-Lokalzeit, nicht Geraetezeit),
+    // unabhaengig vom gewaehlten Zeitraum.
+    // Gleiche Formel (payPerWorker), stornierte Jobs zaehlen nicht.
+    const weekApplies = await prisma.apply.findMany({
+      where: {
+        userId: workerId,
+        status: "accepted",
+        job: { status: { not: "cancelled" }, startTime: prismaRange(currentWeekRange(now)) },
+      },
+      include: { job: { select: { payAmount: true, startTime: true, endTime: true } } },
+    });
+    const thisWeekEarnings = weekApplies.reduce((sum, a) => sum + (a.job ? payPerWorker(a.job) : 0), 0);
+
     // Gleiche Rechnung wie beim Employer (Stundenlohn × Schichtstunden, utils/jobCost.js)
     const calcEarning = (a) => (a.job ? payPerWorker(a.job) : 0);
 
@@ -329,8 +365,17 @@ router.get("/financials", requireAuth, requireVerifiedEmail, async (req, res) =>
     const completedEarnings  = completed.reduce((s, a) => s + calcEarning(a), 0);
     const paidOut            = paidOutArr.reduce((s, a) => s + calcEarning(a), 0);
 
-    const earningsList = applies.slice(0, 20).map((a) => ({
+    // Neueste Schichten zuerst, max. EARNINGS_LIST_LIMIT; total = Anzahl im Zeitraum (fuer "Showing latest N")
+    const sortedApplies = [...applies].sort(
+      (a, b) => (b.job?.startTime ? new Date(b.job.startTime).getTime() : 0) - (a.job?.startTime ? new Date(a.job.startTime).getTime() : 0)
+    );
+    const earningsList = sortedApplies.slice(0, EARNINGS_LIST_LIMIT).map((a) => ({
       id:        a.id,
+      // Stundenlohn × Stunden = amount (utils/jobCost.js); startTime fuer die Monatsgruppierung
+      hourlyRate: a.job?.payAmount ?? null,
+      hours:      a.job ? shiftHours(a.job) : null,
+      startTime:  a.job?.startTime ?? null,
+      isPaid:     a.isPaid,
       jobTitle:  a.job?.title     ?? "—",
       company:   a.job?.company   ?? "—",
       logoEmoji: a.job?.logoEmoji ?? "🏢",
@@ -339,7 +384,7 @@ router.get("/financials", requireAuth, requireVerifiedEmail, async (req, res) =>
       status:    a.job?.startTime && new Date(a.job.startTime) > now ? "upcoming" : "completed",
     }));
 
-    return res.json({ upcomingEarnings, completedEarnings, paidOut, earningsList });
+    return res.json({ upcomingEarnings, completedEarnings, paidOut, thisWeekEarnings, earningsTotal: applies.length, earningsList });
   } catch (err) {
     console.error("GET /worker/financials error:", err);
     return res.status(500).json({ error: "Internal server error" });
@@ -363,35 +408,58 @@ router.get("/saved-companies", requireAuth, requireVerifiedEmail, async (req, re
       savedList.map(async (sc) => {
         const [jobs, reviews] = await Promise.all([
           prisma.job.findMany({
-            where:  { company: { equals: sc.companyName, mode: "insensitive" } },
-            select: { logoEmoji: true, isVerified: true, status: true },
+            where:  companyJobsWhere(sc.companyName),
+            select: { logoEmoji: true, isVerified: true, status: true, location: true, employerId: true },
+            orderBy: { createdAt: "desc" },
           }),
           prisma.workerReview.findMany({
-            where:  { job: { company: { equals: sc.companyName, mode: "insensitive" } } },
+            where:  { apply: { job: companyJobsWhere(sc.companyName) } },
             select: { overallExperience: true },
           }),
         ]);
-
-        const openJobs  = jobs.filter((j) => j.status === "published").length;
-        const logoEmoji = jobs[0]?.logoEmoji ?? "🏢";
-        const isVerified = jobs[0]?.isVerified ?? false;
-        const rating = reviews.length
-          ? Math.round((reviews.reduce((s, r) => s + r.overallExperience, 0) / reviews.length) * 10) / 10
-          : null;
-
-        return {
-          id:          sc.id,
-          companyName: sc.companyName,
-          logoEmoji,
-          isVerified,
-          openJobs,
-          rating,
-          savedAt:     sc.savedAt,
-        };
+        return { sc, jobs, reviews };
       })
     );
 
-    return res.json({ savedCompanies: enriched });
+    // Employer-Profile aller gespeicherten Firmen in EINER Abfrage (statt eine pro Firma)
+    const employerIds = [...new Set(enriched.flatMap(({ jobs }) => {
+      const id = jobs.find((j) => j.employerId)?.employerId;
+      return id ? [id] : [];
+    }))];
+    const employers = employerIds.length
+      ? await prisma.employer.findMany({
+          where:  { userId: { in: employerIds } },
+          select: { userId: true, industry: true, companyDescription: true },
+        })
+      : [];
+    const employerByUser = new Map(employers.map((e) => [e.userId, e]));
+
+    const savedCompanies = enriched.map(({ sc, jobs, reviews }) => {
+      const openJobs  = jobs.filter((j) => j.status === "published").length;
+      const logoEmoji = jobs[0]?.logoEmoji ?? "🏢";
+      const isVerified = jobs[0]?.isVerified ?? false;
+      // Standort = Ort des juengsten offenen Jobs (sonst irgendeines Jobs); Branche/Beschreibung aus dem Employer-Profil
+      const location = (jobs.find((j) => j.status === "published") ?? jobs[0])?.location ?? null;
+      const employer = employerByUser.get(jobs.find((j) => j.employerId)?.employerId);
+      const rating = reviews.length
+        ? Math.round((reviews.reduce((s, r) => s + r.overallExperience, 0) / reviews.length) * 10) / 10
+        : null;
+
+      return {
+        id:          sc.id,
+        companyName: sc.companyName,
+        logoEmoji,
+        isVerified,
+        openJobs,
+        rating,
+        location,
+        industry:    employer?.industry || null,
+        about:       truncateText(employer?.companyDescription, 140),
+        savedAt:     sc.savedAt,
+      };
+    });
+
+    return res.json({ savedCompanies });
   } catch (err) {
     console.error("GET /worker/saved-companies error:", err);
     return res.status(500).json({ error: "Internal server error" });

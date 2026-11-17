@@ -10,6 +10,7 @@ const { geocodeLocation }  = require("./utils/geocode");
 const { buildJobData, validateJobBody, checkDraftAccess } = require("./utils/jobData");
 const { isBlockedBetween } = require("./utils/safety");
 const { normalizeCancellationReason } = require("./utils/applicationStatus");
+const { companyJobsWhere, countCompletedJobs } = require("./utils/companyStats");
 
 const router = express.Router();
 
@@ -640,7 +641,23 @@ router.get("/:id", requireAuth, requireVerifiedEmail, async (req, res) => {
     const job = await prisma.job.findUnique({ where: { id } });
     if (!job) return res.status(404).json({ error: "Job not found" });
     const [enriched] = await enrichJobsWithRatings([job], userId);
-    return res.json({ job: enriched });
+
+    // Firmenblock: Branche/Business Areas (Employer-Profil) + abgeschlossene Schichten der Firma
+    // (gleiche Zaehlung wie completedJobs im Firmenprofil, utils/companyStats.js)
+    const [employer, companyJobs] = await Promise.all([
+      job.employerId
+        ? prisma.employer.findFirst({ where: { userId: job.employerId }, select: { industry: true, businessAreas: true } })
+        : null,
+      prisma.job.findMany({ where: companyJobsWhere(job.company), select: { status: true } }),
+    ]);
+    return res.json({
+      job: {
+        ...enriched,
+        companyIndustry:       employer?.industry || null,
+        companyBusinessAreas:  employer?.businessAreas ?? [],
+        companyCompletedJobs:  countCompletedJobs(companyJobs),
+      },
+    });
   } catch (err) {
     console.error("GET /jobs/:id error:", err);
     return res.status(500).json({ error: "Server error" });
