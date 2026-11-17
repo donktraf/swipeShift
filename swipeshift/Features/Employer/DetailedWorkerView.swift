@@ -14,6 +14,8 @@ struct DetailedWorkerView: View {
     let applicant: Applicant
     let onAccept:  () -> Void
     let onDecline: () -> Void
+    /// false → ohne Accept/Decline-Footer (z.B. wenn aus dem Chat geoeffnet)
+    var showActions: Bool = true
 
     @Environment(\.dismiss) private var dismiss
     @State private var showAcceptAlert  = false
@@ -68,7 +70,7 @@ struct DetailedWorkerView: View {
             }
 
             // Sticky Accept / Decline Footer
-            actionFooter
+            if showActions { actionFooter }
         }
         .navigationBarHidden(true)
         .task { await load() }

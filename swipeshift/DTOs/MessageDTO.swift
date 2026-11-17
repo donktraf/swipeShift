@@ -22,6 +22,20 @@ struct ConversationDTO: Decodable, Identifiable {
     let messages:        [ChatMessageDTO]
     let presence:        ChatPresenceDTO?
 
+    // Alle folgenden Felder optional → aeltere Backends bleiben dekodierbar
+    let counterpartUserId:   String?
+    let counterpartPhotoUrl: String?
+    let location:            String?
+    let payText:             String?
+    let payAmount:           Double?
+    let shiftText:           String?
+    let startTime:           Date?
+    let endTime:             Date?
+    let isPaid:              Bool?
+    let isCounterpartSaved:  Bool?
+    let blockedByMe:         Bool?
+    let blockedByOther:      Bool?
+
     func toDomain() -> Conversation {
         Conversation(
             id:              id,
@@ -36,7 +50,19 @@ struct ConversationDTO: Decodable, Identifiable {
             lastMessageTime: lastMessageTime,
             isRead:          isRead,
             messages:        messages.map { $0.toDomain() },
-            presence:        presence?.toDomain() ?? .unknown
+            presence:        presence?.toDomain() ?? .unknown,
+            counterpartUserId:   counterpartUserId,
+            counterpartPhotoUrl: counterpartPhotoUrl,
+            location:            location ?? "",
+            payText:             payText ?? "",
+            payAmount:           payAmount,
+            shiftText:           shiftText ?? "",
+            startTime:           startTime,
+            endTime:             endTime,
+            isPaid:              isPaid ?? false,
+            isCounterpartSaved:  isCounterpartSaved ?? false,
+            blockedByMe:         blockedByMe ?? false,
+            blockedByOther:      blockedByOther ?? false
         )
     }
 }
@@ -85,6 +111,8 @@ struct ChatPresenceDTO: Decodable {
 struct ChatMessagesResponseDTO: Decodable {
     let messages: [ChatMessageDTO]
     let presence: ChatPresenceDTO?
+    let blockedByMe:    Bool?
+    let blockedByOther: Bool?
 }
 
 // MARK: - Company Profile

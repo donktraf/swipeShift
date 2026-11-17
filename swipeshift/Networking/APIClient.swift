@@ -14,6 +14,7 @@ enum ApplyError: Error {
     case jobUnavailable
     case schedulingConflict
     case accountPaused
+    case blocked
 }
 
 // Einfacher API-Client fürs MVP (später: Error-Typen, Refresh-Token, etc.)
@@ -68,6 +69,7 @@ final class APIClient {
         if let http = response as? HTTPURLResponse, http.statusCode != 200 {
             if let body = try? JSONDecoder().decode([String: String].self, from: data),
                let code = body["error"] {
+                if body["code"] == "BLOCKED" { throw ApplyError.blocked }
                 switch code {
                 case "SHIFT_TAKEN":          throw ApplyError.shiftTaken
                 case "JOB_UNAVAILABLE":      throw ApplyError.jobUnavailable
@@ -712,6 +714,37 @@ final class APIClient {
     func sendTypingStatus(conversationId: String, isTyping: Bool) async throws {
         var req = try makeRequest(path: "/messages/\(conversationId)/typing", method: "POST")
         req.httpBody = try JSONEncoder().encode(["isTyping": isTyping])
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try validate(response: response, data: data)
+    }
+
+    // MARK: - Safety (Melden / Blockieren)
+
+    func reportUser(userId: String, conversationId: String?, reason: String, details: String?) async throws {
+        var req = try makeRequest(path: "/safety/reports", method: "POST")
+        struct Body: Encodable {
+            let reportedUserId: String
+            let conversationId: String?
+            let reason: String
+            let details: String?
+        }
+        req.httpBody = try JSONEncoder().encode(
+            Body(reportedUserId: userId, conversationId: conversationId, reason: reason, details: details)
+        )
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try validate(response: response, data: data)
+    }
+
+    func blockUser(userId: String) async throws {
+        var req = try makeRequest(path: "/safety/blocks", method: "POST")
+        req.httpBody = try JSONEncoder().encode(["userId": userId])
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try validate(response: response, data: data)
+    }
+
+    func unblockUser(userId: String) async throws {
+        let encoded = userId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? userId
+        let req = try makeRequest(path: "/safety/blocks/\(encoded)", method: "DELETE")
         let (data, response) = try await URLSession.shared.data(for: req)
         try validate(response: response, data: data)
     }

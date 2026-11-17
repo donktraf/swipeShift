@@ -144,11 +144,7 @@ private struct ConversationRow: View {
 
             // Logo
             ZStack(alignment: .topTrailing) {
-                Text(conversation.logoEmoji)
-                    .font(.system(size: 26))
-                    .frame(width: 50, height: 50)
-                    .background(Color(uiColor: .secondarySystemGroupedBackground))
-                    .clipShape(Circle())
+                ChatAvatar(photoUrl: conversation.counterpartPhotoUrl, emoji: conversation.logoEmoji, size: 50)
 
                 // Ungelesen-Punkt
                 if !conversation.isRead {
@@ -182,7 +178,7 @@ private struct ConversationRow: View {
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
 
-                Text(conversation.lastMessage)
+                Text(conversation.blockedByMe ? "Blocked" : conversation.lastMessage)
                     .font(.system(size: 13))
                     .foregroundColor(conversation.isRead ? .secondary : .primary)
                     .fontWeight(conversation.isRead ? .regular : .medium)

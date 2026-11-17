@@ -10,16 +10,23 @@ struct ChatView: View {
     var isEmployerMode: Bool = false
 
     @EnvironmentObject var messageStore: MessageStore
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.dismiss) var dismiss
+    @Environment(\.openURL) var openURL
 
     @State private var inputText = ""
     @State private var scrollToBottom = false
-    @State private var showRatingSheet = false
-    @State private var reviewSubmitted = false
-    @State private var jobDetailJob: Job? = nil
-    @State private var loadingJobDetail = false
+    @State var showRatingSheet = false
+    @State var reviewSubmitted = false
+    @State var jobDetailJob: Job? = nil
+    @State var loadingJobDetail = false
+    @State var showReportSheet = false
+    @State var showBlockConfirm = false
+    @State var showSupportFallback = false
+    @State var showWorkerProfile = false
+    @State var isBusy = false
+    @State var actionError: String?
 
-    private var isReadOnly: Bool {
+    var isReadOnly: Bool {
         conversation.status == .completed || conversation.status == .cancelled
     }
 
@@ -32,11 +39,14 @@ struct ChatView: View {
         return pool.first(where: { $0.id == conversation.id })
     }
 
+    /// Aktueller Stand (Polling aktualisiert Blockier-/Gespeichert-Flags im Store)
+    var live: Conversation { liveConversation ?? conversation }
+
     private var currentMessages: [ChatMessage] {
         liveConversation?.messages ?? conversation.messages
     }
 
-    private var presence: ChatPresence {
+    var presence: ChatPresence {
         liveConversation?.presence ?? conversation.presence
     }
 
@@ -52,6 +62,9 @@ struct ChatView: View {
             VStack(spacing: 0) {
                 chatHeader
                 Divider()
+                ChatJobInfoCard(conversation: live, onViewJob: openJobDetails, isLoadingJob: loadingJobDetail)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
                 messageList
                 inputBar
             }
@@ -83,6 +96,13 @@ struct ChatView: View {
                 messageStore.userIsTyping(conversationId: conversation.id)
             }
         }
+        .onChange(of: messageStore.failedDraft) { _, draft in
+            restoreFailedDraft(draft)
+        }
+        .onAppear {
+            // Fehlgeschlagener Text, waehrend der Chat geschlossen war
+            restoreFailedDraft(messageStore.failedDraft)
+        }
         .onDisappear {
             messageStore.userStoppedTyping(conversationId: conversation.id)
         }
@@ -90,6 +110,45 @@ struct ChatView: View {
             NavigationStack {
                 JobDetailView(job: job)
             }
+        }
+        .sheet(isPresented: $showReportSheet) {
+            if let userId = conversation.counterpartUserId {
+                ReportUserSheet(conversation: live, userId: userId)
+            }
+        }
+        .navigationDestination(isPresented: $showWorkerProfile) { workerProfileDestination }
+        .alert(live.blockedByMe ? "Unblock \(conversation.company)?" : "Block \(conversation.company)?",
+               isPresented: $showBlockConfirm) {
+            Button(live.blockedByMe ? "Unblock" : "Block", role: live.blockedByMe ? nil : .destructive) {
+                Task { await toggleBlock() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(live.blockedByMe
+                 ? "You will be able to message each other again."
+                 : "Neither of you will be able to send messages in this conversation. You can still read it, and you can unblock at any time.")
+        }
+        .alert("Contact support", isPresented: $showSupportFallback) {
+            Button("Copy address") { UIPasteboard.general.string = ChatSafety.supportEmail }
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("No mail app available. Write to \(ChatSafety.supportEmail) and mention \"\(conversation.jobTitle)\" (conversation \(conversation.id)).")
+        }
+        .alert("Something went wrong", isPresented: Binding(
+            get: { actionError != nil },
+            set: { if !$0 { actionError = nil } }
+        )) {
+            Button("OK", role: .cancel) { actionError = nil }
+        } message: {
+            Text(actionError ?? "")
+        }
+        .alert("Message not sent", isPresented: Binding(
+            get: { messageStore.sendError != nil },
+            set: { if !$0 { messageStore.sendError = nil } }
+        )) {
+            Button("OK", role: .cancel) { messageStore.sendError = nil }
+        } message: {
+            Text(messageStore.sendError ?? "")
         }
         .sheet(isPresented: $showRatingSheet) {
             if isEmployerMode {
@@ -122,7 +181,13 @@ struct ChatView: View {
         ScrollViewReader { proxy in
             ScrollView(showsIndicators: false) {
                 LazyVStack(spacing: 6) {
-                    ForEach(currentMessages) { message in
+                    safetyNotice
+                    ForEach(Array(currentMessages.enumerated()), id: \.element.id) { index, message in
+                        if index == 0 || !Calendar.current.isDate(
+                            message.timestamp, inSameDayAs: currentMessages[index - 1].timestamp
+                        ) {
+                            DateSeparator(date: message.timestamp)
+                        }
                         if message.isSystemMessage {
                             SystemMessageBubble(text: message.text)
                         } else if message.isFromUser {
@@ -164,6 +229,8 @@ struct ChatView: View {
     private var inputBar: some View {
         if isReadOnly {
             readOnlyBar
+        } else if live.isBlocked {
+            blockedBar
         } else {
             activeInputBar
         }
@@ -172,6 +239,7 @@ struct ChatView: View {
     private var readOnlyBar: some View {
         VStack(spacing: 0) {
             Divider()
+            if conversation.status == .completed { completionSection }
             HStack(spacing: 10) {
                 Image(systemName: conversation.status == .completed ? "checkmark.circle.fill" : "xmark.circle.fill")
                     .foregroundColor(conversation.status == .completed ? .green : .red)
@@ -234,6 +302,14 @@ struct ChatView: View {
         }
     }
 
+    /// Schreibt den Text einer fehlgeschlagenen Nachricht zurueck in die Eingabe;
+    /// steht dort schon etwas, wird er angehaengt statt verworfen.
+    private func restoreFailedDraft(_ draft: MessageStore.FailedDraft?) {
+        guard let draft, draft.conversationId == conversation.id else { return }
+        inputText = inputText.isEmpty ? draft.text : inputText + "\n" + draft.text
+        messageStore.failedDraft = nil
+    }
+
     private func sendMessage() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
@@ -246,85 +322,6 @@ struct ChatView: View {
     }
 }
 
-// MARK: - Header (Extension, haelt den Struct-Body unter dem SwiftLint-Limit)
-extension ChatView {
-    // MARK: - Header
-    private var chatHeader: some View {
-        HStack(spacing: 12) {
-            Button { dismiss() } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundColor(.primary)
-            }
-
-            // Avatar: Employer → worker emoji; Worker → company logo (tippbar)
-            if isEmployerMode {
-                Text(conversation.logoEmoji)
-                    .font(.system(size: 22))
-                    .frame(width: 40, height: 40)
-                    .background(Color(uiColor: .secondarySystemGroupedBackground))
-                    .clipShape(Circle())
-            } else {
-                NavigationLink {
-                    CompanyProfileView(
-                        companyName: conversation.company,
-                        logoEmoji:   conversation.logoEmoji
-                    )
-                } label: {
-                    Text(conversation.logoEmoji)
-                        .font(.system(size: 22))
-                        .frame(width: 40, height: 40)
-                        .background(Color(uiColor: .secondarySystemGroupedBackground))
-                        .clipShape(Circle())
-                }
-                .buttonStyle(.plain)
-            }
-
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 6) {
-                    // `company` wird serverseitig (routes.messages.js) je nach Rolle bereits
-                    // mit dem richtigen Anzeigenamen befuellt (Worker: company name; Employer:
-                    // worker name) — keine clientseitige Fallunterscheidung noetig.
-                    Text(conversation.company)
-                        .font(.system(size: 16, weight: .semibold))
-                    StatusBadge(status: conversation.status)
-                }
-                Text(conversation.jobTitle)
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
-                if !isReadOnly {
-                    PresenceLine(presence: presence)
-                }
-            }
-
-            Spacer()
-
-            // Info-Button → JobDetailView
-            Button {
-                guard !loadingJobDetail else { return }
-                loadingJobDetail = true
-                Task {
-                    jobDetailJob = try? await APIClient.shared.fetchJob(jobId: conversation.jobId)
-                    loadingJobDetail = false
-                }
-            } label: {
-                if loadingJobDetail {
-                    ProgressView()
-                        .frame(width: 24, height: 24)
-                } else {
-                    Image(systemName: "info.circle")
-                        .font(.system(size: 20))
-                        .foregroundColor(SS.primary)
-                }
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(Color(uiColor: .systemBackground))
-    }
-}
-
-
 // MARK: - ChatReviewFormLoader
 
 /// Laedt einen vorhandenen Entwurf fuer diese Bewerbung, bevor das Formular editierbar wird
@@ -333,7 +330,7 @@ private struct ChatReviewFormLoader: View {
     let review: PendingReviewItem
     let onSuccess: () -> Void
 
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.dismiss) var dismiss
     @State private var draft: ReviewDraftValues? = nil
     @State private var isLoaded = false
     @State private var loadError: String? = nil

@@ -21,6 +21,7 @@ enum ApplyResult {
     case shiftUnavailable
     case schedulingConflict
     case accountPaused
+    case blocked
 }
 
 // MARK: - ApplyFlowView
@@ -140,6 +141,7 @@ struct ApplyFlowView: View {
             case .jobUnavailable:     withAnimation { step = .result(.shiftUnavailable) }
             case .schedulingConflict: withAnimation { step = .result(.schedulingConflict) }
             case .accountPaused:      withAnimation { step = .result(.accountPaused) }
+            case .blocked:            withAnimation { step = .result(.blocked) }
             }
         } catch {
             withAnimation { step = .result(.connectionLost) }
@@ -535,7 +537,7 @@ struct ApplyResultView: View {
             onRetry()
         case .shiftAlreadyTaken, .shiftUnavailable:
             onExitToJobList()
-        case .accountPaused:
+        case .accountPaused, .blocked:
             onDone()
         case .schedulingConflict:
             showCalendarSheet = true
@@ -673,6 +675,16 @@ private struct ResultConfig {
             iconBackground  = Color.orange.opacity(0.1)
             title           = "Your Account Is Paused"
             message         = "You can't apply while your account is paused. Resume it under Account Settings → Privacy & Data."
+            primaryActionLabel   = "OK"
+            primaryActionColor   = SS.primary
+            secondaryActionLabel = nil
+
+        case .blocked:
+            iconName        = "hand.raised.fill"
+            iconColor       = .orange
+            iconBackground  = Color.orange.opacity(0.1)
+            title           = "Can't Apply"
+            message         = "You can't apply to this employer."
             primaryActionLabel   = "OK"
             primaryActionColor   = SS.primary
             secondaryActionLabel = nil

@@ -12,6 +12,16 @@ final class MessageStore: ObservableObject {
     @Published var conversations:         [Conversation] = []
     @Published var employerConversations: [Conversation] = []
     @Published var isLoading = false
+    /// Fehler beim Senden (z.B. blockiert) → ChatView zeigt einen Alert
+    @Published var sendError: String?
+    /// Text einer fehlgeschlagenen (nicht blockierten) Nachricht → ChatView schreibt ihn zurueck in die Eingabe
+    @Published var failedDraft: FailedDraft?
+
+    struct FailedDraft: Equatable {
+        let id = UUID()
+        let conversationId: String
+        let text: String
+    }
 
     // MARK: - Laden
 
@@ -75,27 +85,27 @@ final class MessageStore: ObservableObject {
 
     func sendMessage(conversationId: String, text: String) {
         lastTypingPing[conversationId] = nil  // Server beendet Typing beim Senden
-        optimisticAppend(to: &conversations, conversationId: conversationId, text: text)
+        let optimisticId = optimisticAppend(to: &conversations, conversationId: conversationId, text: text)
         Task {
             do {
                 let dto = try await APIClient.shared.sendMessage(conversationId: conversationId, text: text)
                 // Server-ID in die optimistisch hinzugefügte Nachricht zurückschreiben
-                replaceOptimistic(in: &conversations, conversationId: conversationId, serverMsg: dto.toDomain())
+                replaceOptimistic(in: &conversations, conversationId: conversationId, optimisticId: optimisticId, serverMsg: dto.toDomain())
             } catch {
-                print("sendMessage error:", error)
+                handleSendFailure(error, conversationId: conversationId, optimisticId: optimisticId, text: text)
             }
         }
     }
 
     func sendEmployerMessage(conversationId: String, text: String) {
         lastTypingPing[conversationId] = nil  // Server beendet Typing beim Senden
-        optimisticAppend(to: &employerConversations, conversationId: conversationId, text: text)
+        let optimisticId = optimisticAppend(to: &employerConversations, conversationId: conversationId, text: text)
         Task {
             do {
                 let dto = try await APIClient.shared.sendMessage(conversationId: conversationId, text: text)
-                replaceOptimistic(in: &employerConversations, conversationId: conversationId, serverMsg: dto.toDomain())
+                replaceOptimistic(in: &employerConversations, conversationId: conversationId, optimisticId: optimisticId, serverMsg: dto.toDomain())
             } catch {
-                print("sendEmployerMessage error:", error)
+                handleSendFailure(error, conversationId: conversationId, optimisticId: optimisticId, text: text)
             }
         }
     }
@@ -116,6 +126,7 @@ final class MessageStore: ObservableObject {
             let knownIds = Set(conv.messages.map(\.id))
             let incoming = response.messages.map { $0.toDomain() }.filter { !knownIds.contains($0.id) }
             let presence = response.presence?.toDomain() ?? conv.presence
+            applyBlockFlags(conversationId: conversationId, byMe: response.blockedByMe, byOther: response.blockedByOther)
 
             if isEmployerMode {
                 applyRefresh(&employerConversations, conversationId: conversationId, messages: incoming, presence: presence)
@@ -159,6 +170,39 @@ final class MessageStore: ObservableObject {
         }
     }
 
+    // MARK: - Blockieren / Speichern (lokaler Zustand, nachdem das Backend bestaetigt hat)
+
+    func applyBlockFlags(conversationId: String, byMe: Bool?, byOther: Bool?) {
+        guard let byMe, let byOther else { return }
+        mutateEverywhere(conversationId) { $0.blockedByMe = byMe; $0.blockedByOther = byOther }
+    }
+
+    func setCounterpartSaved(conversationId: String, saved: Bool) {
+        mutateEverywhere(conversationId) { $0.isCounterpartSaved = saved }
+    }
+
+    private func mutateEverywhere(_ id: String, _ mutation: (inout Conversation) -> Void) {
+        update(&conversations, id: id, mutation: mutation)
+        update(&employerConversations, id: id, mutation: mutation)
+    }
+
+    /// Fehlgeschlagene Nachricht zurueckrollen und Grund melden (BLOCKED → Eingabe sperren)
+    private func handleSendFailure(_ error: Error, conversationId: String, optimisticId: String, text: String) {
+        let isBlocked = (error as? APIError)?.code == "BLOCKED"
+        mutateEverywhere(conversationId) { conv in
+            if let mIdx = conv.messages.firstIndex(where: { $0.id == optimisticId }) {
+                conv.messages.remove(at: mIdx)
+                if let last = conv.messages.last {
+                    conv.lastMessage = last.text
+                    conv.lastMessageTime = last.timestamp
+                }
+            }
+            if isBlocked { conv.blockedByOther = true }
+        }
+        if !isBlocked { failedDraft = FailedDraft(conversationId: conversationId, text: text) }
+        sendError = error.localizedDescription
+    }
+
     // MARK: - Typing-Indicator (eigene Seite)
 
     /// Letzter gesendeter Typing-Ping pro Konversation (Drosselung, Server-Fenster ist 6 s)
@@ -186,10 +230,12 @@ final class MessageStore: ObservableObject {
         mutation(&list[idx])
     }
 
-    private func optimisticAppend(to list: inout [Conversation], conversationId: String, text: String) {
-        guard let idx = list.firstIndex(where: { $0.id == conversationId }) else { return }
+    @discardableResult
+    private func optimisticAppend(to list: inout [Conversation], conversationId: String, text: String) -> String {
+        let id = "optimistic-\(UUID().uuidString)"
+        guard let idx = list.firstIndex(where: { $0.id == conversationId }) else { return id }
         let msg = ChatMessage(
-            id:              "optimistic-\(UUID().uuidString)",
+            id:              id,
             text:            text,
             isFromUser:      true,
             timestamp:       Date(),
@@ -198,11 +244,12 @@ final class MessageStore: ObservableObject {
         list[idx].messages.append(msg)
         list[idx].lastMessage     = text
         list[idx].lastMessageTime = Date()
+        return id
     }
 
-    private func replaceOptimistic(in list: inout [Conversation], conversationId: String, serverMsg: ChatMessage) {
+    private func replaceOptimistic(in list: inout [Conversation], conversationId: String, optimisticId: String, serverMsg: ChatMessage) {
         guard let cIdx = list.firstIndex(where: { $0.id == conversationId }) else { return }
-        if let mIdx = list[cIdx].messages.firstIndex(where: { $0.id.hasPrefix("optimistic-") }) {
+        if let mIdx = list[cIdx].messages.firstIndex(where: { $0.id == optimisticId }) {
             list[cIdx].messages[mIdx] = serverMsg
         }
     }
