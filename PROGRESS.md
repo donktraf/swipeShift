@@ -785,3 +785,13 @@ Gefunden beim Profile-Screen-Abgleich: Legal-Schalter (Worker + Arbeitgeber) und
 - Arbeitgeber: `yearFounded`, `tagline`, `socialLinks` (nur echte Instagram/LinkedIn/Facebook/TikTok-Links), `streetAddress`, `zipCode` (US), `addressLat/Lng` (Adresssuche), `publicContactName/Role`, `postsInMultipleStates`, `remoteFriendly`; Firmenprofil zeigt Slogan, „Founded“, Adresse + Karte („Open in Maps“), Ansprechpartner, Social-Icons
 - Backend: `src/utils/profileFields.js` (+ Tests), Migration `20261118110000_profile_fields`
 - Offen: Sub-Typen pro Kategorie, Zuverlässigkeits-Score, Auswertung von „mehrere Bundesstaaten“/„Remote“
+
+### Kleinere Lücken Worker-Seite (2026-11-18)
+- Jobdetail: Abschnitt „Location“ mit Adresse + Karte („Open in Maps“, `UI/Components/LocationMapPreview.swift`), Firmenblock mit Branche und Anzahl abgeschlossener Schichten
+- Kalender-Detail: Kategorie + Entfernung; Bewerbungen nach Monat gruppiert mit Summen, „Applied …“, Kategorie, Zahlungsstatus, „View job“/„Chat“ (`ApplicationCard`, `ApplicationMonthGroups`, gemeinsame `ApplicationNavigation`)
+- Gespeichert: Firmenkarten mit Standort/Branche/Kurztext + „View open jobs“/„View profile“; Jobkarten mit Tags, Entfernung, „Company“, „Apply“ (nur bei freien Plätzen und zukünftigem Start)
+- Finanzen (Worker): Verdienstliste mit Stundenlohn × Stunden und Status, nach Monat gruppiert, bis 100 Einträge; Kennzahl „This week“
+- Firmenprofil: Rating-Tags („Fair Pay“, „Friendly Team“ …) ab 3 Bewertungen und Ø ≥ 4.5 über alle Bewertungen
+- Login: zuletzt genutzte Methode wird angezeigt (`Security/LastLoginMethod.swift`)
+- Behoben: ein gemeinsamer Datums-Decoder (mit/ohne Millisekunden) für alle API-Aufrufe; Konto löschen loggt bei Fehler nicht mehr aus
+- Backend-utils: `companyStats.js`, `ratingTags.js`, `distanceMilesBetween`, `currentWeekRange` (+ Tests)

@@ -621,3 +621,13 @@ Fehlschlag.
 
 **Bewusst nicht gebaut:** Sub-Typen pro Kategorie, Zuverlässigkeits-Score (braucht Erfassung von Pünktlichkeit/No-Shows). „Mehrere Bundesstaaten“/„Remote“ werden gespeichert, aber noch nirgends ausgewertet.
 **Offen:** Migration anwenden, Klick-Test.
+
+---
+
+# Dev-Loop 2026-11-18 — kleinere Lücken, Paket A (Worker-Seite)
+
+**Runde 1 – implementer:** Jobdetail mit Karte/Adresse + Branche/abgeschlossenen Schichten der Firma; Kalender mit Kategorie + Entfernung; Bewerbungen nach Monat mit Summen, Bewerbungsdatum, Kategorie, Zahlungsstatus, „View job“/„Chat“; Gespeichert: Firmen mit Standort/Branche/Kurztext + „View open jobs“/„View profile“, Jobs mit Tags/Entfernung + „Company“/„Apply“; Verdienstliste mit Stundenlohn × Stunden, Status, Monatsgruppen, „This week“; Rating-Tags im Firmenprofil; zuletzt genutzte Login-Methode. Neue utils: companyStats, ratingTags, distanceMilesBetween, currentWeekRange.
+**Tester (parallel):** grün, fand Bug: Kürzen von Firmentexten konnte Emojis zerschneiden.
+**Review 1:** Kritisch – Finanzen-Screen hätte mit der neuen Verdienstliste nicht mehr geladen (Datumsformat mit Millisekunden; Altfehler-Muster). Warnungen: „Apply“ bei gespeicherten Jobs auch bei vollen/vergangenen Jobs, Rating-Tags nur aus den letzten 20 Bewertungen, Verdienstliste auf 20 begrenzt, Konto-Löschen loggte auch bei Fehler aus.
+**Runde 2 – implementer:** ein gemeinsamer Datums-Decoder für alle 19 Stellen, „Apply“ nur bei freien Plätzen und zukünftigen Jobs, Tags über alle Bewertungen, Liste bis 100 mit „Showing latest N of M“, Konto-Löschen zeigt Fehler statt Logout, Kürzen an Zeichengrenzen. Vom Orchestrator nachgeprüft: 153/153 grün, Build ok.
+**Bewusst nicht gebaut:** Notizen im Kalender (kein Feld), Netto/Steuer/Tips, „Not interested“/Teilen bei gespeicherten Jobs.
