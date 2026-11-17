@@ -10,6 +10,7 @@ import SwiftUI
 struct LeaveReviewsView: View {
     @State private var selectedTab: ReviewTab = .pending
     @State private var pendingList: [PendingReviewItem] = []
+    @State private var draftList:   [ReviewDraftItem]   = []
     @State private var pastList:    [PastReviewItem]    = []
     @State private var isLoading    = false
     @State private var errorMessage: String? = nil
@@ -18,7 +19,16 @@ struct LeaveReviewsView: View {
     @State private var showFilterSheet  = false
     @State private var selectedSort: ReviewSort     = .mostRecent
     @State private var filters = ReviewFilters()
-    @State private var reviewToEdit: PendingReviewItem? = nil
+    @State private var reviewToEdit: ReviewFormContext? = nil
+    @State private var draftToDelete: ReviewDraftItem? = nil
+    @State private var actionError: String? = nil
+
+    /// Was das Formular-Sheet braucht: Pending-Eintrag + optional vorhandener Entwurf
+    struct ReviewFormContext: Identifiable {
+        let item: PendingReviewItem
+        let draft: ReviewDraftValues?
+        var id: String { item.applyId }
+    }
 
     enum ReviewTab: String, CaseIterable {
         case pending = "Pending"
@@ -45,6 +55,13 @@ struct LeaveReviewsView: View {
         return list
     }
 
+    /// Entwuerfe tragen noch kein Rating → nur Kategorie + Schicht-Datum filtern (neueste Bearbeitung zuerst)
+    private var filteredDrafts: [ReviewDraftItem] {
+        draftList
+            .filter { filters.matches(category: $0.review.jobCategory) && filters.matches(shiftDate: $0.review.shiftDate) }
+            .sorted { $0.updatedAt > $1.updatedAt }
+    }
+
     private var filteredPast: [PastReviewItem] {
         var list = pastList.filter {
             filters.matches(category: $0.jobCategory) && filters.matches(shiftDate: $0.shiftDate)
@@ -63,14 +80,14 @@ struct LeaveReviewsView: View {
 
     /// Nur Kategorien, die in den geladenen Reviews vorkommen (keine leeren Filter-Optionen)
     private var availableCategories: [String] {
-        let all = pendingList.map(\.jobCategory) + pastList.map(\.jobCategory)
+        let all = pendingList.map(\.jobCategory) + draftList.map(\.review.jobCategory) + pastList.map(\.jobCategory)
         return Array(Set(all.filter { !$0.isEmpty && $0 != "—" })).sorted()
     }
 
     private var currentCount: Int {
         switch selectedTab {
         case .pending: return pendingList.count
-        case .drafts:  return 0
+        case .drafts:  return draftList.count
         case .past:    return pastList.count
         }
     }
@@ -98,13 +115,32 @@ struct LeaveReviewsView: View {
         .sheet(isPresented: $showFilterSheet) {
             ReviewFilterSheet(filters: $filters, categories: availableCategories)
         }
-        .sheet(item: $reviewToEdit) { item in
-            ReviewFormSheet(review: item) {
-                Task {
-                    pendingList.removeAll { $0.applyId == item.applyId }
-                    try? await loadPastReviews()
-                }
-            }
+        .sheet(item: $reviewToEdit) { ctx in
+            ReviewFormSheet(
+                review: ctx.item,
+                initialDraft: ctx.draft,
+                onSuccess: { Task { await loadData() } },
+                onDraftChanged: { Task { await loadData() } }
+            )
+        }
+        .confirmationDialog(
+            "Delete this draft?",
+            isPresented: Binding(get: { draftToDelete != nil }, set: { if !$0 { draftToDelete = nil } }),
+            titleVisibility: .visible,
+            presenting: draftToDelete
+        ) { draft in
+            Button("Delete Draft", role: .destructive) { Task { await deleteDraft(draft) } }
+            Button("Cancel", role: .cancel) {}
+        } message: { draft in
+            Text("Your unsent review for \(draft.review.workerName) will be discarded.")
+        }
+        .alert("Something went wrong", isPresented: Binding(
+            get: { actionError != nil },
+            set: { if !$0 { actionError = nil } }
+        )) {
+            Button("OK", role: .cancel) { actionError = nil }
+        } message: {
+            Text(actionError ?? "")
         }
     }
 
@@ -122,7 +158,7 @@ struct LeaveReviewsView: View {
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 12) {
                         ForEach(filteredPending) { item in
-                            PendingReviewCard(item: item) { reviewToEdit = item }
+                            PendingReviewCard(item: item) { reviewToEdit = ReviewFormContext(item: item, draft: nil) }
                         }
                     }
                     .padding(.horizontal, 16)
@@ -130,7 +166,25 @@ struct LeaveReviewsView: View {
                 }
             }
         case .drafts:
-            emptyView(icon: "doc.text", message: "No drafts saved.\nDrafts are not persisted between sessions.")
+            if filteredDrafts.isEmpty && !draftList.isEmpty && activeFilters > 0 {
+                noMatchesView
+            } else if filteredDrafts.isEmpty {
+                emptyView(icon: "doc.text", message: "No drafts saved.\nUse \"Save as Draft\" in the review form to finish a review later.")
+            } else {
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 12) {
+                        ForEach(filteredDrafts) { item in
+                            DraftReviewCard(
+                                item: item,
+                                onOpen:   { reviewToEdit = ReviewFormContext(item: item.review, draft: item.draft) },
+                                onDelete: { draftToDelete = item }
+                            )
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 24)
+                }
+            }
         case .past:
             if filteredPast.isEmpty && !pastList.isEmpty && activeFilters > 0 {
                 noMatchesView
@@ -158,7 +212,7 @@ struct LeaveReviewsView: View {
                 let count: Int = {
                     switch tab {
                     case .pending: return pendingList.count
-                    case .drafts:  return 0
+                    case .drafts:  return draftList.count
                     case .past:    return pastList.count
                     }
                 }()
@@ -330,20 +384,26 @@ struct LeaveReviewsView: View {
     // MARK: - Data Loading
 
     private func loadData() async {
-        isLoading = true
+        isLoading = pendingList.isEmpty && draftList.isEmpty && pastList.isEmpty
         errorMessage = nil
         do {
             async let pending = APIClient.shared.fetchPendingReviews()
+            async let drafts  = APIClient.shared.fetchReviewDrafts()
             async let past    = APIClient.shared.fetchPastReviews()
-            (pendingList, pastList) = try await (pending, past)
+            (pendingList, draftList, pastList) = try await (pending, drafts, past)
         } catch {
             errorMessage = error.localizedDescription
         }
         isLoading = false
     }
 
-    private func loadPastReviews() async throws {
-        pastList = try await APIClient.shared.fetchPastReviews()
+    private func deleteDraft(_ draft: ReviewDraftItem) async {
+        do {
+            try await APIClient.shared.deleteReviewDraft(applyId: draft.review.applyId)
+            await loadData() // der Eintrag taucht danach wieder unter "Pending" auf
+        } catch {
+            actionError = error.localizedDescription
+        }
     }
 }
 
@@ -393,6 +453,62 @@ private struct PendingReviewCard: View {
     }
 }
 
+// MARK: - DraftReviewCard
+
+private struct DraftReviewCard: View {
+    let item: ReviewDraftItem
+    let onOpen: () -> Void
+    let onDelete: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button(action: onOpen) {
+                HStack(spacing: 12) {
+                    ZStack {
+                        Circle().fill(Color.gray.opacity(0.12)).frame(width: 44, height: 44)
+                        Text(item.review.logoEmoji).font(.system(size: 20))
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text(item.review.workerName)
+                                .font(.system(size: 15, weight: .semibold)).foregroundColor(.primary)
+                            Text("Draft")
+                                .font(.system(size: 10, weight: .bold)).foregroundColor(.orange)
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Color.orange.opacity(0.15)).clipShape(Capsule())
+                        }
+                        Text(item.review.jobTitle)
+                            .font(.system(size: 12)).foregroundColor(.secondary)
+                        Text("Last edited \(item.updatedAt.formatted(date: .abbreviated, time: .shortened))")
+                            .font(.system(size: 11)).foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold)).foregroundColor(.secondary)
+                }
+                .padding(14)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Divider().padding(.horizontal, 14)
+
+            Button(role: .destructive, action: onDelete) {
+                HStack {
+                    Image(systemName: "trash").font(.system(size: 13))
+                    Text("Delete Draft").font(.system(size: 13, weight: .semibold))
+                }
+                .foregroundColor(.red)
+                .frame(maxWidth: .infinity).padding(.vertical, 12)
+            }
+            .buttonStyle(.plain)
+        }
+        .background(Color(uiColor: .systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: .black.opacity(0.05), radius: 5, x: 0, y: 2)
+    }
+}
+
 // MARK: - PastReviewCard
 
 private struct PastReviewCard: View {
@@ -408,6 +524,7 @@ private struct PastReviewCard: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(item.workerName)
                         .font(.system(size: 15, weight: .semibold)).foregroundColor(.primary)
+                    if item.isTopWorker { TopWorkerBadge(text: "Top Worker") }
                     Text(item.jobTitle)
                         .font(.system(size: 12)).foregroundColor(.secondary)
                 }
@@ -427,6 +544,7 @@ private struct PastReviewCard: View {
                 miniRatingRow("Teamwork",        value: item.teamwork)
                 miniRatingRow("Reliability",     value: item.reliability)
                 miniRatingRow("Under Pressure",  value: item.underPressure)
+                if let quality = item.workQuality { miniRatingRow("Work Quality", value: quality) }
             }
             .padding(.horizontal, 14).padding(.vertical, 10)
 
@@ -474,21 +592,46 @@ private struct PastReviewCard: View {
 struct ReviewFormSheet: View {
     let review: PendingReviewItem
     let onSuccess: () -> Void
+    /// Wird nach erfolgreichem Speichern eines Entwurfs aufgerufen (Liste neu laden)
+    let onDraftChanged: (() -> Void)?
 
     @Environment(\.dismiss) private var dismiss
 
-    @State private var communication: Int = 0
-    @State private var teamwork:      Int = 0
-    @State private var reliability:   Int = 0
-    @State private var underPressure: Int = 0
-    @State private var comment            = ""
-    @State private var wouldRehire        = true
+    @State private var communication: Int
+    @State private var teamwork:      Int
+    @State private var reliability:   Int
+    @State private var underPressure: Int
+    @State private var workQuality:   Int
+    @State private var comment:       String
+    @State private var wouldRehire:   Bool
+    @State private var topWorker:     Bool
     @State private var isSubmitting       = false
+    @State private var isSavingDraft      = false
+    @State private var draftSaved         = false
     @State private var submitError: String? = nil
 
-    private var isValid: Bool {
-        communication > 0 && teamwork > 0 && reliability > 0 && underPressure > 0
+    init(review: PendingReviewItem,
+         initialDraft: ReviewDraftValues? = nil,
+         onSuccess: @escaping () -> Void,
+         onDraftChanged: (() -> Void)? = nil) {
+        self.review = review
+        self.onSuccess = onSuccess
+        self.onDraftChanged = onDraftChanged
+        _communication = State(initialValue: initialDraft?.communication ?? 0)
+        _teamwork      = State(initialValue: initialDraft?.teamwork ?? 0)
+        _reliability   = State(initialValue: initialDraft?.reliability ?? 0)
+        _underPressure = State(initialValue: initialDraft?.underPressure ?? 0)
+        _workQuality   = State(initialValue: initialDraft?.workQuality ?? 0)
+        _comment       = State(initialValue: initialDraft?.comment ?? "")
+        _wouldRehire   = State(initialValue: initialDraft?.wouldRehire ?? true)
+        _topWorker     = State(initialValue: initialDraft?.topWorker ?? false)
     }
+
+    private var isValid: Bool {
+        communication > 0 && teamwork > 0 && reliability > 0 && underPressure > 0 && workQuality > 0
+    }
+
+    private var isBusy: Bool { isSubmitting || isSavingDraft }
 
     var body: some View {
         NavigationStack {
@@ -519,6 +662,8 @@ struct ReviewFormSheet: View {
                         starRatingRow(label: "Reliability",     binding: $reliability)
                         Divider().padding(.leading, 20)
                         starRatingRow(label: "Under Pressure",  binding: $underPressure)
+                        Divider().padding(.leading, 20)
+                        starRatingRow(label: "Work Quality",    binding: $workQuality)
                     }
                     .background(Color(uiColor: .secondarySystemGroupedBackground))
                     .clipShape(RoundedRectangle(cornerRadius: 14))
@@ -533,6 +678,21 @@ struct ReviewFormSheet: View {
                         }
                         Spacer()
                         Toggle("", isOn: $wouldRehire).labelsHidden().tint(SS.primary)
+                    }
+                    .padding(.horizontal, 20).padding(.vertical, 14)
+                    .background(Color(uiColor: .secondarySystemGroupedBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .padding(.horizontal, 16)
+
+                    // Top Worker
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Highlight as Top Worker").font(.system(size: 15, weight: .semibold))
+                            Text("Exceptional performance")
+                                .font(.system(size: 12)).foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Toggle("", isOn: $topWorker).labelsHidden().tint(SS.primary)
                     }
                     .padding(.horizontal, 20).padding(.vertical, 14)
                     .background(Color(uiColor: .secondarySystemGroupedBackground))
@@ -574,8 +734,22 @@ struct ReviewFormSheet: View {
                             Text("Save Review")
                         }
                     }
-                    .disabled(!isValid || isSubmitting)
-                    .buttonStyle(SSPrimaryButtonStyle(isEnabled: isValid && !isSubmitting))
+                    .disabled(!isValid || isBusy)
+                    .buttonStyle(SSPrimaryButtonStyle(isEnabled: isValid && !isBusy))
+                    .padding(.horizontal, 16)
+
+                    Button {
+                        Task { await saveDraft() }
+                    } label: {
+                        if isSavingDraft {
+                            ProgressView()
+                        } else {
+                            Text("Save as Draft")
+                                .font(.system(size: 15, weight: .semibold)).foregroundColor(SS.primary)
+                        }
+                    }
+                    .disabled(isBusy)
+                    .frame(maxWidth: .infinity).padding(.vertical, 12)
                     .padding(.horizontal, 16).padding(.bottom, 28)
                 }
             }
@@ -588,6 +762,52 @@ struct ReviewFormSheet: View {
                 }
             }
         }
+        .overlay(alignment: .bottom) {
+            if draftSaved {
+                Label("Draft saved", systemImage: "checkmark.circle.fill")
+                    .font(.system(size: 14, weight: .semibold)).foregroundColor(.white)
+                    .padding(.horizontal, 16).padding(.vertical, 10)
+                    .background(SS.primary).clipShape(Capsule())
+                    .shadow(color: .black.opacity(0.15), radius: 6, y: 2)
+                    .padding(.bottom, 24)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .alert("Could not save review", isPresented: Binding(
+            get: { submitError != nil },
+            set: { if !$0 { submitError = nil } }
+        )) {
+            Button("OK", role: .cancel) { submitError = nil }
+        } message: {
+            Text(submitError ?? "")
+        }
+    }
+
+    private func saveDraft() async {
+        isSavingDraft = true
+        submitError   = nil
+        do {
+            try await APIClient.shared.saveReviewDraft(
+                applyId: review.applyId,
+                values: ReviewDraftValues(
+                    communication: communication,
+                    teamwork:      teamwork,
+                    reliability:   reliability,
+                    underPressure: underPressure,
+                    workQuality:   workQuality,
+                    comment:       comment,
+                    wouldRehire:   wouldRehire,
+                    topWorker:     topWorker
+                )
+            )
+            onDraftChanged?()
+            withAnimation { draftSaved = true }
+            try? await Task.sleep(nanoseconds: 900_000_000)
+            dismiss()
+        } catch {
+            submitError = error.localizedDescription
+        }
+        isSavingDraft = false
     }
 
     private func submit() async {
@@ -600,8 +820,10 @@ struct ReviewFormSheet: View {
                 teamwork:      teamwork,
                 reliability:   reliability,
                 underPressure: underPressure,
+                workQuality:   workQuality,
                 comment:       comment,
-                wouldRehire:   wouldRehire
+                wouldRehire:   wouldRehire,
+                topWorker:     topWorker
             ))
             onSuccess()
             dismiss()

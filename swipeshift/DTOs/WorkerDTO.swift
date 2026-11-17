@@ -56,11 +56,15 @@ struct WorkerReviewItem: Identifiable, Decodable {
     let teamwork:      Int
     let reliability:   Int
     let underPressure: Int
+    let workQuality:   Int?     // nil bei Bestandsbewertungen
+    let topWorker:     Bool?
     let feedback:      String
     let wouldRehire:   Bool
 
+    var isTopWorker: Bool { topWorker ?? false }
+
     var avgRating: Double {
-        Double(communication + teamwork + reliability + underPressure) / 4.0
+        reviewAverage([communication, teamwork, reliability, underPressure, workQuality])
     }
 }
 
@@ -68,6 +72,8 @@ struct WorkerReviewsResponse: Decodable {
     let reviews:       [WorkerReviewItem]
     let overallRating: Double
     let totalJobs:     Int
+    let skillAverages: WorkerRatingBreakdown?
+    let topWorkerCount: Int?
 }
 
 // MARK: - Worker Financials

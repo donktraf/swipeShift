@@ -255,6 +255,19 @@ struct CompanyProfileView: View {
                 .padding(.vertical, 20)
             }
 
+            // Anteil "would work here again" (Backend blendet bei < 3 Antworten aus)
+            if let percent = p.wouldWorkAgainPercent {
+                Divider().padding(.horizontal, 14)
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 13)).foregroundColor(SS.primary)
+                    Text("\(percent)% would work here again")
+                        .font(.system(size: 13, weight: .semibold)).foregroundColor(.primary)
+                    Spacer()
+                }
+                .padding(.horizontal, 14).padding(.vertical, 12)
+            }
+
             // Individual review cards
             if let reviews = p.workerReviews, !reviews.isEmpty {
                 Divider().padding(.horizontal, 14)

@@ -19,6 +19,12 @@ struct ReviewsView: View {
     private var avgTeamwork:      Double { avg(reviews.map { Double($0.teamwork) }) }
     private var avgReliability:   Double { avg(reviews.map { Double($0.reliability) }) }
     private var avgUnderPressure: Double { avg(reviews.map { Double($0.underPressure) }) }
+    /// nil, solange keine Bewertung "Work quality" enthaelt (Bestandsdaten) → Durchschnitt nur ueber vorhandene Werte
+    private var avgWorkQuality: Double? {
+        let values = reviews.compactMap { $0.workQuality }.filter { $0 > 0 }
+        return values.isEmpty ? nil : Double(values.reduce(0, +)) / Double(values.count)
+    }
+    private var topWorkerCount: Int { reviewsData?.topWorkerCount ?? reviews.filter(\.isTopWorker).count }
 
     var body: some View {
         SubScreenShell(title: "Your Ratings") {
@@ -64,6 +70,9 @@ struct ReviewsView: View {
                     starsRow(rating: reviewsData?.overallRating ?? 0, size: 22)
                     Text("Basierend auf \(reviewsData?.totalJobs ?? 0) Jobs")
                         .font(.system(size: 13)).foregroundColor(.secondary)
+                    if topWorkerCount > 0 {
+                        TopWorkerBadge(text: "Top Worker ×\(topWorkerCount)")
+                    }
                     VStack(spacing: 3) {
                         ForEach([5, 4, 3, 2, 1], id: \.self) { star in
                             HStack(spacing: 6) {
@@ -106,6 +115,10 @@ struct ReviewsView: View {
             SkillBar(label: "Reliability",            rating: avgReliability)
             Divider().padding(.leading, 14)
             SkillBar(label: "Working under Pressure", rating: avgUnderPressure)
+            if let quality = avgWorkQuality {
+                Divider().padding(.leading, 14)
+                SkillBar(label: "Work Quality", rating: quality)
+            }
         }
         .background(Color(uiColor: .systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
@@ -207,6 +220,7 @@ private struct ReviewCard: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(review.companyName)
                         .font(.system(size: 14, weight: .semibold)).foregroundColor(.primary)
+                    if review.isTopWorker { TopWorkerBadge(text: "Top Worker") }
                     Text("\(review.jobType) · \(review.date.formatted(date: .abbreviated, time: .omitted))")
                         .font(.system(size: 12)).foregroundColor(.secondary)
                 }
@@ -227,6 +241,7 @@ private struct ReviewCard: View {
                 MiniSkill(label: "Team",   value: review.teamwork)
                 MiniSkill(label: "Rely.",  value: review.reliability)
                 MiniSkill(label: "Press.", value: review.underPressure)
+                if let quality = review.workQuality { MiniSkill(label: "Quality", value: quality) }
             }
         }
         .padding(14)
@@ -243,5 +258,21 @@ private struct MiniSkill: View {
             Text("\(value)").font(.system(size: 13, weight: .bold)).foregroundColor(SS.primary)
             Text(label).font(.system(size: 10)).foregroundColor(.secondary)
         }
+    }
+}
+
+/// Auszeichnung "Top Worker" (Arbeitgeber hat die Leistung hervorgehoben)
+struct TopWorkerBadge: View {
+    let text: String
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "star.circle.fill").font(.system(size: 11))
+            Text(text).font(.system(size: 11, weight: .bold))
+        }
+        .foregroundColor(Color(red: 0.62, green: 0.40, blue: 0.0))
+        .padding(.horizontal, 8).padding(.vertical, 3)
+        .background(Color.yellow.opacity(0.25))
+        .clipShape(Capsule())
+        .accessibilityLabel(text)
     }
 }

@@ -103,6 +103,8 @@ struct CompanyProfileDTO: Decodable {
     let responseRate:         Double?
     /// Median bis zur ersten Antwort in Stunden, nil = zu wenig Daten
     let typicalResponseHours: Double?
+    /// 0...100, nil = zu wenig Antworten (< 3), siehe backend utils/reviewLogic.js
+    let wouldWorkAgainPercent: Int?
     let about:            String?
     let website:          String?
     let phone:            String?

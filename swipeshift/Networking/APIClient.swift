@@ -741,6 +741,8 @@ final class APIClient {
         let workEnvironment:        Int
         let jobDescriptionAccuracy: Int
         let overallExperience:      Int
+        let wouldWorkAgain:         Bool
+        let publishConsent:         Bool
         let comment:                String?
     }
 
@@ -903,6 +905,29 @@ final class APIClient {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return try decoder.decode(W.self, from: data).reviews
+    }
+
+    func fetchReviewDrafts() async throws -> [ReviewDraftItem] {
+        let req = try makeRequest(path: "/employer/reviews/drafts", method: "GET")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+        struct W: Decodable { let drafts: [ReviewDraftItem] }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(W.self, from: data).drafts
+    }
+
+    func saveReviewDraft(applyId: String, values: ReviewDraftValues) async throws {
+        var req = try makeRequest(path: "/employer/reviews/drafts/\(applyId)", method: "PUT")
+        req.httpBody = try JSONEncoder().encode(values)
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+    }
+
+    func deleteReviewDraft(applyId: String) async throws {
+        let req = try makeRequest(path: "/employer/reviews/drafts/\(applyId)", method: "DELETE")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
     }
 
     func submitReview(_ request: SubmitReviewRequest) async throws {

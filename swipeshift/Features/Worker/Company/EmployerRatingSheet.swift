@@ -18,13 +18,16 @@ struct EmployerRatingSheet: View {
     @State private var workEnvironment:        Int = 0
     @State private var jobDescriptionAccuracy: Int = 0
     @State private var overallExperience:      Int = 0
+    @State private var wouldWorkAgain:         Bool? = nil
+    @State private var publishConsent          = false
     @State private var comment                 = ""
     @State private var isSubmitting            = false
     @State private var errorMessage:           String? = nil
 
     private var isValid: Bool {
         communication > 0 && paymentFairness > 0 &&
-        workEnvironment > 0 && jobDescriptionAccuracy > 0 && overallExperience > 0
+        workEnvironment > 0 && jobDescriptionAccuracy > 0 && overallExperience > 0 &&
+        wouldWorkAgain != nil && publishConsent
     }
 
     var body: some View {
@@ -59,6 +62,22 @@ struct EmployerRatingSheet: View {
                         ratingRow("Overall Experience", value: $overallExperience,
                                   desc: "How would you rate this employer overall?")
                     }
+                    .background(Color(uiColor: .systemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
+                    .padding(.horizontal, 16)
+
+                    // Would work again
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Would you work for this company again?")
+                            .font(.system(size: 14, weight: .semibold))
+                        HStack(spacing: 10) {
+                            workAgainButton("Yes", icon: "hand.thumbsup.fill", value: true)
+                            workAgainButton("No", icon: "hand.thumbsdown.fill", value: false)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
                     .background(Color(uiColor: .systemBackground))
                     .clipShape(RoundedRectangle(cornerRadius: 16))
                     .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
@@ -100,13 +119,22 @@ struct EmployerRatingSheet: View {
                         }
                     }
 
-                    if let err = errorMessage {
-                        Text(err)
-                            .font(.system(size: 13))
-                            .foregroundColor(.red)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 24)
+                    // Zustimmung zur Veroeffentlichung (Pflicht)
+                    Button { publishConsent.toggle() } label: {
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: publishConsent ? "checkmark.square.fill" : "square")
+                                .font(.system(size: 22))
+                                .foregroundColor(publishConsent ? SS.primary : Color.secondary.opacity(0.5))
+                            Text("I confirm this rating is honest and based on my own experience. It will be shown on the company profile.")
+                                .font(.system(size: 13))
+                                .foregroundColor(.primary)
+                                .multilineTextAlignment(.leading)
+                            Spacer(minLength: 0)
+                        }
                     }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 16)
+                    .accessibilityAddTraits(publishConsent ? .isSelected : [])
 
                     // Submit
                     Button {
@@ -143,6 +171,30 @@ struct EmployerRatingSheet: View {
         .onChange(of: comment) { _, new in
             if new.count > 400 { comment = String(new.prefix(400)) }
         }
+        .alert("Could not submit review", isPresented: Binding(
+            get: { errorMessage != nil },
+            set: { if !$0 { errorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { errorMessage = nil }
+        } message: {
+            Text(errorMessage ?? "")
+        }
+    }
+
+    private func workAgainButton(_ title: String, icon: String, value: Bool) -> some View {
+        let selected = wouldWorkAgain == value
+        return Button { wouldWorkAgain = value } label: {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                Text(title).font(.system(size: 14, weight: .semibold))
+            }
+            .foregroundColor(selected ? .white : .primary)
+            .frame(maxWidth: .infinity).padding(.vertical, 12)
+            .background(selected ? SS.primary : Color.secondary.opacity(0.12))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     // MARK: - Rating Row
@@ -200,13 +252,15 @@ struct EmployerRatingSheet: View {
                     workEnvironment:        workEnvironment,
                     jobDescriptionAccuracy: jobDescriptionAccuracy,
                     overallExperience:      overallExperience,
+                    wouldWorkAgain:         wouldWorkAgain ?? false,
+                    publishConsent:         publishConsent,
                     comment:               comment.isEmpty ? nil : comment
                 )
             )
             onSubmitted()
             dismiss()
         } catch {
-            errorMessage = "Could not submit review. Please try again."
+            errorMessage = error.localizedDescription
         }
         isSubmitting = false
     }

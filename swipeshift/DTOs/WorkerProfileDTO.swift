@@ -41,6 +41,7 @@ struct WorkerRatingBreakdown: Decodable {
     let teamwork: Double?
     let reliability: Double?
     let underPressure: Double?
+    let workQuality: Double?
 }
 
 struct WorkerCategoryCount: Decodable, Identifiable {
@@ -54,6 +55,7 @@ struct WorkerProfileStats: Decodable {
     let overallRating: Double?
     let ratings: WorkerRatingBreakdown?
     let wouldRehirePercent: Int?
+    let topWorkerCount: Int?
     let completedJobs: Int
     let completedByCategory: [WorkerCategoryCount]
 }
@@ -64,5 +66,6 @@ struct WorkerProfileReview: Decodable, Identifiable {
     let createdAt: Date
     let rating: Double?
     let wouldRehire: Bool
+    let topWorker: Bool?
     var id: String { "\(createdAt.timeIntervalSince1970)-\(comment.prefix(20))" }
 }

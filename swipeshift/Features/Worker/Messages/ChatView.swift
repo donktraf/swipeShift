@@ -93,13 +93,14 @@ struct ChatView: View {
         }
         .sheet(isPresented: $showRatingSheet) {
             if isEmployerMode {
-                ReviewFormSheet(
+                // workerId/jobCategory kennt der Chat-Kontext nicht; das Formular nutzt sie nicht
+                ChatReviewFormLoader(
                     review: PendingReviewItem(
                         applyId:     conversation.applyId,
                         workerId:    "",
                         workerName:  conversation.company,
                         workerPhoto: nil,
-                        jobId:       "",
+                        jobId:       conversation.jobId,
                         jobTitle:    conversation.jobTitle,
                         jobCategory: "",
                         shiftDate:   conversation.jobDate,
@@ -320,5 +321,53 @@ extension ChatView {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .background(Color(uiColor: .systemBackground))
+    }
+}
+
+
+// MARK: - ChatReviewFormLoader
+
+/// Laedt einen vorhandenen Entwurf fuer diese Bewerbung, bevor das Formular editierbar wird
+/// (sonst wuerde "Save as Draft" den Entwurf mit Leerwerten ueberschreiben).
+private struct ChatReviewFormLoader: View {
+    let review: PendingReviewItem
+    let onSuccess: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var draft: ReviewDraftValues? = nil
+    @State private var isLoaded = false
+    @State private var loadError: String? = nil
+
+    var body: some View {
+        Group {
+            if isLoaded {
+                ReviewFormSheet(review: review, initialDraft: draft, onSuccess: onSuccess)
+            } else {
+                VStack(spacing: 14) {
+                    ProgressView()
+                    Text("Loading review…").font(.system(size: 13)).foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .task { await load() }
+        .alert("Could not load draft", isPresented: Binding(
+            get: { loadError != nil },
+            set: { if !$0 { loadError = nil } }
+        )) {
+            Button("OK", role: .cancel) { dismiss() }
+        } message: {
+            Text(loadError ?? "")
+        }
+    }
+
+    private func load() async {
+        do {
+            let drafts = try await APIClient.shared.fetchReviewDrafts()
+            draft = drafts.first { $0.review.applyId == review.applyId }?.draft
+            isLoaded = true
+        } catch {
+            loadError = error.localizedDescription
+        }
     }
 }

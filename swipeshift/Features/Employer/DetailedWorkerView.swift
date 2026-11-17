@@ -139,6 +139,9 @@ struct DetailedWorkerView: View {
 
                     if let stats {
                         ratingLine(stats)
+                        if let top = stats.topWorkerCount, top > 0 {
+                            TopWorkerBadge(text: "Top Worker ×\(top)")
+                        }
                     }
 
                     HStack(spacing: 12) {
@@ -241,6 +244,18 @@ struct DetailedWorkerView: View {
                     ratingRow(label: "Reliability",    value: ratings.reliability)
                     Divider().padding(.leading, 16)
                     ratingRow(label: "Under Pressure", value: ratings.underPressure)
+                    if ratings.workQuality != nil {
+                        Divider().padding(.leading, 16)
+                        ratingRow(label: "Work Quality", value: ratings.workQuality)
+                    }
+                    if let top = profile.stats.topWorkerCount, top > 0 {
+                        Divider().padding(.leading, 16)
+                        HStack {
+                            TopWorkerBadge(text: "Top Worker ×\(top)")
+                            Spacer()
+                        }
+                        .padding(.horizontal, 16).padding(.vertical, 12)
+                    }
 
                     if let rehire = profile.stats.wouldRehirePercent {
                         Divider().padding(.leading, 16)
@@ -311,6 +326,7 @@ struct DetailedWorkerView: View {
                 if let rating = review.rating {
                     StarRow(value: rating, size: 10)
                 }
+                if review.topWorker == true { TopWorkerBadge(text: "Top Worker") }
                 Text([review.jobTitle, review.createdAt.formatted(date: .abbreviated, time: .omitted)]
                         .compactMap { $0 }.joined(separator: " · "))
                     .font(.system(size: 12))
