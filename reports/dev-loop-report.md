@@ -631,3 +631,12 @@ Fehlschlag.
 **Review 1:** Kritisch – Finanzen-Screen hätte mit der neuen Verdienstliste nicht mehr geladen (Datumsformat mit Millisekunden; Altfehler-Muster). Warnungen: „Apply“ bei gespeicherten Jobs auch bei vollen/vergangenen Jobs, Rating-Tags nur aus den letzten 20 Bewertungen, Verdienstliste auf 20 begrenzt, Konto-Löschen loggte auch bei Fehler aus.
 **Runde 2 – implementer:** ein gemeinsamer Datums-Decoder für alle 19 Stellen, „Apply“ nur bei freien Plätzen und zukünftigen Jobs, Tags über alle Bewertungen, Liste bis 100 mit „Showing latest N of M“, Konto-Löschen zeigt Fehler statt Logout, Kürzen an Zeichengrenzen. Vom Orchestrator nachgeprüft: 153/153 grün, Build ok.
 **Bewusst nicht gebaut:** Notizen im Kalender (kein Feld), Netto/Steuer/Tips, „Not interested“/Teilen bei gespeicherten Jobs.
+
+---
+
+# Dev-Loop 2026-11-18 — kleinere Lücken, Paket B (Arbeitgeber-Seite)
+
+**Runde 1 – implementer:** gemeinsame Bewerber-Zusammenfassung `src/utils/applicantSummary.js` (Ø-Bewertung, Anzahl, abgeschlossene Jobs, bis 3 Tags aus Erfahrung/Skills, 18+-Badge ohne Alter, Verfügbarkeit) + `src/applicantSummaries.js` (3 Abfragen für alle Bewerber, kein N+1); Bewerberkarten, gemerkte Bewerber (Foto, Stadt, Bewertung, Jobs, Erfahrung, Kurz-Bio, „View profile“), Arbeitgeber-Kalender (Kategorie, Schichtkosten, bestätigte Worker mit Team-Ø), Chat-Button nach Annahme (Karte + Detailprofil). Nebenbei: Bewerberliste übernimmt Angenommen/Abgelehnt aus dem Server (vorher blieb alles „Pending“), Fehler in gemerkten Bewerbern/Kalender sichtbar.
+**Tester:** 173/173 grün (+11 Randfall-Tests), Build ok, keine Bugs.
+**Review:** vom Nutzer gestoppt; Orchestrator hat stattdessen geprüft, dass keine privaten Felder (Alter, Telefon, E-Mail) im Payload landen.
+**Offen:** Klick-Test; Bestätigung, dass der „New Applicants“-Zähler im Dashboard durch die übernommenen Status unverändert stimmt.

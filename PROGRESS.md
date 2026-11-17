@@ -795,3 +795,10 @@ Gefunden beim Profile-Screen-Abgleich: Legal-Schalter (Worker + Arbeitgeber) und
 - Login: zuletzt genutzte Methode wird angezeigt (`Security/LastLoginMethod.swift`)
 - Behoben: ein gemeinsamer Datums-Decoder (mit/ohne Millisekunden) für alle API-Aufrufe; Konto löschen loggt bei Fehler nicht mehr aus
 - Backend-utils: `companyStats.js`, `ratingTags.js`, `distanceMilesBetween`, `currentWeekRange` (+ Tests)
+
+### Kleinere Lücken Arbeitgeber-Seite (2026-11-18)
+- Backend: `src/utils/applicantSummary.js` (+ Tests) und `src/applicantSummaries.js` — eine Zusammenfassung pro Worker (Ø-Bewertung, Jobs, Tags, 18+-Badge ohne Alter, Verfügbarkeit), gebündelt geladen; genutzt von `GET /employer/applicants`, `/employer/saved-applicants`, `/employer/calendar`
+- Bewerberkarte: Bewertung („New“ ohne), Jobs, Erfahrungs-/Skill-Tags, 18+, „Applied 2h ago“, Verfügbarkeit, „Chat“ nach Annahme; Status Angenommen/Abgelehnt kommt jetzt vom Server
+- Gemerkte Bewerber: Foto, Stadt, Bewertung, Jobs, stärkste Erfahrung, Kurz-Bio, „View profile“
+- Arbeitgeber-Kalender: Kategorie, Schichtkosten, bestätigte Worker (antippbar) mit Team-Ø
+- Worker-Detailprofil: „Chat“-Button nach Annahme; Bewerbungsliste (Worker) zeigt die Anzahl Jobs pro Monat
