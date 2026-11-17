@@ -158,8 +158,9 @@ Backend
 5. Was noch NICHT implementiert ist
 Der ueberwiegende Teil der Wireframe-Anforderungen ist implementiert. Bekannte offene Detail-Punkte
 (siehe PROGRESS.md, TODO-Kommentare im Code):
-• Active Sessions + 2FA (E-Mail-Code) sind umgesetzt (2026-11-17, siehe PROGRESS.md). Offen: Standort
-  pro Geraet (braucht IP-Geolocation), Authenticator-App (TOTP) als Alternative, eigenes
+• Active Sessions + 2FA sind umgesetzt (E-Mail-Code 2026-11-17, Authenticator-App/TOTP + ungefaehre
+  Stadt pro Geraet 2026-11-18, siehe PROGRESS.md). Backend braucht ausserhalb von development/test
+  TOTP_ENCRYPTION_KEY + BACKUP_CODE_PEPPER (siehe swipeshift-backend/.env.example). Offen: eigenes
   Employer-"Payments & Billing" (Employer nutzt aktuell die Worker-Account-Settings)
 • DetailedWorkerView: seit 2026-11-17 echte Daten (GET /employer/workers/:userId). Offen: Erfahrungslevel
   pro Kategorie (nicht im Worker-Modell), Sprachen, Zuverlaessigkeit/No-Show-Quote
