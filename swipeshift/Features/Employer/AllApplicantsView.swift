@@ -44,6 +44,10 @@ struct Applicant: Identifiable, Decodable {
 // MARK: - AllApplicantsView
 
 struct AllApplicantsView: View {
+    /// Optional: nur Bewerber dieses Jobs anzeigen (Schnellaktion auf der Jobkarte)
+    var jobId: String? = nil
+    var jobTitle: String? = nil
+
     @State private var applicants: [Applicant] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
@@ -76,7 +80,7 @@ struct AllApplicantsView: View {
     }
 
     var body: some View {
-        SubScreenShell(title: "All Applicants") {
+        SubScreenShell(title: jobTitle ?? "All Applicants") {
             VStack(spacing: 16) {
                 // Filter-Bar
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -204,7 +208,10 @@ struct AllApplicantsView: View {
     private func load() async {
         isLoading = true
         errorMessage = nil
-        do { applicants = try await APIClient.shared.fetchApplicants() }
+        do {
+            let all = try await APIClient.shared.fetchApplicants()
+            applicants = jobId.map { id in all.filter { $0.job?.id == id } } ?? all
+        }
         catch { errorMessage = error.localizedDescription }
         isLoading = false
     }

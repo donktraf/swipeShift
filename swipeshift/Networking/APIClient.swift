@@ -573,6 +573,30 @@ final class APIClient {
         try validate(response: response, data: data)
     }
 
+    // PUT /jobs/:id — Draft bearbeiten (request.status "published" veroeffentlicht direkt)
+    func updateJob(id: String, request: PostJobRequest) async throws {
+        var req = try makeRequest(path: "/jobs/\(id)", method: "PUT")
+        req.httpBody = try JSONEncoder().encode(request)
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try validate(response: response, data: data)
+    }
+
+    // DELETE /jobs/:id — Draft loeschen
+    func deleteJob(id: String) async throws {
+        let req = try makeRequest(path: "/jobs/\(id)", method: "DELETE")
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try validate(response: response, data: data)
+    }
+
+    // GET /jobs/:id — voller Job fuer PostJobView im Bearbeiten-Modus
+    func fetchJobForEditing(id: String) async throws -> EditableJob {
+        let req = try makeRequest(path: "/jobs/\(id)", method: "GET")
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try validate(response: response, data: data)
+        struct Resp: Decodable { let job: EditableJob }
+        return try JSONDecoder().decode(Resp.self, from: data).job
+    }
+
     // GET /jobs/mine — eigene Jobs des Arbeitgebers
     func fetchMyJobs() async throws -> [EmployerJob] {
         let req = try makeRequest(path: "/jobs/mine", method: "GET")

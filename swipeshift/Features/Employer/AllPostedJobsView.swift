@@ -7,7 +7,7 @@ import SwiftUI
 
 // MARK: - EmployerJob Model
 
-struct EmployerJob: Identifiable, Decodable {
+struct EmployerJob: Identifiable, Decodable, Hashable {
     let id: String
     let title: String
     let company: String
@@ -20,6 +20,22 @@ struct EmployerJob: Identifiable, Decodable {
     let logoEmoji: String
     let applicantCount: Int
     let createdAt: String
+    let updatedAt: String?
+
+    /// Zeitpunkt der letzten Aenderung (Fallback createdAt)
+    private static let isoWithFraction: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    private static let isoPlain = ISO8601DateFormatter()
+
+    var lastSavedDate: Date? {
+        for raw in [updatedAt, createdAt].compactMap({ $0 }) {
+            if let d = Self.isoWithFraction.date(from: raw) ?? Self.isoPlain.date(from: raw) { return d }
+        }
+        return nil
+    }
 
     var statusEnum: JobStatus {
         switch status {
@@ -69,6 +85,10 @@ struct AllPostedJobsView: View {
     @State private var jobToCancel: EmployerJob? = nil
     @State private var cancelReason = ""
     @State private var jobToPublish: EmployerJob? = nil
+    @State private var jobToDelete: EmployerJob? = nil
+    @State private var jobToEdit: EmployerJob? = nil
+    @State private var jobForApplicants: EmployerJob? = nil
+    @State private var actionError: String? = nil
 
     // Payment Navigation
     @State private var jobForPayment: EmployerJob? = nil
@@ -86,7 +106,9 @@ struct AllPostedJobsView: View {
         case .active:
             return jobs.filter { $0.status == "published" || $0.status == "inProgress" }
         case .draft:
+            // Zuletzt bearbeitete Entwuerfe zuerst
             return jobs.filter { $0.status == "draft" }
+                .sorted { ($0.lastSavedDate ?? .distantPast) > ($1.lastSavedDate ?? .distantPast) }
         case .completed:
             return jobs.filter { $0.status == "completed" }
         case .past:
@@ -118,6 +140,9 @@ struct AllPostedJobsView: View {
                                 job: job,
                                 onCancel:       { jobToCancel  = job },
                                 onPublish:      { jobToPublish = job },
+                                onEdit:         { jobToEdit = job },
+                                onDelete:       { jobToDelete = job },
+                                onViewApplicants: { jobForApplicants = job },
                                 onViewPayments: {
                                     jobForPayment = job
                                     showPayments  = true
@@ -140,6 +165,34 @@ struct AllPostedJobsView: View {
                     jobLocation: job.location
                 )
             }
+        }
+        .navigationDestination(item: $jobForApplicants) { job in
+            AllApplicantsView(jobId: job.id, jobTitle: job.title)
+        }
+        .sheet(item: $jobToEdit, onDismiss: { Task { await load() } }) { job in
+            PostJobView(editingJobId: job.id)
+        }
+        // Fehler bei Edit/Delete/Publish/Cancel
+        .alert("Something went wrong", isPresented: Binding(
+            get: { actionError != nil },
+            set: { if !$0 { actionError = nil } }
+        )) {
+            Button("OK", role: .cancel) { actionError = nil }
+        } message: {
+            Text(actionError ?? "")
+        }
+        // Delete confirmation (nur Drafts)
+        .alert("Delete this draft?", isPresented: Binding(
+            get: { jobToDelete != nil },
+            set: { if !$0 { jobToDelete = nil } }
+        )) {
+            Button("Delete", role: .destructive) {
+                if let job = jobToDelete { Task { await deleteDraft(job) } }
+                jobToDelete = nil
+            }
+            Button("Cancel", role: .cancel) { jobToDelete = nil }
+        } message: {
+            Text("This can't be undone.")
         }
         // Cancel confirmation
         .alert("Cancel job?", isPresented: Binding(
@@ -268,7 +321,17 @@ struct AllPostedJobsView: View {
             try await APIClient.shared.updateJobStatus(jobId: job.id, status: status, reason: reason)
             await load()
         } catch {
-            errorMessage = error.localizedDescription
+            actionError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func deleteDraft(_ job: EmployerJob) async {
+        do {
+            try await APIClient.shared.deleteJob(id: job.id)
+            await load()
+        } catch {
+            actionError = error.localizedDescription
         }
     }
 }
@@ -279,6 +342,9 @@ private struct PostedJobCard: View {
     let job: EmployerJob
     let onCancel:       () -> Void
     let onPublish:      () -> Void
+    let onEdit:         () -> Void
+    let onDelete:       () -> Void
+    let onViewApplicants: () -> Void
     let onViewPayments: () -> Void
 
     var body: some View {
@@ -306,6 +372,11 @@ private struct PostedJobCard: View {
                             .padding(.vertical, 3)
                             .background(job.statusEnum.color)
                             .clipShape(Capsule())
+                    }
+                    if job.status == "draft", let saved = job.lastSavedDate {
+                        Text("Last saved \(saved.formatted(.relative(presentation: .named)))")
+                            .font(.system(size: 12))
+                            .foregroundColor(.orange)
                     }
                     Text(job.location)
                         .font(.system(size: 13))
@@ -336,9 +407,14 @@ private struct PostedJobCard: View {
                 Divider().padding(.horizontal, 14)
                 HStack(spacing: 8) {
                     if job.status == "draft" {
+                        actionButton(label: "Edit", color: SS.primary, action: onEdit)
                         actionButton(label: "Publish", color: SS.primary, action: onPublish)
+                        actionButton(label: "Delete", color: .red, action: onDelete)
                     }
-                    if job.status != "cancelled" && job.status != "completed" {
+                    if job.status == "published" && job.applicantCount > 0 {
+                        actionButton(label: "View Applicants", color: SS.primary, action: onViewApplicants)
+                    }
+                    if job.status != "cancelled" && job.status != "completed" && job.status != "draft" {
                         actionButton(label: "Cancel", color: .red, action: onCancel)
                     }
                     if showPayBtn {

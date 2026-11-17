@@ -76,6 +76,18 @@ struct PostJobView: View {
     @EnvironmentObject var userStore: UserStore
     @Environment(\.dismiss) private var dismiss
 
+    /// Gesetzt = Bearbeiten-Modus fuer einen bestehenden Draft ("Edit Draft", PUT statt POST)
+    let editingJobId: String?
+    @State private var isLoadingDraft = false
+    @State private var draftLoadError: String? = nil
+    @State private var skipNextLocationReset = false
+
+    init(editingJobId: String? = nil) {
+        self.editingJobId = editingJobId
+    }
+
+    private var isEditing: Bool { editingJobId != nil }
+
     // Job Basics
     @State private var title = ""
     @State private var locationText = ""
@@ -154,6 +166,36 @@ struct PostJobView: View {
             footerBar
         }
         .navigationBarHidden(true)
+        .overlay {
+            // Laden fehlgeschlagen: kein (leeres) Formular, sonst koennte der Draft mit Defaults ueberschrieben werden
+            if let draftLoadError {
+                ZStack {
+                    Color(uiColor: .systemGroupedBackground).ignoresSafeArea()
+                    VStack(spacing: 14) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.system(size: 36))
+                            .foregroundColor(.orange)
+                        Text("Couldn't load this draft")
+                            .font(.system(size: 17, weight: .semibold))
+                        Text(draftLoadError)
+                            .font(.system(size: 14))
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                        Button("Retry") { Task { await loadDraftIfNeeded() } }
+                            .buttonStyle(SSPrimaryButtonStyle())
+                        Button("Close") { dismiss() }
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.horizontal, 40)
+                }
+            } else if isLoadingDraft {
+                ZStack {
+                    Color(uiColor: .systemGroupedBackground).ignoresSafeArea()
+                    ProgressView()
+                }
+            }
+        }
+        .task { await loadDraftIfNeeded() }
         .sheet(isPresented: $showConfirmSheet) {
             PostJobConfirmSheet(
                 jobTitle: title,
@@ -189,7 +231,7 @@ struct PostJobView: View {
 
             Spacer()
 
-            Text("Post a Job")
+            Text(isEditing ? "Edit Draft" : "Post a Job")
                 .font(.system(size: 17, weight: .semibold))
 
             Spacer()
@@ -221,6 +263,8 @@ struct PostJobView: View {
                         TextField("City or address", text: $locationText)
                             .font(.system(size: 15))
                             .onChange(of: locationText) { _, newValue in
+                                // Vorbefuellung im Bearbeiten-Modus: Koordinaten behalten, keine Vorschlaege oeffnen
+                                if skipNextLocationReset { skipNextLocationReset = false; return }
                                 locationLat = nil
                                 locationLng = nil
                                 showLocationSuggestions = true
@@ -539,7 +583,7 @@ struct PostJobView: View {
                     pendingStatus = "draft"
                     showConfirmSheet = true
                 } label: {
-                    Text("Save as Draft")
+                    Text(isEditing ? "Save Draft" : "Save as Draft")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(SS.primary)
                         .frame(maxWidth: .infinity)
@@ -578,6 +622,41 @@ struct PostJobView: View {
         }
     }
 
+    // MARK: - Draft laden (Bearbeiten-Modus)
+    @MainActor
+    private func loadDraftIfNeeded() async {
+        guard let editingJobId, !isLoadingDraft, title.isEmpty else { return }
+        isLoadingDraft = true
+        draftLoadError = nil
+        defer { isLoadingDraft = false }
+        do {
+            let job = try await APIClient.shared.fetchJobForEditing(id: editingJobId)
+            title = job.title
+            if !job.location.isEmpty && job.location != locationText { skipNextLocationReset = true }
+            locationText = job.location
+            locationLat = job.lat
+            locationLng = job.lng
+            selectedCategory = job.category ?? ""
+            selectedTags = Set(job.tags)
+            let loaded = job.shifts.compactMap { $0.toDraftShift() }
+            shifts = loaded.isEmpty ? [DraftShift()] : loaded
+            numberOfWorkers = max(1, job.openSpots)
+            if let pay = job.payAmount, pay > 0 {
+                hourlyRateText = pay.truncatingRemainder(dividingBy: 1) == 0 ? String(Int(pay)) : String(pay)
+            }
+            jobDescription = job.jobDescription ?? ""
+            tasks = job.tasks.isEmpty ? [""] : job.tasks
+            selectedDressCode = job.dressCode ?? ""
+            selectedLanguages = Set(job.languages)
+            minAgeText = job.minAge.map(String.init) ?? ""
+            selectedExpLevel = job.experienceLevel ?? ""
+            selectedPayFreq = job.paymentMethod ?? ""
+            selectedContractType = job.contractType ?? ""
+        } catch {
+            draftLoadError = error.localizedDescription
+        }
+    }
+
     // MARK: - Submit
     @MainActor
     private func submit() async {
@@ -612,7 +691,11 @@ struct PostJobView: View {
         )
 
         do {
-            try await APIClient.shared.postJob(request)
+            if let editingJobId {
+                try await APIClient.shared.updateJob(id: editingJobId, request: request)
+            } else {
+                try await APIClient.shared.postJob(request)
+            }
             isSubmitting = false
             dismiss()
         } catch {
@@ -955,4 +1038,42 @@ private struct MultiPickerRow: View {
         }
         .background(Color(uiColor: .systemBackground))
     }
+}
+
+// MARK: - EditableJob (GET /jobs/:id → Bearbeiten-Modus)
+struct EditableJob: Decodable {
+    struct Shift: Decodable {
+        let startTimeISO: String?
+        let endTimeISO: String?
+
+        func toDraftShift() -> DraftShift? {
+            let iso = ISO8601DateFormatter()
+            let isoFraction = ISO8601DateFormatter()
+            isoFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            func parse(_ raw: String?) -> Date? {
+                guard let raw else { return nil }
+                return iso.date(from: raw) ?? isoFraction.date(from: raw)
+            }
+            guard let start = parse(startTimeISO), let end = parse(endTimeISO) else { return nil }
+            return DraftShift(date: start, startTime: start, endTime: end)
+        }
+    }
+
+    let title: String
+    let location: String
+    let lat: Double?
+    let lng: Double?
+    let category: String?
+    let tags: [String]
+    let shifts: [Shift]
+    let openSpots: Int
+    let payAmount: Double?
+    let jobDescription: String?
+    let tasks: [String]
+    let dressCode: String?
+    let languages: [String]
+    let minAge: Int?
+    let experienceLevel: String?
+    let paymentMethod: String?
+    let contractType: String?
 }
