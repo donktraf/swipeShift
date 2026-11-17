@@ -59,6 +59,8 @@ model User {
   savedCompanies SavedCompany[]
   sessions UserSession[]
   twoFactorCodes TwoFactorCode[]
+  blocksGiven    UserBlock[]  @relation("BlocksGiven")
+  blocksReceived UserBlock[]  @relation("BlocksReceived")
 }
 
 // Eine Login-Sitzung pro Geraet. Jeder JWT traegt die Session-ID (sid);
@@ -413,4 +415,34 @@ model SavedApplicant {
 
   @@unique([employerId, applyId])
   @@index([employerId])
+}
+
+// Nutzer A blockiert Nutzer B (Chat in beide Richtungen gesperrt, Inhalte bleiben lesbar)
+model UserBlock {
+  id        String   @id @default(uuid())
+  blockerId String
+  blockedId String
+  createdAt DateTime @default(now())
+
+  blocker User @relation("BlocksGiven", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked User @relation("BlocksReceived", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerId, blockedId])
+  @@index([blockedId])
+}
+
+// Bewusst OHNE Foreign Keys: Reports ueberleben die Loeschung der Konten (Moderation/Nachweis).
+// Meldung eines Nutzers (Whitelist der Gruende: src/utils/safety.js); wird per Mail an Support gesendet
+model UserReport {
+  id             String   @id @default(uuid())
+  reporterId     String
+  reportedUserId String
+  conversationId String?
+  reason         String
+  details        String?  @db.Text
+  status         String   @default("open")
+  createdAt      DateTime @default(now())
+
+  @@index([reporterId, reportedUserId, conversationId])
+  @@index([status])
 }

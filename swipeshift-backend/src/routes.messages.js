@@ -6,6 +6,7 @@ const { requireAuth } = require("./auth");
 const {
   isTyping, isOnline, isReadByOther, participantFields,
 } = require("./utils/chatPresence");
+const { blockState, isBlockedBetween } = require("./utils/safety");
 
 // Nachricht → iOS ChatMessageDTO. `otherLastReadAt` bestimmt die Lesebestaetigung
 // fuer eigene Nachrichten (fremde Nachrichten haben kein Lese-Flag fuer uns).
@@ -60,6 +61,20 @@ function handle(label, fn) {
   };
 }
 
+// Block-Beziehungen zwischen userId und den Gegenseiten laden (beide Richtungen)
+async function loadBlocks(userId, otherIds) {
+  if (!otherIds.length) return [];
+  return prisma.userBlock.findMany({
+    where: {
+      OR: [
+        { blockerId: userId, blockedId: { in: otherIds } },
+        { blockedId: userId, blockerId: { in: otherIds } },
+      ],
+    },
+    select: { blockerId: true, blockedId: true },
+  });
+}
+
 // ─── Conversation-Status → iOS ConversationStatus ───────────────────────────
 // "active"    → today (shift within 24h) oder upcoming
 // "completed" → completed
@@ -74,7 +89,7 @@ function deriveStatus(job, convStatus) {
 }
 
 // Conversation-Response-Shape für iOS
-function formatConversation(conv, currentUserId) {
+function formatConversation(conv, currentUserId, extra = {}) {
   const job      = conv.job;
   const isWorker = conv.workerId === currentUserId;
 
@@ -101,6 +116,20 @@ function formatConversation(conv, currentUserId) {
                          })(),
     logoEmoji:       isWorker ? job.logoEmoji : "👤",
     status:          deriveStatus(job, conv.status),
+    counterpartUserId:   isWorker ? conv.employerId : conv.workerId,
+    counterpartPhotoUrl: extra.counterpartPhotoUrl ?? null,
+    // Job-Kontext fuer Chat-Header / Quick-Info-Karte
+    location:        job.location ?? "",
+    payText:         job.payText ?? "",
+    payAmount:       job.payAmount ?? null,
+    shiftText:       job.shiftText ?? "",
+    startTime:       job.startTime ?? null,
+    endTime:         job.endTime ?? null,
+    // Nach Jobende: Zahlungsstatus + "gemerkt"-Zustand der Gegenseite (Worker: Firma, Employer: Worker)
+    isPaid:          conv.apply?.isPaid ?? false,
+    isCounterpartSaved: extra.isCounterpartSaved ?? false,
+    blockedByMe:     extra.blockedByMe ?? false,
+    blockedByOther:  extra.blockedByOther ?? false,
     jobDate:         job.startTime ?? conv.createdAt,
     lastMessage:     lastMsg?.text ?? "",
     lastMessageTime: lastMsg?.createdAt ?? conv.createdAt,
@@ -134,8 +163,12 @@ router.get("/", requireAuth, handle("GET /messages", async (req, res) => {
       job: {
         select: {
           id: true, title: true, company: true, logoEmoji: true,
-          startTime: true, payAmount: true, payText: true,
+          startTime: true, endTime: true, payAmount: true, payText: true,
+          location: true, shiftText: true,
         },
+      },
+      apply: {
+        select: { isPaid: true, savedApplicant: { select: { employerId: true } } },
       },
       messages: {
         orderBy: { createdAt: "asc" },
@@ -157,6 +190,29 @@ router.get("/", requireAuth, handle("GET /messages", async (req, res) => {
   });
   const otherMap = Object.fromEntries(others.map(u => [u.id, u]));
 
+  // Profilfotos: Worker sieht Firmenlogo des Employers, Employer sieht Worker-Foto
+  const photoMap = {};
+  if (isWorker) {
+    const emps = await prisma.employer.findMany({
+      where: { userId: { in: otherIds } }, select: { userId: true, companyLogoUrl: true },
+    });
+    emps.forEach(e => { photoMap[e.userId] = e.companyLogoUrl; });
+  } else {
+    const wks = await prisma.worker.findMany({
+      where: { userId: { in: otherIds } }, select: { userId: true, profilePhotoUrl: true },
+    });
+    wks.forEach(w => { photoMap[w.userId] = w.profilePhotoUrl; });
+  }
+
+  const blocks = await loadBlocks(userId, otherIds);
+
+  // Worker: gemerkte Firmen (nach Firmenname)
+  const savedCompanyNames = isWorker
+    ? new Set((await prisma.savedCompany.findMany({
+        where: { userId }, select: { companyName: true },
+      })).map(c => c.companyName.toLowerCase()))
+    : new Set();
+
   const result = conversations.map(conv => {
     const enriched = { ...conv };
     const otherId = isWorker ? conv.employerId : conv.workerId;
@@ -164,7 +220,13 @@ router.get("/", requireAuth, handle("GET /messages", async (req, res) => {
     if (!isWorker) {
       enriched.worker = enriched.otherUser;
     }
-    return formatConversation(enriched, userId);
+    return formatConversation(enriched, userId, {
+      counterpartPhotoUrl: otherId ? (photoMap[otherId] ?? null) : null,
+      isCounterpartSaved:  isWorker
+        ? savedCompanyNames.has((conv.job.company ?? "").toLowerCase())
+        : conv.apply?.savedApplicant?.employerId === userId,
+      ...(otherId ? blockState(blocks, userId, otherId) : {}),
+    });
   });
 
   return res.json(result);
@@ -192,6 +254,11 @@ router.post("/:conversationId", requireAuth, handle("POST /messages/:conversatio
 
   if (conv.status !== "active") {
     return res.status(409).json({ error: "Conversation is closed" });
+  }
+
+  const { otherUserId: peerId } = participantFields(conv, userId);
+  if (peerId && isBlockedBetween(await loadBlocks(userId, [peerId]), userId, peerId)) {
+    return res.status(403).json({ error: "You can't reply to this conversation.", code: "BLOCKED" });
   }
 
   const message = await prisma.message.create({
@@ -249,9 +316,14 @@ router.get("/:conversationId", requireAuth, async (req, res) => {
       orderBy: { createdAt: "asc" },
     });
 
+    const blocked = otherUserId
+      ? blockState(await loadBlocks(userId, [otherUserId]), userId, otherUserId)
+      : { blockedByMe: false, blockedByOther: false };
+
     return res.json({
       messages: messages.map(m => formatMessage(m, userId, conv[otherReadField])),
       presence: formatPresence(conv, userId, otherUser),
+      ...blocked,
     });
   } catch (err) {
     console.error("GET /messages/:conversationId error:", err);
@@ -314,7 +386,11 @@ router.post("/:conversationId/typing", requireAuth, async (req, res) => {
       return res.status(409).json({ error: "Conversation is closed" });
     }
 
-    const { myTypingField } = participantFields(conv, userId);
+    const { myTypingField, otherUserId } = participantFields(conv, userId);
+    // Blockiert (egal in welche Richtung): Typing-Ping ignorieren
+    if (otherUserId && isBlockedBetween(await loadBlocks(userId, [otherUserId]), userId, otherUserId)) {
+      return res.json({ ok: true });
+    }
     await setPresenceColumn(conversationId, myTypingField, typing ? new Date() : null);
 
     return res.json({ ok: true });

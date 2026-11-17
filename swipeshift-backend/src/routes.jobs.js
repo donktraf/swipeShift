@@ -8,19 +8,31 @@ const { requireVerifiedEmail } = require("./middlewares/requireVerifiedEmail");
 const { haversineDistance, kmToMiles, milesToKm } = require("./utils/haversine");
 const { geocodeLocation }  = require("./utils/geocode");
 const { buildJobData, validateJobBody, checkDraftAccess } = require("./utils/jobData");
+const { isBlockedBetween } = require("./utils/safety");
 const { normalizeCancellationReason } = require("./utils/applicationStatus");
 
 const router = express.Router();
 
 // Pausierte Arbeitgeber: ihre Jobs sind fuer Worker unsichtbar und nicht bewerbbar
-async function pausedEmployerFilter() {
+// Mit userId zusaetzlich: Arbeitgeber, die mit diesem User einen Block haben (beide Richtungen).
+// Bewusst nur im Feed (GET /jobs, /jobs/nearby) ausgeblendet; Direktaufrufe (Job-Detail, Firmenprofil,
+// Gespeichert, Deep Link) bleiben sichtbar – Bewerben ist dort per BLOCKED-Check in POST /:id/apply gesperrt.
+async function pausedEmployerFilter(userId) {
   const paused = await prisma.user.findMany({
     where: { pausedAt: { not: null }, role: "employer" },
     select: { id: true },
   });
-  if (!paused.length) return {};
+  const hiddenIds = paused.map((u) => u.id);
+  if (userId) {
+    const blocks = await prisma.userBlock.findMany({
+      where: { OR: [{ blockerId: userId }, { blockedId: userId }] },
+      select: { blockerId: true, blockedId: true },
+    });
+    for (const b of blocks) hiddenIds.push(b.blockerId === userId ? b.blockedId : b.blockerId);
+  }
+  if (!hiddenIds.length) return {};
   // OR noetig: NOT IN wuerde Jobs ohne employerId (Seed-Daten) mit ausschliessen
-  return { OR: [{ employerId: null }, { employerId: { notIn: paused.map((u) => u.id) } }] };
+  return { OR: [{ employerId: null }, { employerId: { notIn: hiddenIds } }] };
 }
 
 // ─────────────────────────────────────────────
@@ -139,7 +151,7 @@ router.get("/", requireAuth, requireVerifiedEmail, async (req, res) => {
     }
 
     const baseWhere = {
-      ...(await pausedEmployerFilter()),
+      ...(await pausedEmployerFilter(userId)),
       status: "published",
       ...(seenIds.length > 0 && { id: { notIn: seenIds } }),
       ...(category && { category: { equals: category, mode: "insensitive" } }),
@@ -228,7 +240,7 @@ router.get("/nearby", requireAuth, requireVerifiedEmail, async (req, res) => {
     // Radar zeigt immer alle Jobs — unabhängig von apply/skip
     const allJobs = await prisma.job.findMany({
       where: {
-        ...(await pausedEmployerFilter()),
+        ...(await pausedEmployerFilter(userId)),
         status: "published",
         lat: { not: null },
         lng: { not: null },
@@ -331,6 +343,20 @@ router.post("/:id/apply", requireAuth, requireVerifiedEmail, async (req, res) =>
     }
     if (job.status !== "published" || employerPaused) {
       return res.status(400).json({ error: "JOB_UNAVAILABLE" });
+    }
+
+    // Block zwischen Worker und Arbeitgeber (beide Richtungen) → Bewerbung abgelehnt
+    if (job.employerId) {
+      const blocks = await prisma.userBlock.findMany({
+        where: { OR: [
+          { blockerId: userId, blockedId: job.employerId },
+          { blockerId: job.employerId, blockedId: userId },
+        ] },
+        select: { blockerId: true, blockedId: true },
+      });
+      if (isBlockedBetween(blocks, userId, job.employerId)) {
+        return res.status(403).json({ error: "You can't apply to this employer.", code: "BLOCKED" });
+      }
     }
 
     // Keine offenen Stellen mehr

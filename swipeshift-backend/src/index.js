@@ -19,6 +19,7 @@ const workerRoutes     = require("./routes.worker");
 const messagesRoutes        = require("./routes.messages");
 const companiesRoutes       = require("./routes.companies");
 const notificationsRoutes   = require("./routes.notifications");
+const safetyRoutes          = require("./routes.safety");
 
 const app = express();
 
@@ -44,6 +45,7 @@ app.use("/worker",    workerRoutes);
 app.use("/messages",       messagesRoutes);
 app.use("/companies",      companiesRoutes);
 app.use("/notifications",  notificationsRoutes);
+app.use("/safety",         safetyRoutes);
 
 const PORT = process.env.PORT || 3000;
 
