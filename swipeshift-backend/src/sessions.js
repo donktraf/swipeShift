@@ -7,7 +7,7 @@ const { prisma } = require("./prisma.js");
 const { signToken, JWT_SECRET, SESSION_TTL_MS } = require("./auth");
 const { sendMail } = require("./mailer");
 const { deviceInfoFromRequest } = require("./utils/deviceInfo");
-const { generateCode, hashCode, maskEmail, CODE_TTL_MS } = require("./utils/twoFactor");
+const { generateCode, hashCode, maskEmail, CODE_TTL_MS, TOTP_CHALLENGE_MARKER } = require("./utils/twoFactor");
 
 async function createSession(user, req) {
   const session = await prisma.userSession.create({
@@ -46,6 +46,10 @@ const PURPOSE_COPY = {
   enable: {
     subject: "Turn on two-factor authentication",
     line: "Use this code to turn on two-factor authentication for your SwipeShift account.",
+  },
+  totp_enable: {
+    subject: "Set up an authenticator app",
+    line: "Use this code to confirm it's you before setting up an authenticator app for your SwipeShift account.",
   },
   disable: {
     subject: "Turn off two-factor authentication",
@@ -86,19 +90,40 @@ async function issueTwoFactorCode(user, purpose) {
   // in Produktion fehlt) — lokal den Code in MailHog (http://localhost:8025) ablesen.
   return {
     challengeId: record.id,
+    method: "email",
     emailHint: maskEmail(user.email),
     expiresInSeconds: Math.round(CODE_TTL_MS / 1000),
   };
 }
 
+// TOTP: kein Code, keine Mail — der Datensatz dient nur als Challenge (identifiziert den User,
+// zaehlt Fehlversuche, laeuft ab). Der Marker im codeHash passt zu keinem E-Mail-Code.
+async function issueTotpChallenge(user, purpose) {
+  await prisma.twoFactorCode.updateMany({
+    where: { userId: user.id, purpose, consumedAt: null },
+    data: { consumedAt: new Date() },
+  });
+  const record = await prisma.twoFactorCode.create({
+    data: {
+      userId: user.id,
+      purpose,
+      codeHash: TOTP_CHALLENGE_MARKER,
+      expiresAt: new Date(Date.now() + CODE_TTL_MS),
+    },
+  });
+  return { challengeId: record.id, method: "totp", expiresInSeconds: Math.round(CODE_TTL_MS / 1000) };
+}
+
 // Gemeinsamer Abschluss aller Logins. `extra` landet zusaetzlich in der Antwort (z.B. isNewUser).
 async function completeLogin(user, req, { userOverrides = {}, extra = {} } = {}) {
   if (user.twoFactorEnabled) {
-    const challenge = await issueTwoFactorCode(user, "login");
+    const challenge = user.twoFactorMethod === "totp"
+      ? await issueTotpChallenge(user, "login")
+      : await issueTwoFactorCode(user, "login");
     return { twoFactorRequired: true, ...challenge, ...extra };
   }
   const token = await createSession(user, req);
   return { token, user: authUserPayload(user, userOverrides), ...extra };
 }
 
-module.exports = { createSession, authUserPayload, issueTwoFactorCode, completeLogin };
+module.exports = { createSession, authUserPayload, issueTwoFactorCode, issueTotpChallenge, completeLogin };

@@ -26,7 +26,7 @@ router.get("/me", requireAuth, async (req, res) => {
       select: {
         id: true, email: true, role: true, onboarding: true,
         firstName: true, lastName: true, location: true, lat: true, lng: true,
-        emailVerifiedAt: true, passwordHash: true, createdAt: true, twoFactorEnabled: true, pausedAt: true, legalConsents: true,
+        emailVerifiedAt: true, passwordHash: true, createdAt: true, twoFactorEnabled: true, twoFactorMethod: true, pausedAt: true, legalConsents: true,
         worker: {
           select: {
             bio: true, dateOfBirth: true, jobInterests: true, availability: true, profilePhotoUrl: true,
@@ -66,6 +66,7 @@ router.get("/me", requireAuth, async (req, res) => {
       isEmailVerified:  !!user.emailVerifiedAt,
       hasSocialLogin:   user.passwordHash === "SOCIAL_LOGIN",
       twoFactorEnabled: user.twoFactorEnabled,
+      twoFactorMethod: user.twoFactorEnabled ? (user.twoFactorMethod || "email") : null,
       isPaused:         !!user.pausedAt,
       legalConsents:    consentsToFlags(user.legalConsents),
       createdAt:        user.createdAt,

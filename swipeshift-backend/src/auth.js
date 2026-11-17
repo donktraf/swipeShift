@@ -1,6 +1,7 @@
 // src/auth.js
 const jwt = require("jsonwebtoken");
 const { shouldTouchLastSeen } = require("./utils/chatPresence");
+const { sanitizeCity } = require("./utils/deviceInfo");
 
 // In-Memory-Drosselung fuer lastSeenAt/lastActiveAt-Updates (pro Prozess), damit nicht jeder
 // Request einen DB-Write ausloest. Verlust bei Neustart ist unkritisch.
@@ -22,12 +23,12 @@ function touchLastSeen(userId) {
     .catch(() => lastSeenTouches.delete(userId));
 }
 
-function touchSession(sessionId) {
+function touchSession(sessionId, city) {
   const now = Date.now();
   if (!shouldTouchLastSeen(sessionTouches.get(sessionId), now)) return;
   sessionTouches.set(sessionId, now);
   db()
-    .userSession.update({ where: { id: sessionId }, data: { lastActiveAt: new Date(now) } })
+    .userSession.update({ where: { id: sessionId }, data: { lastActiveAt: new Date(now), ...(city ? { city } : {}) } })
     .catch(() => sessionTouches.delete(sessionId));
 }
 
@@ -91,7 +92,7 @@ async function requireAuth(req, res, next) {
 
   req.auth = payload; // { sub, role, email, sid, iat, exp }
   touchLastSeen(payload.sub);
-  touchSession(payload.sid);
+  touchSession(payload.sid, sanitizeCity(req.headers["x-device-city"]));
   next();
 }
 

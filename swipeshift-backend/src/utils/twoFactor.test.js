@@ -46,10 +46,10 @@ test("deviceInfoFromRequest liest + kuerzt Header, nimmt erste X-Forwarded-For-I
       "x-device-name": "iPhone",
       "x-device-model": "iPhone16,1",
       "x-os-version": "iOS 18.1",
-      "x-forwarded-for": "203.0.113.5, 10.0.0.1",
     },
+    ip: "203.0.113.5",
   });
-  assert.deepEqual(info, { deviceName: "iPhone", deviceModel: "iPhone16,1", osVersion: "iOS 18.1", ipAddress: "203.0.113.5" });
+  assert.deepEqual(info, { deviceName: "iPhone", deviceModel: "iPhone16,1", osVersion: "iOS 18.1", city: null, ipAddress: "203.0.113.5" });
 
   const long = deviceInfoFromRequest({ headers: { "x-device-name": "x".repeat(500) }, ip: "127.0.0.1" });
   assert.equal(long.deviceName.length, 64);

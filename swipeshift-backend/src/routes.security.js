@@ -6,18 +6,32 @@
 //   POST /auth/sessions/revoke-others   alle anderen Geraete abmelden
 //   POST /auth/logout                   aktuelle Sitzung beenden
 //   GET  /auth/2fa                      { enabled }
-//   POST /auth/2fa/request              { action: "enable"|"disable" } → Code per Mail
+//   POST /auth/2fa/request              { action: "enable"|"disable", method?: "email"|"totp" } → Code per Mail
+//                                       (enable+totp: Mail-Code als Re-Auth vor der Einrichtung; auch bei
+//                                       aktiver E-Mail-2FA erlaubt = Wechsel email→totp; bei aktivem TOTP 409)
 //   POST /auth/2fa/confirm              { challengeId, code } → 2FA an/aus
 //   POST /auth/2fa/verify-login         { challengeId, code } → Token (ohne Auth)
-//   POST /auth/2fa/resend               { challengeId } → neuer Login-Code (ohne Auth)
+//   POST /auth/2fa/resend               { challengeId } → neuer Login-Code (ohne Auth; 400 bei TOTP)
+//   POST /auth/2fa/totp/setup           { challengeId, code } (Mail-Code, purpose totp_enable) → { secret, otpauthUri }
+//   POST /auth/2fa/totp/backup-codes    { code } (aktueller TOTP-Code) → neue Backup-Codes
+//   POST /auth/2fa/totp/confirm         { code } → TOTP aktiv + 8 Backup-Codes (einmalig)
+//   Bei Methode totp akzeptieren confirm(disable) und verify-login TOTP-Code ODER Backup-Code.
 
 const express = require("express");
 const rateLimit = require("express-rate-limit");
 const { z } = require("zod");
 const { prisma } = require("./prisma.js");
 const { requireAuth, JWT_SECRET } = require("./auth");
-const { createSession, authUserPayload, issueTwoFactorCode } = require("./sessions");
-const { codeMatches, isCodeUsable } = require("./utils/twoFactor");
+const { createSession, authUserPayload, issueTwoFactorCode, issueTotpChallenge } = require("./sessions");
+const { sendMail } = require("./mailer");
+const {
+  codeMatches, isCodeUsable, TOTP_CHALLENGE_MARKER, MAX_ATTEMPTS,
+  isLockActive, nextLockState, lockOptsFor, minutesUntil, shouldSendLockMail, LOCK_MAIL_INTERVAL_MS,
+  GLOBAL_LOCK_IP, IP_LOCK_OPTS, GLOBAL_LOCK_OPTS,
+  currentMethod, challengeMatchesUser,
+} = require("./utils/twoFactor");
+const totp = require("./utils/totp");
+const { normalizeIp } = require("./utils/clientIp");
 
 const router = express.Router();
 
@@ -52,7 +66,7 @@ router.get("/sessions", requireAuth, async (req, res) => {
       where: activeSessionWhere(req.auth.sub),
       orderBy: { lastActiveAt: "desc" },
       select: {
-        id: true, deviceName: true, deviceModel: true, osVersion: true,
+        id: true, city: true, deviceName: true, deviceModel: true, osVersion: true,
         createdAt: true, lastActiveAt: true,
       },
     });
@@ -109,20 +123,240 @@ router.post("/logout", requireAuth, async (req, res) => {
 
 // ───────────────────────── 2FA ─────────────────────────
 
+// Fehlversuche pro User+IP (Tabelle TwoFactorLock) PLUS nutzerweite Obergrenze ueber alle IPs
+// (Zeile mit ip = "*"). Zaehlen und Sperren werden per Compare-and-Set auf der Zeile entschieden
+// (nextLockState ist rein). Bewusst CAS statt Raw-SQL-Upsert: die Logik bleibt in getestetem JS.
+// Faellt der CAS dauerhaft durch (Dauerkonflikt), wird fail-closed abgelehnt (429).
+function ipOf(req) {
+  return normalizeIp(req?.ip || req?.socket?.remoteAddress);
+}
+
+// Aktive Sperre fuer dieses User+IP-Paar ODER nutzerweit; liefert die laengste oder null
+async function getActiveLock(userId, ip) {
+  const rows = await prisma.twoFactorLock.findMany({ where: { userId, ip: { in: [ip, GLOBAL_LOCK_IP] } } });
+  const active = rows.filter((r) => isLockActive(r));
+  if (!active.length) return null;
+  return active.reduce((a, b) => (new Date(a.lockedUntil) > new Date(b.lockedUntil) ? a : b));
+}
+
+function sendLocked(res, lock) {
+  const m = lock ? minutesUntil(lock.lockedUntil) : 1;
+  return res.status(429).json({
+    error: `Too many wrong codes. Try again in ${m} minute${m === 1 ? "" : "s"}.`,
+    code: "TOO_MANY_ATTEMPTS",
+  });
+}
+
+async function lockResponseIfLocked(res, userId, ip) {
+  const lock = await getActiveLock(userId, ip);
+  if (!lock) return false;
+  sendLocked(res, lock);
+  return true;
+}
+
+// Eine Zeile atomar fortschreiben. true = gezaehlt, false = Dauerkonflikt (fail-closed).
+async function bumpLockRow(userId, ip) {
+  const opts = lockOptsFor(ip);
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const row = await prisma.twoFactorLock.findUnique({ where: { userId_ip: { userId, ip } } });
+    const next = nextLockState(row, Date.now(), opts);
+    const data = { failedCount: next.failedCount, firstFailedAt: next.firstFailedAt, lockedUntil: next.lockedUntil };
+    if (!row) {
+      try {
+        await prisma.twoFactorLock.create({ data: { userId, ip, ...data } });
+      } catch (err) {
+        if (err.code === "P2002") continue; // paralleler Insert → neu lesen
+        throw err;
+      }
+    } else {
+      const { count } = await prisma.twoFactorLock.updateMany({
+        where: { id: row.id, failedCount: row.failedCount, firstFailedAt: row.firstFailedAt, lockedUntil: row.lockedUntil },
+        data,
+      });
+      if (count !== 1) continue; // jemand war schneller → neu lesen
+    }
+    if (next.justLocked) await notifyLock(userId, ip).catch((e) => console.error("2FA lock mail failed:", e.message));
+    return true;
+  }
+  return false;
+}
+
+// Opportunistisch: abgelaufene Zeilen dieses Users loeschen (Fenster vorbei, nicht gesperrt)
+async function cleanupLocks(userId) {
+  const now = Date.now();
+  const idle = [{ lockedUntil: null }, { lockedUntil: { lt: new Date(now) } }];
+  await prisma.twoFactorLock.deleteMany({
+    where: {
+      userId,
+      OR: [
+        { ip: { not: GLOBAL_LOCK_IP }, firstFailedAt: { lt: new Date(now - IP_LOCK_OPTS.windowMs) }, OR: idle },
+        { ip: GLOBAL_LOCK_IP, firstFailedAt: { lt: new Date(now - GLOBAL_LOCK_OPTS.windowMs) }, OR: idle },
+      ],
+    },
+  });
+}
+
+// Zaehlt einen Fehlversuch (IP-Zeile + nutzerweit). Rueckgabe false = nicht sicher gezaehlt → Aufrufer lehnt ab.
+async function registerFailure(userId, ip) {
+  const okIp = await bumpLockRow(userId, ip);
+  const okGlobal = await bumpLockRow(userId, GLOBAL_LOCK_IP);
+  cleanupLocks(userId).catch((e) => console.error("2FA lock cleanup failed:", e.message));
+  if (!okIp || !okGlobal) {
+    console.error(`2FA_LOCK_CONTENTION userId=${userId} ip=${ip} — rejecting (fail-closed)`);
+    return false;
+  }
+  return true;
+}
+
+// Info-Mail nach einer Sperre, max. 1 pro Stunde je User (ueber alle Zeilen)
+async function notifyLock(userId, ip) {
+  const latest = await prisma.twoFactorLock.findFirst({
+    where: { userId, notifiedAt: { not: null } },
+    orderBy: { notifiedAt: "desc" },
+    select: { notifiedAt: true },
+  });
+  if (!shouldSendLockMail(latest?.notifiedAt)) return;
+  const row = await prisma.twoFactorLock.findUnique({ where: { userId_ip: { userId, ip } } });
+  if (!row) return;
+  // Nur einer gewinnt (Race-Schutz fuer die Mail)
+  const { count } = await prisma.twoFactorLock.updateMany({
+    where: { id: row.id, OR: [{ notifiedAt: null }, { notifiedAt: { lt: new Date(Date.now() - LOCK_MAIL_INTERVAL_MS) } }] },
+    data: { notifiedAt: new Date() },
+  });
+  if (count !== 1) return;
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
+  if (!user) return;
+  await sendMail({
+    to: user.email,
+    subject: "Several incorrect two-factor codes on your SwipeShift account",
+    text: "Several incorrect two-factor codes were entered for your SwipeShift account. For security, further code attempts are paused for 15 minutes.\n\nIf this wasn't you, change your password.",
+    html: "<p>Several incorrect two-factor codes were entered for your SwipeShift account. For security, further code attempts are paused for 15 minutes.</p><p>If this wasn't you, change your password.</p>",
+  });
+}
+
+// Ein korrekter Code loescht nur die Zeile der eigenen IP; die nutzerweite Zeile verfaellt ueber ihr Fenster
+async function clearFailures(userId, ip) {
+  await prisma.twoFactorLock.deleteMany({ where: { userId, ip } });
+}
+
+// Alle offenen Codes/Challenges eines Users ungueltig machen (bei Aktivieren/Deaktivieren/Wechsel)
+async function invalidateOpenCodes(userId, client = prisma) {
+  await client.twoFactorCode.updateMany({
+    where: { userId, consumedAt: null },
+    data: { consumedAt: new Date() },
+  });
+}
+
+async function remainingBackupCodes(userId) {
+  return prisma.twoFactorBackupCode.count({ where: { userId, usedAt: null } });
+}
+
+// Zweiter Faktor per TOTP: aktueller Code (einmalig pro Zeitschritt) ODER (allowBackup) Backup-Code (wird verbraucht).
+// Rueckgabe: { ok, usedBackup?, decryptFailed? } — decryptFailed ist ein Serverproblem und zaehlt NICHT als Fehlversuch.
+async function verifyTotpFactor(userId, input, { allowBackup = true } = {}) {
+  if (totp.looksLikeTotpCode(input)) {
+    // CAS: bei Konflikt (parallele Re-Encrypt/Schritt-Verbrauch) einmal neu lesen und wiederholen
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { totpSecretEnc: true, totpLastStep: true },
+      });
+      if (!user?.totpSecretEnc) return { ok: false };
+      let secret;
+      try { secret = totp.decryptSecret(user.totpSecretEnc, userId); }
+      catch (err) {
+        console.error(`TOTP_DECRYPT_FAILED userId=${userId}: ${err.message}`);
+        return { ok: false, decryptFailed: true };
+      }
+      const r = totp.verifyTotp(secret, input, { lastStep: user.totpLastStep });
+      if (!r.ok) return { ok: false };
+      const data = { totpLastStep: r.step };
+      // Key-Rotation: mit altem Key verschluesselte Secrets beim ersten Erfolg neu verschluesseln
+      if (totp.needsReencrypt(user.totpSecretEnc)) data.totpSecretEnc = totp.encryptSecret(secret, userId);
+      const { count } = await prisma.user.updateMany({
+        where: {
+          id: userId,
+          totpSecretEnc: user.totpSecretEnc,
+          OR: [{ totpLastStep: null }, { totpLastStep: { lt: r.step } }],
+        },
+        data,
+      });
+      if (count === 1) return { ok: true };
+    }
+    return { ok: false };
+  }
+
+  if (!allowBackup) return { ok: false };
+  const codes = await prisma.twoFactorBackupCode.findMany({
+    where: { userId, usedAt: null },
+    select: { id: true, codeHash: true },
+  });
+  const hit = totp.findBackupCodeHash(input, totp.getBackupPepper(), codes.map((c) => c.codeHash));
+  if (!hit) return { ok: false };
+  const row = codes.find((c) => c.codeHash === hit);
+  const { count } = await prisma.twoFactorBackupCode.updateMany({
+    where: { id: row.id, usedAt: null },
+    data: { usedAt: new Date() },
+  });
+  if (count !== 1) return { ok: false };
+
+  // Info-Mail (nicht blockierend)
+  Promise.all([
+    prisma.user.findUnique({ where: { id: userId }, select: { email: true } }),
+    remainingBackupCodes(userId),
+  ])
+    .then(([u, left]) => u && sendMail({
+      to: u.email,
+      subject: "A SwipeShift backup code was used",
+      text: `A backup code was just used to confirm a sign-in or security change on your SwipeShift account.\n\nBackup codes left: ${left}.\n\nIf this wasn't you, change your password and turn two-factor authentication off and on again to get new codes.`,
+      html: `<p>A backup code was just used to confirm a sign-in or security change on your SwipeShift account.</p><p>Backup codes left: <b>${left}</b>.</p><p>If this wasn't you, change your password and turn two-factor authentication off and on again to get new codes.</p>`,
+    }))
+    .catch((err) => console.error("Backup-code info mail failed:", err.message));
+  return { ok: true, usedBackup: true };
+}
+
 // Prueft einen Code gegen eine Challenge. Liefert den (verbrauchten) Datensatz oder einen Fehler-Code.
-async function consumeCode(challengeId, code, { purpose, userId } = {}) {
+// E-Mail-Challenge: Code-Hash; TOTP-Challenge (Marker im codeHash): TOTP-/Backup-Code.
+async function consumeCode(challengeId, code, { purpose, userId, ip } = {}) {
   const record = await prisma.twoFactorCode.findUnique({ where: { id: challengeId } });
   if (!record) return { error: "CODE_INVALID" };
   if (purpose && !purpose.includes(record.purpose)) return { error: "CODE_INVALID" };
   if (userId && record.userId !== userId) return { error: "CODE_INVALID" };
-  if (!isCodeUsable(record)) return { error: "CODE_EXPIRED" };
 
-  if (!codeMatches(code, record.codeHash, JWT_SECRET)) {
-    await prisma.twoFactorCode.update({
-      where: { id: record.id },
-      data: { attempts: { increment: 1 } },
-    });
-    return { error: "CODE_INVALID" };
+  const isTotp = record.codeHash === TOTP_CHALLENGE_MARKER;
+  const user = await prisma.user.findUnique({
+    where: { id: record.userId },
+    select: { twoFactorEnabled: true, twoFactorMethod: true },
+  });
+  if (!user) return { error: "CODE_INVALID", isTotp };
+  // Challenge-Art muss zur AKTUELLEN Methode passen (kein Downgrade ueber alte E-Mail-Challenges)
+  if (!challengeMatchesUser(record.purpose, isTotp, user)) return { error: "CODE_INVALID", isTotp };
+  const lock = await getActiveLock(record.userId, ip);
+  if (lock) return { error: "LOCKED", isTotp, minutes: minutesUntil(lock.lockedUntil) };
+  if (!isCodeUsable(record)) return { error: "CODE_EXPIRED", isTotp };
+
+  // Versuch ZUERST atomar zaehlen — parallele Requests koennen die Grenze nicht umgehen
+  const claim = await prisma.twoFactorCode.updateMany({
+    where: { id: record.id, consumedAt: null, attempts: { lt: MAX_ATTEMPTS }, expiresAt: { gt: new Date() } },
+    data: { attempts: { increment: 1 } },
+  });
+  if (claim.count !== 1) return { error: "CODE_EXPIRED", isTotp };
+
+  let valid, usedBackup = false;
+  if (isTotp) {
+    const r = await verifyTotpFactor(record.userId, code);
+    valid = r.ok;
+    usedBackup = !!r.usedBackup;
+    // Serverseitiges Entschluesselungsproblem: kein Fehlversuch fuer den Nutzer
+    if (!valid && r.decryptFailed) return { error: "CODE_INVALID", isTotp };
+  } else {
+    valid = codeMatches(code, record.codeHash, JWT_SECRET);
+  }
+
+  if (!valid) {
+    // Nicht sicher gezaehlt (Dauerkonflikt) → fail-closed
+    if (!(await registerFailure(record.userId, ip))) return { error: "LOCKED", isTotp, minutes: 1 };
+    return { error: "CODE_INVALID", isTotp };
   }
 
   // Race-sicher verbrauchen: nur einer gewinnt
@@ -130,7 +364,14 @@ async function consumeCode(challengeId, code, { purpose, userId } = {}) {
     where: { id: record.id, consumedAt: null },
     data: { consumedAt: new Date() },
   });
-  if (count !== 1) return { error: "CODE_EXPIRED" };
+  if (count !== 1) {
+    if (usedBackup) {
+      console.error(`TWO_FACTOR backup code consumed, challenge not completed userId=${record.userId} challenge=${record.id}`);
+      return { error: "BACKUP_CODE_CONSUMED", isTotp };
+    }
+    return { error: "CODE_EXPIRED", isTotp };
+  }
+  await clearFailures(record.userId, ip);
   return { record };
 }
 
@@ -138,9 +379,26 @@ const CODE_ERRORS = {
   CODE_INVALID: "That code isn't right. Check your email and try again.",
   CODE_EXPIRED: "This code has expired. Request a new one.",
 };
+const TOTP_CODE_ERRORS = {
+  CODE_INVALID: "That code isn't right. Check your authenticator app (or use a backup code) and try again.",
+  CODE_EXPIRED: "This request has expired. Please start again.",
+};
 
-function codeErrorResponse(res, error) {
-  return res.status(400).json({ error: CODE_ERRORS[error] || "Invalid code", code: error });
+function codeErrorResponse(res, error, isTotp = false, minutes = 15) {
+  if (error === "BACKUP_CODE_CONSUMED") {
+    return res.status(409).json({
+      error: "That backup code was used up, but the request could not be completed. Please try again with another code.",
+      code: "BACKUP_CODE_CONSUMED",
+    });
+  }
+  if (error === "LOCKED") {
+    return res.status(429).json({
+      error: `Too many wrong codes. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.`,
+      code: "TOO_MANY_ATTEMPTS",
+    });
+  }
+  const table = isTotp ? TOTP_CODE_ERRORS : CODE_ERRORS;
+  return res.status(400).json({ error: table[error] || "Invalid code", code: error });
 }
 
 const codeSchema = z.object({
@@ -148,32 +406,52 @@ const codeSchema = z.object({
   code: z.string().min(1).max(12),
 });
 
+const methodOf = currentMethod;
+
 router.get("/2fa", requireAuth, async (req, res) => {
   const user = await prisma.user.findUnique({
     where: { id: req.auth.sub },
-    select: { twoFactorEnabled: true },
+    select: { twoFactorEnabled: true, twoFactorMethod: true },
   });
   if (!user) return res.status(404).json({ error: "User not found" });
-  return res.json({ enabled: user.twoFactorEnabled });
+  const method = methodOf(user);
+  return res.json({
+    enabled: user.twoFactorEnabled,
+    method,
+    backupCodesRemaining: method === "totp" ? await remainingBackupCodes(req.auth.sub) : null,
+  });
 });
 
 router.post("/2fa/request", requireAuth, sendLimiter, async (req, res) => {
-  const parsed = z.object({ action: z.enum(["enable", "disable"]) }).safeParse(req.body);
+  const parsed = z.object({
+    action: z.enum(["enable", "disable"]),
+    method: z.enum(["email", "totp"]).optional(),
+  }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid input" });
   const { action } = parsed.data;
+  const wantsTotp = action === "enable" && parsed.data.method === "totp";
 
   try {
     const user = await prisma.user.findUnique({ where: { id: req.auth.sub } });
     if (!user) return res.status(404).json({ error: "User not found" });
+    if (await lockResponseIfLocked(res, user.id, ipOf(req))) return;
 
-    if (action === "enable" && user.twoFactorEnabled)
+    if (action === "enable" && !wantsTotp && user.twoFactorEnabled)
       return res.status(409).json({ error: "Two-factor authentication is already on.", code: "ALREADY_ENABLED" });
+    // Entscheidung: Wechsel email→totp ist erlaubt (Mail-Code genuegt als Bestaetigung, E-Mail-2FA bleibt bis
+    // zur TOTP-Bestaetigung aktiv). Bei aktivem TOTP: erst ausschalten.
+    if (wantsTotp && methodOf(user) === "totp")
+      return res.status(409).json({ error: "The authenticator app is already on. Turn two-factor off first to set it up again.", code: "ALREADY_ENABLED" });
     if (action === "disable" && !user.twoFactorEnabled)
       return res.status(409).json({ error: "Two-factor authentication is already off.", code: "ALREADY_DISABLED" });
     if (action === "enable" && !user.emailVerifiedAt)
       return res.status(403).json({ error: "Please verify your email address first.", code: "EMAIL_NOT_VERIFIED" });
 
-    return res.json(await issueTwoFactorCode(user, action));
+    // Abschalten bei TOTP: keine Mail, Bestaetigung per aktuellem Code der Authenticator-App
+    if (action === "disable" && methodOf(user) === "totp")
+      return res.json(await issueTotpChallenge(user, "disable"));
+
+    return res.json(await issueTwoFactorCode(user, wantsTotp ? "totp_enable" : action));
   } catch (err) {
     console.error("POST /auth/2fa/request error:", err);
     return res.status(500).json({ error: "Could not send the code. Please try again." });
@@ -185,15 +463,29 @@ router.post("/2fa/confirm", requireAuth, codeLimiter, async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: "Invalid input" });
 
   try {
-    const { record, error } = await consumeCode(parsed.data.challengeId, parsed.data.code, {
+    const { record, error, isTotp, minutes } = await consumeCode(parsed.data.challengeId, parsed.data.code, {
       purpose: ["enable", "disable"],
       userId: req.auth.sub,
+      ip: ipOf(req),
     });
-    if (error) return codeErrorResponse(res, error);
+    if (error) return codeErrorResponse(res, error, isTotp, minutes);
 
     const enabled = record.purpose === "enable";
-    await prisma.user.update({ where: { id: req.auth.sub }, data: { twoFactorEnabled: enabled } });
-    return res.json({ ok: true, enabled });
+    await prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: req.auth.sub },
+        data: enabled
+          ? { twoFactorEnabled: true, twoFactorMethod: "email", totpPendingEnc: null, totpPendingAt: null }
+          : {
+              // Alles TOTP-bezogene mit entfernen
+              twoFactorEnabled: false, twoFactorMethod: null,
+              totpSecretEnc: null, totpPendingEnc: null, totpPendingAt: null, totpLastStep: null,
+            },
+      });
+      if (!enabled) await tx.twoFactorBackupCode.deleteMany({ where: { userId: req.auth.sub } });
+      await invalidateOpenCodes(req.auth.sub, tx);
+    });
+    return res.json({ ok: true, enabled, method: enabled ? "email" : null });
   } catch (err) {
     console.error("POST /auth/2fa/confirm error:", err);
     return res.status(500).json({ error: "Internal server error" });
@@ -205,11 +497,17 @@ router.post("/2fa/verify-login", codeLimiter, async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: "Invalid input" });
 
   try {
-    const { record, error } = await consumeCode(parsed.data.challengeId, parsed.data.code, { purpose: ["login"] });
-    if (error) return codeErrorResponse(res, error);
+    const { record, error, isTotp, minutes } = await consumeCode(parsed.data.challengeId, parsed.data.code, { purpose: ["login"], ip: ipOf(req) });
+    if (error) return codeErrorResponse(res, error, isTotp, minutes);
 
     const user = await prisma.user.findUnique({ where: { id: record.userId } });
     if (!user) return codeErrorResponse(res, "CODE_INVALID");
+
+    // Alle uebrigen offenen Login-Challenges (z.B. aeltere Mail-Codes) sind damit erledigt
+    await prisma.twoFactorCode.updateMany({
+      where: { userId: user.id, purpose: "login", consumedAt: null },
+      data: { consumedAt: new Date() },
+    });
 
     const token = await createSession(user, req);
     const isSocial = user.passwordHash === "SOCIAL_LOGIN";
@@ -237,10 +535,161 @@ router.post("/2fa/resend", sendLimiter, async (req, res) => {
     if (!record || record.purpose !== "login" || tooOld) {
       return res.status(400).json({ error: "Please sign in again.", code: "CHALLENGE_EXPIRED" });
     }
+    const isTotp = record.codeHash === TOTP_CHALLENGE_MARKER;
+    // Die Challenge-Art muss zur aktuellen Methode passen (sonst: neu einloggen)
+    if (!challengeMatchesUser("login", isTotp, record.user)) {
+      return res.status(400).json({ error: "Please sign in again.", code: "CHALLENGE_EXPIRED" });
+    }
+    if (isTotp) {
+      return res.status(400).json({
+        error: "Codes from your authenticator app can't be resent. Open the app, or use a backup code.",
+        code: "RESEND_NOT_AVAILABLE",
+      });
+    }
     return res.json(await issueTwoFactorCode(record.user, "login"));
   } catch (err) {
     console.error("POST /auth/2fa/resend error:", err);
     return res.status(500).json({ error: "Could not send the code. Please try again." });
+  }
+});
+
+// ───────────────────────── TOTP (Authenticator-App) ─────────────────────────
+
+// Re-Auth: erst nach gueltigem Mail-Code (purpose totp_enable) gibt es das Pending-Secret.
+router.post("/2fa/totp/setup", requireAuth, codeLimiter, async (req, res) => {
+  const parsed = codeSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid input" });
+
+  try {
+    const { record, error, isTotp, minutes } = await consumeCode(parsed.data.challengeId, parsed.data.code, {
+      purpose: ["totp_enable"],
+      userId: req.auth.sub,
+      ip: ipOf(req),
+    });
+    if (error) return codeErrorResponse(res, error, isTotp, minutes);
+
+    const user = await prisma.user.findUnique({ where: { id: req.auth.sub } });
+    if (!user) return res.status(404).json({ error: "User not found" });
+    if (methodOf(user) === "totp")
+      return res.status(409).json({ error: "The authenticator app is already on.", code: "ALREADY_ENABLED" });
+
+    const secret = totp.generateSecret();
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { totpPendingEnc: totp.encryptSecret(secret, user.id), totpPendingAt: new Date() },
+    });
+    return res.json({
+      secret,
+      otpauthUri: totp.otpauthUri(secret, user.email),
+      issuer: totp.ISSUER,
+      account: user.email,
+    });
+  } catch (err) {
+    console.error("POST /auth/2fa/totp/setup error:", err);
+    return res.status(500).json({ error: "Could not start the setup. Please try again." });
+  }
+});
+
+router.post("/2fa/totp/confirm", requireAuth, codeLimiter, async (req, res) => {
+  const parsed = z.object({ code: z.string().min(1).max(12) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid input" });
+
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.auth.sub } });
+    if (!user) return res.status(404).json({ error: "User not found" });
+    if (await lockResponseIfLocked(res, user.id, ipOf(req))) return;
+    if (methodOf(user) === "totp")
+      return res.status(409).json({ error: "Two-factor authentication is already on.", code: "ALREADY_ENABLED" });
+    if (!user.totpPendingEnc)
+      return res.status(400).json({ error: "Start the setup first.", code: "NO_PENDING_SETUP" });
+    if (!totp.isPendingFresh(user.totpPendingAt))
+      return res.status(400).json({ error: "The setup took too long. Please start again.", code: "SETUP_EXPIRED" });
+
+    let secret;
+    try { secret = totp.decryptSecret(user.totpPendingEnc, user.id); }
+    catch (err) {
+      console.error(`TOTP_DECRYPT_FAILED (pending) userId=${user.id}: ${err.message}`);
+      return res.status(400).json({ error: "Start the setup again.", code: "NO_PENDING_SETUP" });
+    }
+
+    const r = totp.verifyTotp(secret, parsed.data.code);
+    if (!r.ok) {
+      if (!(await registerFailure(user.id, ipOf(req)))) return sendLocked(res, null);
+      return codeErrorResponse(res, "CODE_INVALID", true);
+    }
+
+    const freshAfter = new Date(Date.now() - totp.PENDING_TTL_MS);
+    const backupCodes = await prisma.$transaction(async (tx) => {
+      // Atomar: nur wenn das Pending-Secret noch exakt dasselbe (und frisch) ist
+      const { count } = await tx.user.updateMany({
+        where: {
+          id: user.id,
+          totpPendingEnc: user.totpPendingEnc,
+          totpPendingAt: { gt: freshAfter },
+          OR: [{ twoFactorEnabled: false }, { twoFactorMethod: { not: "totp" } }],
+        },
+        data: {
+          twoFactorEnabled: true, twoFactorMethod: "totp",
+          totpSecretEnc: user.totpPendingEnc, totpPendingEnc: null, totpPendingAt: null,
+          totpLastStep: r.step, // der Bestaetigungs-Code ist damit verbraucht
+        },
+      });
+      if (count !== 1) return null;
+
+      // Erst jetzt Backup-Codes erzeugen
+      const codes = totp.generateBackupCodes();
+      const pepper = totp.getBackupPepper();
+      await tx.twoFactorBackupCode.deleteMany({ where: { userId: user.id } });
+      await tx.twoFactorBackupCode.createMany({
+        data: codes.map((c) => ({ userId: user.id, codeHash: totp.hashBackupCode(c, pepper) })),
+      });
+      // Methodenwechsel/Aktivierung: alle offenen Codes ungueltig
+      await invalidateOpenCodes(user.id, tx);
+      return codes;
+    });
+    if (!backupCodes)
+      return res.status(409).json({ error: "This setup is no longer valid. Please start again.", code: "SETUP_EXPIRED" });
+
+    // Klartext-Codes nur in dieser einen Antwort
+    return res.json({ ok: true, enabled: true, method: "totp", backupCodes });
+  } catch (err) {
+    console.error("POST /auth/2fa/totp/confirm error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Neue Backup-Codes (die alten werden ungueltig) — nur mit gueltigem aktuellem TOTP-Code
+router.post("/2fa/totp/backup-codes", requireAuth, codeLimiter, async (req, res) => {
+  const parsed = z.object({ code: z.string().min(1).max(12) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid input" });
+
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.auth.sub } });
+    if (!user) return res.status(404).json({ error: "User not found" });
+    if (methodOf(user) !== "totp")
+      return res.status(409).json({ error: "The authenticator app isn't turned on.", code: "NOT_ENABLED" });
+    if (await lockResponseIfLocked(res, user.id, ipOf(req))) return;
+
+    // Nur der Authenticator-Code zaehlt (kein Backup-Code, sonst laesst sich der Vorrat nicht "nachfuellen")
+    const check = await verifyTotpFactor(user.id, parsed.data.code, { allowBackup: false });
+    if (!check.ok) {
+      if (!check.decryptFailed && !(await registerFailure(user.id, ipOf(req)))) return sendLocked(res, null);
+      return codeErrorResponse(res, "CODE_INVALID", true);
+    }
+    await clearFailures(user.id, ipOf(req));
+
+    const codes = totp.generateBackupCodes();
+    const pepper = totp.getBackupPepper();
+    await prisma.$transaction([
+      prisma.twoFactorBackupCode.deleteMany({ where: { userId: user.id } }),
+      prisma.twoFactorBackupCode.createMany({
+        data: codes.map((c) => ({ userId: user.id, codeHash: totp.hashBackupCode(c, pepper) })),
+      }),
+    ]);
+    return res.json({ ok: true, backupCodes: codes });
+  } catch (err) {
+    console.error("POST /auth/2fa/totp/backup-codes error:", err);
+    return res.status(500).json({ error: "Internal server error" });
   }
 });
 

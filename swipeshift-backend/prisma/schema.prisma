@@ -41,6 +41,16 @@ model User {
 
   // 2FA per E-Mail-Code (beim Login wird zusaetzlich ein Code an die E-Mail geschickt)
   twoFactorEnabled Boolean @default(false)
+  // "email" | "totp" (null + twoFactorEnabled = Altbestand = email)
+  twoFactorMethod  String?
+  // TOTP-Secret (AES-256-GCM, siehe src/utils/totp.js); Pending = Einrichtung noch nicht bestaetigt
+  totpSecretEnc    String?
+  totpPendingEnc   String?
+  // Zuletzt akzeptierter 30-s-Zeitschritt → ein Code ist nur einmal nutzbar
+  totpLastStep     Int?
+  totpPendingAt    DateTime?
+  twoFactorLocks   TwoFactorLock[]
+  backupCodes      TwoFactorBackupCode[]
 
   // Konto-Einstellungen (Benachrichtigungen, Ruhezeiten, Auszahlung) — Form siehe src/utils/settings.js
   settings Json?
@@ -70,6 +80,7 @@ model UserSession {
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  city        String?   // grober Ort vom Geraet ("Austin, TX"), siehe X-Device-City
   deviceName  String?   // z.B. "iPhone", "iPad"
   deviceModel String?   // Hardware-Kennung, z.B. "iPhone16,1"
   osVersion   String?   // z.B. "iOS 18.1"
@@ -87,6 +98,7 @@ enum TwoFactorPurpose {
   login
   enable
   disable
+  totp_enable // Mail-Code als Re-Auth vor der TOTP-Einrichtung
 }
 
 // Einmal-Code (6-stellig, gehasht) fuer Login-Challenge bzw. 2FA an-/ausschalten.
@@ -103,6 +115,32 @@ model TwoFactorCode {
   createdAt  DateTime  @default(now())
 
   @@index([userId, purpose])
+}
+
+// Sperre gegen Code-Raten pro User+IP (Entscheidungslogik: nextLockState in utils/twoFactor.js)
+model TwoFactorLock {
+  id            String    @id @default(uuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ip            String
+  failedCount   Int       @default(0)
+  firstFailedAt DateTime
+  lockedUntil   DateTime?
+  notifiedAt    DateTime?
+
+  @@unique([userId, ip])
+}
+
+// Einmal-Backup-Code fuer TOTP-2FA (nur HMAC-Hash gespeichert).
+model TwoFactorBackupCode {
+  id       String    @id @default(uuid())
+  userId   String
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash String
+  usedAt   DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
 }
 
 model Worker {

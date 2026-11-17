@@ -21,7 +21,16 @@ const companiesRoutes       = require("./routes.companies");
 const notificationsRoutes   = require("./routes.notifications");
 const safetyRoutes          = require("./routes.safety");
 
+// Produktion ohne TOTP_ENCRYPTION_KEY → Start abbrechen (Secrets nie unverschluesselt)
+require("./utils/totp").assertTotpConfig(); // Fehlender/ungueltiger Key → Startabbruch (Dev-Fallback nur NODE_ENV=development|test)
+
 const app = express();
+
+// Hinter einem Reverse-Proxy/Load-Balancer TRUST_PROXY setzen: Anzahl Proxy-Hops (z.B. "1") oder Liste
+// konkreter Proxy-IPs/CIDRs — NICHT "true". Damit ist req.ip (Rate-Limits, 2FA-Sperre, Geraete-IP) die
+// Client-IP. Ohne die Variable wird X-Forwarded-For ignoriert. Ungueltiger Wert → Startabbruch.
+const trustProxy = require("./utils/trustProxy").parseTrustProxy(process.env.TRUST_PROXY);
+if (trustProxy !== undefined) app.set("trust proxy", trustProxy);
 
 app.use(cors());
 app.use(express.json());

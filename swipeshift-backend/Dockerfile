@@ -11,5 +11,6 @@ COPY . .
 
 EXPOSE 3000
 
-# Wird von docker-compose überschrieben
+# Produktionsverhalten: ohne TOTP_ENCRYPTION_KEY/BACKUP_CODE_PEPPER bricht der Start ab (gewollt).
+# docker-compose startet derzeit nur db + mailhog; Backend lokal via `npm run dev` (NODE_ENV=development).
 CMD ["npm", "start"]

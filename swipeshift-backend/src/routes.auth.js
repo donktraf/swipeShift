@@ -277,6 +277,7 @@ router.post("/login", loginLimiter, async (req, res) => {
       emailVerifiedAt: true,
       passwordHash: true,
       twoFactorEnabled: true,
+      twoFactorMethod: true,
     },
   });
 
