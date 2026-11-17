@@ -609,3 +609,15 @@ Fehlschlag.
 
 **Bewusst nicht gebaut:** „Erneut buchen“ (braucht Einladungs-Flow), Liste blockierter Nutzer in den Einstellungen (Endpunkt vorhanden), Admin-Oberfläche für Meldungen (gehen per Mail an Support).
 **Offen:** Migration anwenden, Klick-Test (Meldung in MailHog, Block in beide Richtungen, Merken); Rate-Limit-Speicher ist pro Serverprozess.
+
+---
+
+# Dev-Loop 2026-11-18 — restliche Profilfelder (Worker + Arbeitgeber)
+
+**Runde 1 – implementer:** Worker: Tageszeiten, Schicht-Typen (One-day/Weekend/Event; „Last-minute“ bleibt der bestehende Same-day-Schalter), Vorerfahrung pro Kategorie (<3 Mon./3–12 Mon./1+ J.), Anzeige im Worker-Detailprofil. Arbeitgeber: Gründungsjahr, Slogan, Social Links, Straße/PLZ/Koordinaten (Adresssuche), öffentlicher Ansprechpartner, mehrere Bundesstaaten, Remote; Anzeige im Firmenprofil (Slogan, „Founded“, Adresse + Karte, Ansprechpartner, Social-Icons). `src/utils/profileFields.js`, Migration `20261118110000_profile_fields`.
+**Tester (parallel):** 131/131 grün (+8 Randfall-Tests), Build ok; meldete: Koordinaten nahmen `true`/`[]` an.
+**Review 1:** keine kritischen Punkte (kein Datenverlust zwischen den Tabs, nur öffentliche Felder im Firmenprofil). Warnungen: Social Links akzeptierten beliebige Hosts (Phishing-Link hinter Instagram-Icon), keine Längengrenze, Koordinaten-Validierung zu locker, Listen-Spalten ohne Default, erneutes Erscheinen der Ansicht überschrieb ungespeicherte Eingaben, öffentliche Adresse ohne Hinweis.
+**Runde 2 – implementer:** Host-Whitelist pro Netzwerk, keine Zugangsdaten in URLs, max. 300 Zeichen, strikte Koordinaten, `NOT NULL DEFAULT` für Listen, einmaliges Vorbefüllen, Adress-Hinweis, robustes Dekodieren der Erfahrung, Adresssuche übernimmt nur echte Straßen. Vom Orchestrator nachgeprüft: 132/132 grün, Build ok.
+
+**Bewusst nicht gebaut:** Sub-Typen pro Kategorie, Zuverlässigkeits-Score (braucht Erfassung von Pünktlichkeit/No-Shows). „Mehrere Bundesstaaten“/„Remote“ werden gespeichert, aber noch nirgends ausgewertet.
+**Offen:** Migration anwenden, Klick-Test.

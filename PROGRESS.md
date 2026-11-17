@@ -779,3 +779,9 @@ Gefunden beim Profile-Screen-Abgleich: Legal-Schalter (Worker + Arbeitgeber) und
 - Conversation-Payload: Gegenüber-ID + Foto, Ort, Lohn, Schicht, Zahlungsstatus, Block- und Merk-Status
 - iOS: `ChatSafety.swift`, `ChatView+Header.swift` — Menü (Report, Block/Unblock, Contact support per Mail, Job details, View worker profile), Sicherheitshinweis, Profilfotos in Liste und Header, Datums-Trenner, Datum/Schicht im Header, einklappbare Job-Infokarte, nach Jobende Zahlungsstatus + Firma/Worker merken; fehlgeschlagene Nachrichten landen wieder in der Eingabe
 - Offen: „Erneut buchen“, Liste blockierter Nutzer in den Einstellungen, Admin-Oberfläche für Meldungen
+
+### Restliche Profilfelder (2026-11-18)
+- Worker: `availableTimes` (morning/afternoon/evening/night), `shiftTypes` (oneDay/weekend/eventBased — Last-minute bleibt der Same-day-Schalter), `experience` (pro Kategorie < 3 Monate / 3–12 Monate / 1+ Jahre); im Edit Profile bearbeitbar, im Worker-Detailprofil für Arbeitgeber sichtbar
+- Arbeitgeber: `yearFounded`, `tagline`, `socialLinks` (nur echte Instagram/LinkedIn/Facebook/TikTok-Links), `streetAddress`, `zipCode` (US), `addressLat/Lng` (Adresssuche), `publicContactName/Role`, `postsInMultipleStates`, `remoteFriendly`; Firmenprofil zeigt Slogan, „Founded“, Adresse + Karte („Open in Maps“), Ansprechpartner, Social-Icons
+- Backend: `src/utils/profileFields.js` (+ Tests), Migration `20261118110000_profile_fields`
+- Offen: Sub-Typen pro Kategorie, Zuverlässigkeits-Score, Auswertung von „mehrere Bundesstaaten“/„Remote“
