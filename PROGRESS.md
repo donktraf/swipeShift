@@ -752,3 +752,9 @@ Gefunden beim Profile-Screen-Abgleich: Legal-Schalter (Worker + Arbeitgeber) und
 - iOS: `utils/DateOnly.swift`, `utils/Distance.swift` (neu); Edit Profile (Worker) mit Rating-System-Zustimmung, 18+-Zeile aus dem Geburtsdatum, Geburtsdatum wird nicht mehr still überschrieben, Fehler-Alert; Arbeitgeber-Profil speichert alle fünf Zustimmungen; Jobliste-Filter + Radar in Meilen
 - `validate()` reicht jede Backend-Meldung `{ error }` lesbar durch (vorher nur mit `code`)
 - Vor Start: `npx prisma migrate deploy`
+
+### Arbeitgeber-Entwürfe bearbeiten und löschen (2026-11-17)
+- Backend: `Job.updatedAt` (Migration `20261117200000_add_job_updated_at`, Altjobs übernehmen `createdAt`); `src/utils/jobData.js` — `buildJobData` (gemeinsames Mapping POST/PUT), `validateJobBody` (400 statt 500 bei kaputten Zahlen/Arrays), `checkDraftAccess` (+ Tests)
+- `PUT /jobs/:id` (nur eigener Entwurf, optional direkt veröffentlichen, `company` bleibt wenn nicht gesendet) und `DELETE /jobs/:id` (nur eigener Entwurf) — beide atomar (`updateMany`/`deleteMany` mit `status: "draft"`), damit ein inzwischen veröffentlichter Job nie überschrieben/gelöscht wird; Fehler 404/403/409 `NOT_DRAFT`
+- iOS: `PostJobView(editingJobId:)` lädt und befüllt den Entwurf („Edit Draft“, Save Draft / Post Job, Fehlerzustand mit Retry/Close); Entwurfskarten mit Edit / Publish / Delete (Bestätigung) und „Last saved …“, Entwürfe nach letzter Änderung sortiert; „View Applicants“ auf veröffentlichten Jobs mit Bewerbern (`AllApplicantsView(jobId:jobTitle:)`); Fehler als Alert statt ganzer Fehleransicht
+- Offen: Klick-Test; beim Veröffentlichen bleibt das Erstelldatum das des Entwurfs

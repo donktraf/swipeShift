@@ -554,3 +554,19 @@ Fehlschlag.
 **Tester:** `npm test` 77/77 grün (3 neue Consent-Randfall-Tests), iOS-Build erfolgreich (SwiftLint per PATH umgangen – SwiftLint meldet viele Altverstöße). Migration `20261117180000_add_legal_consents` NICHT gegen DB gelaufen (Docker aus) – vor Start `npx prisma migrate deploy`.
 
 **Status:** erfolgreich, 2 Review-Runden, 1 Testrunde. Offen: Migration lokal anwenden + manueller Klick-Test; Radius-Parsing in routes.jobs.js nicht unit-getestet (inline).
+
+---
+
+# Dev-Loop 2026-11-17 — Arbeitgeber-Entwürfe bearbeiten/löschen
+
+**Aufgabe:** Entwürfe ließen sich nur veröffentlichen. Ziel: bearbeiten, löschen, „Last saved“, Schnellaktion „View Applicants“.
+
+**Runde 1 – implementer:** `Job.updatedAt` (+ Migration), Feld-Mapping aus POST in `src/utils/jobData.js` (`buildJobData`) ausgelagert, `PUT /jobs/:id` und `DELETE /jobs/:id` (nur eigener Entwurf), PostJobView mit Bearbeiten-Modus, Entwurfskarte mit Edit/Publish/Delete + „Last saved“, „View Applicants“ auf veröffentlichten Jobs (AllApplicantsView mit Job-Filter), Fehler-Alerts.
+**Tester (parallel):** 79/79 grün, +9 Randfall-Tests für `buildJobData` (verhaltensgleich zum alten POST), Build ok.
+**Review 1:** Kritisch – Prüfung und Löschen/Ändern getrennt → bei gleichzeitiger Veröffentlichung hätte Löschen per Cascade Bewerbungen/Chats vernichtet. Warnungen: Migration setzt `updatedAt` aller Altjobs auf „jetzt“, fehlgeschlagenes Laden im Edit-Modus hinterließ speicherbares Leerformular (hätte Entwurf mit Defaults überschrieben), PUT setzte `company` auf „Unknown“ wenn nicht mitgeschickt, kaputte Zahlen → 500.
+**Runde 2 – implementer:** atomar via `deleteMany`/`updateMany` mit `status: "draft"` im where, `checkDraftAccess` (testbar), Migration übernimmt `createdAt`, Fehlerzustand mit Retry/Close, `validateJobBody` (400 statt 500, POST+PUT), `company` bleibt erhalten, statische Formatter. 92/92 grün, Build ok.
+**Review 2:** keine kritischen Punkte. Restpunkte (leeres lat/lng → NaN, `openSpots` ungeprüft, Lesen nach Update ohne Null-Check) vom Orchestrator behoben + 2 Tests → 94/94 grün.
+
+**Bewusst nicht geändert:** Beim Veröffentlichen bleibt `createdAt` das Entwurfsdatum (Produktentscheidung).
+**Offen:** Migrationen `20261117180000_add_legal_consents` + `20261117200000_add_job_updated_at` lokal anwenden (Docker war aus), Klick-Test Edit/Delete/Publish im Simulator.
+**Status:** erfolgreich, 2 Review-Runden.
