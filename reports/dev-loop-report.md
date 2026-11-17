@@ -640,3 +640,17 @@ Fehlschlag.
 **Tester:** 173/173 grün (+11 Randfall-Tests), Build ok, keine Bugs.
 **Review:** vom Nutzer gestoppt; Orchestrator hat stattdessen geprüft, dass keine privaten Felder (Alter, Telefon, E-Mail) im Payload landen.
 **Offen:** Klick-Test; Bestätigung, dass der „New Applicants“-Zähler im Dashboard durch die übernommenen Status unverändert stimmt.
+
+---
+
+# Dev-Loop 2026-11-18 — Active Sessions: Stadt pro Gerät + Authenticator-App (TOTP)
+
+**Runde 1 – implementer:** Stadt pro Session aus dem vorhandenen Profil-Ort (Header `X-Device-City`, kein GPS, keine IP-Ortung, kein Drittanbieter); TOTP nach RFC 6238 ohne Dependency (`src/utils/totp.js`), Secret AES-256-GCM-verschlüsselt, 8 Backup-Codes, iOS-Einrichtung mit QR-Code.
+**Tester:** 193/193 grün, RFC-Testvektoren bestätigt, Produktionsstart ohne Schlüssel bricht ab.
+**Sicherheits-Review 1:** 2× Kritisch – (1) mit gestohlener Session ließ sich ohne Bestätigung eine eigene Authenticator-App einrichten (Kontoübernahme), (2) alte E-Mail-Codes umgingen TOTP (Downgrade). Dazu Warnungen zu Fehlversuchen, Schlüsselverwaltung, Backup-Code-Hashing, Rennen beim Bestätigen.
+**Runde 2:** Mailcode vor TOTP-Einrichtung, Challenge-Art gegen aktuelle Methode geprüft, offene Codes werden invalidiert, atomare Zähler, Schlüssel mit Key-ID/Rotation/AAD, Pending-Ablauf, Backup-Codes neu erzeugen, Info-Mails.
+**Sicherheits-Review 2:** kritisch geschlossen; Deploy-Risiko (Start ohne Schlüssel), Pepper an rotierendem Schlüssel, Sperre pro Nutzer als DoS-Hebel.
+**Runde 3 + Entscheidung Orchestrator:** Sperre pro Nutzer+IP (Passwort-Diebe können den echten Nutzer nicht aussperren) + Warn-Mail; stabiler `BACKUP_CODE_PEPPER`; Rotationsskript; `.env.example`; `TRUST_PROXY` ohne `true`.
+**Sicherheits-Review 3:** nichts Kritisches. **Runde 4:** fail-closed bei Zähl-Konflikten, IPv6 auf /64 zusammengefasst, nutzerweite Obergrenze (50/h), Aufräumen alter Sperren. Vom Orchestrator nachgeprüft: 208/208 grün, Build ok; `.env.example` enthält keine echten Werte.
+
+**Offen:** Migration `20261118140000_session_city_totp` anwenden; manuelle Durchläufe (siehe PROGRESS); in Produktion `TOTP_ENCRYPTION_KEY` und `BACKUP_CODE_PEPPER` setzen. Wechsel E-Mail→Authenticator in der App nur über Aus-/Einschalten.

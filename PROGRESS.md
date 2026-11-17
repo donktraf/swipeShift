@@ -802,3 +802,12 @@ Gefunden beim Profile-Screen-Abgleich: Legal-Schalter (Worker + Arbeitgeber) und
 - Gemerkte Bewerber: Foto, Stadt, Bewertung, Jobs, stärkste Erfahrung, Kurz-Bio, „View profile“
 - Arbeitgeber-Kalender: Kategorie, Schichtkosten, bestätigte Worker (antippbar) mit Team-Ø
 - Worker-Detailprofil: „Chat“-Button nach Annahme; Bewerbungsliste (Worker) zeigt die Anzahl Jobs pro Monat
+
+### Active Sessions: Stadt pro Gerät + Authenticator-App (2026-11-18)
+- Stadt: App schickt den groben Ort aus dem Profil (`X-Device-City`, „City, ST“), gespeichert in `UserSession.city`, angezeigt als „Austin, TX (approx.)“ — keine Koordinaten, keine IP-Ortung, kein Drittanbieter; Cache wird bei Logout/Nutzerwechsel gelöscht
+- TOTP (RFC 6238, eigene Implementierung `src/utils/totp.js`): Einrichtung erst nach Mailcode, QR-Code + Secret + „Open in authenticator app“, 8 Backup-Codes (einmalig, Info-Mail bei Verbrauch, „N of 8 left“, neu erzeugen mit aktuellem Code); Login akzeptiert TOTP- oder Backup-Code
+- Sicherheit: Secret AES-256-GCM mit Key-ID + AAD (Rotation über `TOTP_ENCRYPTION_KEY_PREVIOUS` + `scripts/rotate-totp-key.js`), eigener `BACKUP_CODE_PEPPER`, Replay-Schutz, Challenge-Art an aktuelle Methode gebunden, Fehlversuchssperre pro Nutzer+IP (IPv6 /64) plus nutzerweite Obergrenze, Warn-Mail; `TRUST_PROXY` nur Hop-Zahl/IP-Liste
+- Konfiguration: `swipeshift-backend/.env.example`; außerhalb von development/test startet das Backend nur mit `TOTP_ENCRYPTION_KEY` und `BACKUP_CODE_PEPPER` (`npm run dev` setzt NODE_ENV=development)
+- Migration `20261118140000_session_city_totp`
+- Manuell zu prüfen: Einrichtung (falscher/abgelaufener Mailcode, Pending > 15 min), Login mit TOTP/Backup-Code, Sperre (10 Fehlversuche je IP, 50/h gesamt), Downgrade mit altem Mailcode, Abschalten, Backup-Codes neu erzeugen, Schlüsselrotation, Startprüfungen
+- Offen: direkter Wechsel E-Mail → Authenticator in der App (aktuell erst ausschalten)

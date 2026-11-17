@@ -56,7 +56,11 @@ npm run dev           # nodemon, http://localhost:3000
 | `DATABASE_URL` | Postgres-Connection-String (z.B. `postgresql://swipeshift:swipeshift_pw@localhost:5432/swipeshift_dev`) |
 | `JWT_SECRET` | Secret zum Signieren der Auth-Tokens |
 | `PORT` | Server-Port (Standard: `3000`) |
-| `NODE_ENV` | `development` / `production` |
+| `NODE_ENV` | `development` / `test` / `production`. Ohne `development`/`test` bricht der Start ohne `TOTP_ENCRYPTION_KEY` und `BACKUP_CODE_PEPPER` ab. `npm run dev`/`npm test` setzen es per Shell-Syntax (macOS/Linux vorausgesetzt) |
+| `TOTP_ENCRYPTION_KEY` | 32 Byte (`openssl rand -hex 32`) zum Verschlüsseln der Authenticator-Secrets; Rotation siehe `scripts/rotate-totp-key.js` (`TOTP_ENCRYPTION_KEY_PREVIOUS`) |
+| `BACKUP_CODE_PEPPER` | 32 Byte, stabil (nicht rotieren) für Backup-Codes |
+| `TRUST_PROXY` | Nur hinter Proxy: Hop-Anzahl (z.B. `1`) oder Proxy-IPs/CIDRs, nie `true` |
+| `SUPPORT_EMAIL` | Empfänger für Safety-Meldungen (Standard `support@swipeshift.app`) |
 | `GOOGLE_CLIENT_ID` | Google Sign-In |
 | `APPLE_CLIENT_ID` | Apple Sign-In |
 | `APP_SCHEME` | Custom URL Scheme für OAuth-Redirects in der iOS-App |
@@ -66,6 +70,8 @@ npm run dev           # nodemon, http://localhost:3000
 | `PUBLIC_RESET_FALLBACK_URL` | Fallback-Link für Passwort-Reset außerhalb der App |
 
 MailHog-Weboberfläche (lokale Test-Mails): http://localhost:8025
+
+Vorlage: `swipeshift-backend/.env.example`.
 
 ### Backend-Tests
 
