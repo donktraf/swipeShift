@@ -15,12 +15,16 @@ struct swipeShiftApp: App {
     @StateObject private var jobStore = JobStore()
     @StateObject private var messageStore = MessageStore()
 
+    // Erscheinungsbild pro Geraet (Einstellungen → App Preferences)
+    @AppStorage(AppColorSchemePreference.storageKey) private var colorSchemeRaw = AppColorSchemePreference.system.rawValue
+
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environmentObject(userStore)
                 .environmentObject(jobStore)
                 .environmentObject(messageStore)
+                .preferredColorScheme(AppColorSchemePreference(rawValue: colorSchemeRaw)?.colorScheme)
                 .onOpenURL { url in
                     handleDeepLink(url)
                 }

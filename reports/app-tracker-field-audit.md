@@ -187,6 +187,6 @@ Alle Feldzeilen des App Development Trackers wurden gegen den Code geprüft (au�
 
 **Neue Funde (vorher als „fertig“ geführt):**
 - `DetailedWorkerView.swift` (Worker-Profil für Arbeitgeber) zeigt **fest eingetragene Beispieldaten**: Bewertung 4.6 / „18 Jobs“, Kategorie-Bewertungen, Verfügbarkeit, Erfahrung, Präferenzen, Legal. Nur Name, Foto, Ort, Job und Accept/Decline sind echt. **✅ Behoben 2026-11-17:** neuer Endpunkt `GET /employer/workers/:userId` (nur für Arbeitgeber, bei denen sich der Worker beworben hat); Bewertungen anderer Arbeitgeber, abgeschlossene Jobs pro Kategorie, Verfügbarkeit, Präferenzen, Alter/18+, Arbeitserlaubnis, Bio, Selbsteinschätzung. „Verified Worker“ → ehrlich „Verified email“.
-- `AccountSettingsView.swift`: Benachrichtigungen, Quiet Hours, Auszahlungsdaten, Konto pausieren, Dark Mode und Sprache sind nur lokaler `@State` — werden nicht gespeichert, haben keine Wirkung.
+- `AccountSettingsView.swift`: Benachrichtigungen, Quiet Hours, Auszahlungsdaten, Konto pausieren, Dark Mode und Sprache sind nur lokaler `@State` — werden nicht gespeichert, haben keine Wirkung. **✅ Behoben 2026-11-17:** im Konto gespeichert (`User.settings`, IBAN geprüft + nur maskiert zurück), Pause wirkt (Worker kann sich nicht bewerben, Jobs pausierter Arbeitgeber ausgeblendet), Dark Mode pro Gerät. Sprachauswahl entfernt (App nur Englisch).
 - Währung ist überall fest „€“ (für US-Launch umstellen).
 - Arbeitgeber-Entwürfe lassen sich nicht bearbeiten oder löschen.

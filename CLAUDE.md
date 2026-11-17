@@ -163,8 +163,9 @@ Der ueberwiegende Teil der Wireframe-Anforderungen ist implementiert. Bekannte o
   Employer-"Payments & Billing" (Employer nutzt aktuell die Worker-Account-Settings)
 • DetailedWorkerView: seit 2026-11-17 echte Daten (GET /employer/workers/:userId). Offen: Erfahrungslevel
   pro Kategorie (nicht im Worker-Modell), Sprachen, Zuverlaessigkeit/No-Show-Quote
-• AccountSettingsView: Benachrichtigungen, Quiet Hours, Auszahlung, Konto pausieren, Dark Mode, Sprache
-  sind nur lokaler @State (nicht gespeichert, ohne Wirkung)
+• AccountSettingsView: seit 2026-11-17 gespeichert (GET/PATCH /auth/me/settings, POST /auth/me/pause;
+  Dark Mode pro Geraet via @AppStorage). Offen: Push-/Mail-Versand nach diesen Einstellungen, echte
+  Auszahlungen, Lokalisierung (Sprachauswahl bis dahin entfernt), Zeitzone
 • Kein XCTest-Target im Xcode-Projekt vorhanden — iOS-Unit-/UI-Tests muessen ueber Xcode
   (File > New > Target > Unit Testing Bundle) manuell angelegt werden, siehe Abschnitt 12
 • Backend-Testabdeckung ist bewusst minimal (Smoke-Tests fuer reine Utility-Funktionen), keine

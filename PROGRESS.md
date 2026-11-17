@@ -733,3 +733,12 @@ Vorher waren Bewertung (4.6 / „18 Jobs“), Kategorie-Bewertungen, Verfügbark
 - `src/utils/workerProfile.js` (+ Tests) — Alter, verfügbare Tage, Review-Zusammenfassung, abgeschlossene Jobs (gleiche Logik wie Worker-Kalender), Bereinigung freier JSON-Felder
 - iOS: `DTOs/WorkerProfileDTO.swift` (neu), `DetailedWorkerView.swift` neu aufgebaut (Lade-/Fehlerzustand, „New on SwipeShift“ ohne Bewertungen, Selbsteinschätzung klar gekennzeichnet, „Verified email“ statt „Verified Worker“)
 - Offen: Erfahrungslevel pro Kategorie (nicht im Datenmodell), Sprachen, Zuverlässigkeit/No-Show-Quote
+
+### Einstellungen werden wirklich gespeichert (2026-11-17)
+Vorher: Benachrichtigungen, Quiet Hours, Dark Mode, Sprache nur lokaler `@State`; Auszahlung + „Konto pausieren“ nur in `UserDefaults`, ohne Wirkung.
+- Backend: `User.settings` (JSON) + `User.pausedAt` (Migration `20261117140000_add_user_settings_paused`); `src/routes.settings.js` — `GET/PATCH /auth/me/settings`, `POST /auth/me/pause`; `GET /auth/me` liefert `isPaused`
+- `src/utils/settings.js` (+ Tests) — Standardwerte, Validierung (HH:MM, IBAN mit Mod-97-Prüfung, PayPal-Mail), Teil-Updates, IBAN wird nie komplett zurückgegeben
+- Pause wirkt: pausierter Worker → `POST /jobs/:id/apply` = `403 ACCOUNT_PAUSED` (eigener Ergebnis-Screen im Apply-Flow); Jobs pausierter Arbeitgeber fehlen in `GET /jobs` + `/jobs/nearby` und sind nicht bewerbbar
+- iOS: `DTOs/SettingsDTO.swift` (neu); Notifications speichern jede Änderung sofort (bei Fehler zurück auf alten Stand); Payments lädt/speichert, gespeicherte IBAN nur maskiert; Pause über API mit rollenabhängigem Text; Dark Mode via `@AppStorage`, angewendet in `swipeShiftApp`; Sprachauswahl durch Hinweis „English, more coming soon“ ersetzt
+- End-to-End gegen lokale DB getestet (13 Checks)
+- Offen: Push-/Mail-Versand gemäß Einstellungen (keine Push-Infrastruktur), echte Auszahlungen, Lokalisierung, Zeitzone; offene-Jobs-Zähler im Company-Profil zählt Jobs pausierter Arbeitgeber noch mit

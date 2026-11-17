@@ -10,6 +10,17 @@ const { normalizeCancellationReason } = require("./utils/applicationStatus");
 
 const router = express.Router();
 
+// Pausierte Arbeitgeber: ihre Jobs sind fuer Worker unsichtbar und nicht bewerbbar
+async function pausedEmployerFilter() {
+  const paused = await prisma.user.findMany({
+    where: { pausedAt: { not: null }, role: "employer" },
+    select: { id: true },
+  });
+  if (!paused.length) return {};
+  // OR noetig: NOT IN wuerde Jobs ohne employerId (Seed-Daten) mit ausschliessen
+  return { OR: [{ employerId: null }, { employerId: { notIn: paused.map((u) => u.id) } }] };
+}
+
 // ─────────────────────────────────────────────
 // Helper: JobIDs die der User bereits applied/skipped hat (aus PostgreSQL)
 // ─────────────────────────────────────────────
@@ -126,6 +137,7 @@ router.get("/", requireAuth, requireVerifiedEmail, async (req, res) => {
     }
 
     const baseWhere = {
+      ...(await pausedEmployerFilter()),
       status: "published",
       ...(seenIds.length > 0 && { id: { notIn: seenIds } }),
       ...(category && { category: { equals: category, mode: "insensitive" } }),
@@ -208,6 +220,7 @@ router.get("/nearby", requireAuth, requireVerifiedEmail, async (req, res) => {
     // Radar zeigt immer alle Jobs — unabhängig von apply/skip
     const allJobs = await prisma.job.findMany({
       where: {
+        ...(await pausedEmployerFilter()),
         status: "published",
         lat: { not: null },
         lng: { not: null },
@@ -324,8 +337,19 @@ router.post("/:id/apply", requireAuth, requireVerifiedEmail, async (req, res) =>
     });
     if (!job) return res.status(404).json({ error: "Job not found" });
 
-    // Job muss published sein
-    if (job.status !== "published") {
+    // Pausiertes Worker-Konto: keine Bewerbungen (Einstellungen → Privacy & Data)
+    const applicant = await prisma.user.findUnique({ where: { id: userId }, select: { pausedAt: true } });
+    if (applicant?.pausedAt) {
+      return res.status(403).json({ error: "ACCOUNT_PAUSED", message: "Your account is paused. Resume it in Settings to apply." });
+    }
+
+    // Job muss published sein — und der Arbeitgeber darf nicht pausiert sein
+    let employerPaused = false;
+    if (job.employerId) {
+      const employer = await prisma.user.findUnique({ where: { id: job.employerId }, select: { pausedAt: true } });
+      employerPaused = !!employer?.pausedAt;
+    }
+    if (job.status !== "published" || employerPaused) {
       return res.status(400).json({ error: "JOB_UNAVAILABLE" });
     }
 

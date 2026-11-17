@@ -42,6 +42,11 @@ model User {
   // 2FA per E-Mail-Code (beim Login wird zusaetzlich ein Code an die E-Mail geschickt)
   twoFactorEnabled Boolean @default(false)
 
+  // Konto-Einstellungen (Benachrichtigungen, Ruhezeiten, Auszahlung) — Form siehe src/utils/settings.js
+  settings Json?
+  // Konto pausiert: Worker kann sich nicht bewerben, Jobs eines Employers sind ausgeblendet
+  pausedAt DateTime?
+
   worker   Worker?
   employer Employer?
 

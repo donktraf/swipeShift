@@ -399,128 +399,235 @@ struct ActiveSessionsView: View {
 // MARK: - Notification Settings
 
 struct NotificationSettingsView: View {
-    private struct NotifCategory: Identifiable {
-        let id = UUID()
+    private struct CategoryRow: Identifiable {
+        let id: WritableKeyPath<NotificationSettingsDTO, NotificationChannelDTO>
         let icon: String
         let color: Color
         let label: String
-        var push: Bool
-        var email: Bool
     }
 
-    @State private var categories: [NotifCategory] = [
-        .init(icon: "briefcase.fill",       color: SS.primary, label: "Job Activity", push: true,  email: true),
-        .init(icon: "eurosign.circle.fill",  color: .green,     label: "Payments",    push: true,  email: false),
-        .init(icon: "bubble.left.fill",      color: .blue,      label: "Messages",    push: true,  email: false),
-        .init(icon: "person.fill",           color: .orange,    label: "Account",     push: false, email: true),
+    private let rows: [CategoryRow] = [
+        .init(id: \.jobActivity, icon: "briefcase.fill",      color: SS.primary, label: "Job Activity"),
+        .init(id: \.payments,    icon: "eurosign.circle.fill", color: .green,     label: "Payments"),
+        .init(id: \.messages,    icon: "bubble.left.fill",     color: .blue,      label: "Messages"),
+        .init(id: \.account,     icon: "person.fill",          color: .orange,    label: "Account"),
     ]
-    @State private var quietHoursEnabled = false
-    @State private var quietFrom         = Calendar.current.date(bySettingHour: 22, minute: 0, second: 0, of: Date()) ?? Date()
-    @State private var quietTo           = Calendar.current.date(bySettingHour: 7,  minute: 0, second: 0, of: Date()) ?? Date()
+
+    @State private var settings: AccountSettingsDTO?
+    @State private var loadError: String?
+    @State private var saveError: String?
+    @State private var isSaving = false
 
     var body: some View {
         SubScreenShell(title: "Notifications") {
             VStack(spacing: 16) {
-                // Kanal-Header
-                HStack {
+                if let settings {
+                    content(settings)
+                } else if let loadError {
+                    VStack(spacing: 12) {
+                        Text(loadError).font(.system(size: 14)).foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                        Button("Try Again") { Task { await load() } }
+                            .font(.system(size: 14, weight: .semibold))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 40)
+                } else {
+                    ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
+                }
+            }
+        }
+        .task { await load() }
+    }
+
+    @ViewBuilder
+    private func content(_ current: AccountSettingsDTO) -> some View {
+        // Kanal-Header
+        HStack {
+            Spacer()
+            Text("Push")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.secondary)
+                .frame(width: 50)
+            Text("E-Mail")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.secondary)
+                .frame(width: 50)
+                .padding(.trailing, 14)
+        }
+        .padding(.horizontal, 16)
+
+        // Kategorien
+        VStack(spacing: 0) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                HStack(spacing: 12) {
+                    ZStack {
+                        Circle()
+                            .fill(row.color.opacity(0.12))
+                            .frame(width: 34, height: 34)
+                        Image(systemName: row.icon)
+                            .font(.system(size: 14))
+                            .foregroundColor(row.color)
+                    }
+                    .padding(.leading, 14)
+
+                    Text(row.label)
+                        .font(.system(size: 15))
+
                     Spacer()
-                    Text("Push")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.secondary)
+
+                    Toggle("", isOn: channelBinding(row.id, \.push))
+                        .labelsHidden()
                         .frame(width: 50)
-                    Text("E-Mail")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.secondary)
+
+                    Toggle("", isOn: channelBinding(row.id, \.email))
+                        .labelsHidden()
                         .frame(width: 50)
                         .padding(.trailing, 14)
                 }
-                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
 
-                // Kategorien
-                VStack(spacing: 0) {
-                    ForEach(categories.indices, id: \.self) { i in
-                        HStack(spacing: 12) {
-                            ZStack {
-                                Circle()
-                                    .fill(categories[i].color.opacity(0.12))
-                                    .frame(width: 34, height: 34)
-                                Image(systemName: categories[i].icon)
-                                    .font(.system(size: 14))
-                                    .foregroundColor(categories[i].color)
-                            }
-                            .padding(.leading, 14)
-
-                            Text(categories[i].label)
-                                .font(.system(size: 15))
-
-                            Spacer()
-
-                            Toggle("", isOn: $categories[i].push)
-                                .labelsHidden()
-                                .frame(width: 50)
-
-                            Toggle("", isOn: $categories[i].email)
-                                .labelsHidden()
-                                .frame(width: 50)
-                                .padding(.trailing, 14)
-                        }
-                        .padding(.vertical, 12)
-
-                        if i < categories.count - 1 {
-                            Divider().padding(.leading, 62)
-                        }
-                    }
+                if index < rows.count - 1 {
+                    Divider().padding(.leading, 62)
                 }
-                .background(Color(uiColor: .systemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 16))
-                .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
-                .padding(.horizontal, 16)
+            }
+        }
+        .background(Color(uiColor: .systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
+        .padding(.horizontal, 16)
 
-                // Ruhige Stunden
-                VStack(spacing: 0) {
-                    HStack(spacing: 14) {
-                        Image(systemName: "moon.fill")
-                            .font(.system(size: 16))
-                            .foregroundColor(SS.primary)
-                            .frame(width: 28)
-                            .padding(.leading, 14)
-                        Text("Quiet Hours")
-                            .font(.system(size: 15))
-                        Spacer()
-                        Toggle("", isOn: $quietHoursEnabled)
-                            .labelsHidden()
-                            .padding(.trailing, 14)
-                    }
-                    .padding(.vertical, 14)
+        // Ruhige Stunden
+        VStack(spacing: 0) {
+            HStack(spacing: 14) {
+                Image(systemName: "moon.fill")
+                    .font(.system(size: 16))
+                    .foregroundColor(SS.primary)
+                    .frame(width: 28)
+                    .padding(.leading, 14)
+                Text("Quiet Hours")
+                    .font(.system(size: 15))
+                Spacer()
+                Toggle("", isOn: quietBinding(\.enabled))
+                    .labelsHidden()
+                    .padding(.trailing, 14)
+            }
+            .padding(.vertical, 14)
 
-                    if quietHoursEnabled {
-                        Divider().padding(.leading, 52)
-                        HStack(spacing: 14) {
-                            Image(systemName: "clock.fill")
-                                .font(.system(size: 16))
-                                .foregroundColor(.secondary)
-                                .frame(width: 28)
-                                .padding(.leading, 14)
-                            Text("From")
-                                .font(.system(size: 15))
-                                .foregroundColor(.secondary)
-                            DatePicker("", selection: $quietFrom, displayedComponents: .hourAndMinute)
-                                .labelsHidden()
-                            Text("to")
-                                .font(.system(size: 15))
-                                .foregroundColor(.secondary)
-                            DatePicker("", selection: $quietTo, displayedComponents: .hourAndMinute)
-                                .labelsHidden()
-                                .padding(.trailing, 14)
-                        }
-                        .padding(.vertical, 10)
-                    }
+            if current.quietHours.enabled {
+                Divider().padding(.leading, 52)
+                HStack(spacing: 14) {
+                    Image(systemName: "clock.fill")
+                        .font(.system(size: 16))
+                        .foregroundColor(.secondary)
+                        .frame(width: 28)
+                        .padding(.leading, 14)
+                    Text("From")
+                        .font(.system(size: 15))
+                        .foregroundColor(.secondary)
+                    DatePicker("", selection: timeBinding(\.from), displayedComponents: .hourAndMinute)
+                        .labelsHidden()
+                    Text("to")
+                        .font(.system(size: 15))
+                        .foregroundColor(.secondary)
+                    DatePicker("", selection: timeBinding(\.to), displayedComponents: .hourAndMinute)
+                        .labelsHidden()
+                        .padding(.trailing, 14)
                 }
-                .background(Color(uiColor: .systemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 16))
-                .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
-                .padding(.horizontal, 16)
-                .animation(.easeInOut(duration: 0.2), value: quietHoursEnabled)
+                .padding(.vertical, 10)
+            }
+        }
+        .background(Color(uiColor: .systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
+        .padding(.horizontal, 16)
+        .animation(.easeInOut(duration: 0.2), value: current.quietHours.enabled)
+
+        if let saveError {
+            Text(saveError)
+                .font(.system(size: 12))
+                .foregroundColor(.red)
+                .padding(.horizontal, 20)
+        }
+
+        // Ehrlicher Hinweis: es gibt noch keinen Push-/Mail-Versand fuer diese Kategorien
+        Text("Your choices are saved to your account. Push notifications are coming soon and will follow these settings automatically.")
+            .font(.system(size: 12))
+            .foregroundColor(.secondary)
+            .padding(.horizontal, 20)
+    }
+
+    // MARK: Bindings (jede Aenderung wird sofort gespeichert)
+
+    private func channelBinding(
+        _ category: WritableKeyPath<NotificationSettingsDTO, NotificationChannelDTO>,
+        _ channel: WritableKeyPath<NotificationChannelDTO, Bool>
+    ) -> Binding<Bool> {
+        Binding(
+            get: { settings?.notifications[keyPath: category][keyPath: channel] ?? false },
+            set: { newValue in
+                guard var updated = settings else { return }
+                updated.notifications[keyPath: category][keyPath: channel] = newValue
+                save(updated, patch: AccountSettingsPatch(notifications: updated.notifications))
+            }
+        )
+    }
+
+    private func quietBinding(_ key: WritableKeyPath<QuietHoursDTO, Bool>) -> Binding<Bool> {
+        Binding(
+            get: { settings?.quietHours[keyPath: key] ?? false },
+            set: { newValue in
+                guard var updated = settings else { return }
+                updated.quietHours[keyPath: key] = newValue
+                save(updated, patch: AccountSettingsPatch(quietHours: updated.quietHours))
+            }
+        )
+    }
+
+    private func timeBinding(_ key: WritableKeyPath<QuietHoursDTO, String>) -> Binding<Date> {
+        Binding(
+            get: { Self.date(from: settings?.quietHours[keyPath: key] ?? "00:00") },
+            set: { newValue in
+                guard var updated = settings else { return }
+                updated.quietHours[keyPath: key] = Self.hhmm(from: newValue)
+                save(updated, patch: AccountSettingsPatch(quietHours: updated.quietHours))
+            }
+        )
+    }
+
+    private static func date(from hhmm: String) -> Date {
+        let parts = hhmm.split(separator: ":").compactMap { Int($0) }
+        let hour = parts.first ?? 0, minute = parts.count > 1 ? parts[1] : 0
+        return Calendar.current.date(bySettingHour: hour, minute: minute, second: 0, of: Date()) ?? Date()
+    }
+
+    private static func hhmm(from date: Date) -> String {
+        let c = Calendar.current.dateComponents([.hour, .minute], from: date)
+        return String(format: "%02d:%02d", c.hour ?? 0, c.minute ?? 0)
+    }
+
+    // MARK: Laden / Speichern
+
+    private func load() async {
+        loadError = nil
+        do {
+            settings = try await APIClient.shared.fetchAccountSettings().settings
+        } catch {
+            loadError = "Couldn't load your notification settings. Check your connection and try again."
+        }
+    }
+
+    /// Optimistisch anzeigen, im Fehlerfall auf den vorherigen Stand zurueck
+    private func save(_ updated: AccountSettingsDTO, patch: AccountSettingsPatch) {
+        let previous = settings
+        settings = updated
+        saveError = nil
+        Task {
+            do {
+                settings = try await APIClient.shared.updateAccountSettings(patch)
+            } catch {
+                settings = previous
+                saveError = "Couldn't save. Please try again."
             }
         }
     }
@@ -530,97 +637,143 @@ struct NotificationSettingsView: View {
 
 struct PaymentsPayoutsView: View {
     enum PayoutMethod: String, CaseIterable {
-        case bankAccount = "Bank Account"
-        case paypal      = "PayPal"
+        case bank, paypal
+        var label: String { self == .bank ? "Bank Account" : "PayPal" }
     }
     enum PayoutFrequency: String, CaseIterable {
-        case instant  = "Immediately"
-        case weekly   = "Weekly"
-        case monthly  = "Monthly"
+        case instant, weekly, monthly
+        var label: String {
+            switch self {
+            case .instant: return "Immediately"
+            case .weekly:  return "Weekly"
+            case .monthly: return "Monthly"
+            }
+        }
     }
 
-    @State private var selectedMethod:    PayoutMethod    = .bankAccount
+    @State private var selectedMethod:    PayoutMethod    = .bank
     @State private var iban:              String          = ""
     @State private var paypalEmail:       String          = ""
     @State private var selectedFrequency: PayoutFrequency = .weekly
+    @State private var savedIbanMasked:   String?
+    @State private var isLoading          = true
+    @State private var isSaving           = false
+    @State private var errorMessage:      String?
     @State private var showSavedToast     = false
 
     var body: some View {
         SubScreenShell(title: "Payments & Payouts") {
             VStack(spacing: 16) {
-                // Methode wählen
-                sectionCard("Payout Method") {
-                    HStack(spacing: 0) {
-                        ForEach(PayoutMethod.allCases, id: \.self) { method in
-                            Button {
-                                withAnimation(.easeInOut(duration: 0.2)) { selectedMethod = method }
-                            } label: {
-                                Text(method.rawValue)
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundColor(selectedMethod == method ? .white : .secondary)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 10)
-                                    .background(selectedMethod == method ? SS.primary : Color.clear)
-                                    .clipShape(Capsule())
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(4)
-                    .background(Color.gray.opacity(0.1))
-                    .clipShape(Capsule())
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 12)
-
-                    Divider().padding(.horizontal, 14)
-
-                    if selectedMethod == .bankAccount {
-                        inputRow(icon: "building.columns.fill", placeholder: "IBAN (e.g. DE89 3704 0044 ...)", text: $iban)
-                    } else {
-                        inputRow(icon: "p.circle.fill", placeholder: "PayPal E-Mail", text: $paypalEmail)
-                    }
+                if isLoading {
+                    ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
+                } else {
+                    form
                 }
-
-                // Auszahlungsrhythmus
-                sectionCard("Payout Frequency") {
-                    VStack(spacing: 0) {
-                        ForEach(PayoutFrequency.allCases, id: \.self) { freq in
-                            Button {
-                                selectedFrequency = freq
-                            } label: {
-                                HStack(spacing: 14) {
-                                    Image(systemName: selectedFrequency == freq ? "checkmark.circle.fill" : "circle")
-                                        .font(.system(size: 18))
-                                        .foregroundColor(selectedFrequency == freq ? SS.primary : .secondary)
-                                        .frame(width: 28)
-                                        .padding(.leading, 14)
-                                    Text(freq.rawValue)
-                                        .font(.system(size: 15))
-                                        .foregroundColor(.primary)
-                                    Spacer()
-                                }
-                                .padding(.vertical, 14)
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            if freq != PayoutFrequency.allCases.last {
-                                Divider().padding(.leading, 52)
-                            }
-                        }
-                    }
-                }
-
-                // Speichern
-                Button { savePayout() } label: {
-                    Text("Save")
-                        .fontWeight(.semibold)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(SSPrimaryButtonStyle())
-                .padding(.horizontal, 16)
             }
             .padding(.horizontal, 16)
         }
+        .task { await load() }
+    }
+
+    @ViewBuilder
+    private var form: some View {
+        // Methode wählen
+        sectionCard("Payout Method") {
+            HStack(spacing: 0) {
+                ForEach(PayoutMethod.allCases, id: \.self) { method in
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) { selectedMethod = method }
+                    } label: {
+                        Text(method.label)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(selectedMethod == method ? .white : .secondary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(selectedMethod == method ? SS.primary : Color.clear)
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(4)
+            .background(Color.gray.opacity(0.1))
+            .clipShape(Capsule())
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+
+            Divider().padding(.horizontal, 14)
+
+            if selectedMethod == .bank {
+                // Gespeicherte IBAN kommt nur maskiert zurueck — leer lassen = unveraendert
+                inputRow(icon: "building.columns.fill",
+                         placeholder: savedIbanMasked.map { "Saved: \($0)" } ?? "IBAN (e.g. DE89 3704 0044 ...)",
+                         text: $iban)
+                    .textInputAutocapitalization(.characters)
+                    .autocorrectionDisabled()
+            } else {
+                inputRow(icon: "p.circle.fill", placeholder: "PayPal E-Mail", text: $paypalEmail)
+                    .keyboardType(.emailAddress)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+            }
+        }
+
+        // Auszahlungsrhythmus
+        sectionCard("Payout Frequency") {
+            VStack(spacing: 0) {
+                ForEach(PayoutFrequency.allCases, id: \.self) { freq in
+                    Button {
+                        selectedFrequency = freq
+                    } label: {
+                        HStack(spacing: 14) {
+                            Image(systemName: selectedFrequency == freq ? "checkmark.circle.fill" : "circle")
+                                .font(.system(size: 18))
+                                .foregroundColor(selectedFrequency == freq ? SS.primary : .secondary)
+                                .frame(width: 28)
+                                .padding(.leading, 14)
+                            Text(freq.label)
+                                .font(.system(size: 15))
+                                .foregroundColor(.primary)
+                            Spacer()
+                        }
+                        .padding(.vertical, 14)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    if freq != PayoutFrequency.allCases.last {
+                        Divider().padding(.leading, 52)
+                    }
+                }
+            }
+        }
+
+        if let errorMessage {
+            Text(errorMessage)
+                .font(.system(size: 13))
+                .foregroundColor(.red)
+                .padding(.horizontal, 4)
+        } else if showSavedToast {
+            Label("Saved", systemImage: "checkmark.circle.fill")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.green)
+        }
+
+        // Speichern
+        Button { Task { await savePayout() } } label: {
+            if isSaving {
+                ProgressView().tint(.white).frame(maxWidth: .infinity)
+            } else {
+                Text("Save").fontWeight(.semibold).frame(maxWidth: .infinity)
+            }
+        }
+        .buttonStyle(SSPrimaryButtonStyle())
+        .disabled(isSaving)
+
+        // TODO: Echte Auszahlungen (Zahlungsdienstleister) gibt es noch nicht — Daten werden nur hinterlegt
+        Text("Your payout details are stored securely and shown only masked. Automatic payouts will use them once in-app payments launch.")
+            .font(.system(size: 12))
+            .foregroundColor(.secondary)
+            .padding(.horizontal, 4)
     }
 
     private func inputRow(icon: String, placeholder: String, text: Binding<String>) -> some View {
@@ -637,15 +790,47 @@ struct PaymentsPayoutsView: View {
         .padding(.vertical, 14)
     }
 
-    private func savePayout() {
-        UserDefaults.standard.set(selectedMethod.rawValue,    forKey: "payoutMethod")
-        UserDefaults.standard.set(iban,                        forKey: "payoutIBAN")
-        UserDefaults.standard.set(paypalEmail,                 forKey: "payoutPayPalEmail")
-        UserDefaults.standard.set(selectedFrequency.rawValue,  forKey: "payoutFrequency")
-        withAnimation { showSavedToast = true }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-            withAnimation { showSavedToast = false }
+    private func apply(_ payout: PayoutSettingsDTO) {
+        selectedMethod    = PayoutMethod(rawValue: payout.method) ?? .bank
+        selectedFrequency = PayoutFrequency(rawValue: payout.frequency) ?? .weekly
+        paypalEmail       = payout.paypalEmail ?? ""
+        savedIbanMasked   = payout.ibanMasked
+        iban              = ""
+    }
+
+    private func load() async {
+        isLoading = true
+        do {
+            apply(try await APIClient.shared.fetchAccountSettings().settings.payout)
+            errorMessage = nil
+        } catch {
+            errorMessage = "Couldn't load your payout settings."
         }
+        isLoading = false
+    }
+
+    private func savePayout() async {
+        isSaving = true
+        errorMessage = nil
+        showSavedToast = false
+        let trimmedIban = iban.trimmingCharacters(in: .whitespaces)
+        let patch = AccountSettingsPatch(payout: .init(
+            method: selectedMethod.rawValue,
+            iban: trimmedIban.isEmpty ? nil : trimmedIban,      // leer = gespeicherte IBAN behalten
+            paypalEmail: selectedMethod == .paypal ? paypalEmail.trimmingCharacters(in: .whitespaces) : nil,
+            frequency: selectedFrequency.rawValue
+        ))
+        do {
+            apply(try await APIClient.shared.updateAccountSettings(patch).payout)
+            withAnimation { showSavedToast = true }
+        } catch {
+            errorMessage = (error as? APIError)?.message.contains("iban") == true
+                ? "That IBAN doesn't look right. Please check it."
+                : ((error as? APIError)?.message.contains("paypalEmail") == true
+                    ? "Please enter a valid PayPal email."
+                    : "Couldn't save. Please try again.")
+        }
+        isSaving = false
     }
 }
 
@@ -657,6 +842,8 @@ struct PrivacyDataView: View {
     @State private var accountPaused    = false
     @State private var showDeleteAlert  = false
     @State private var showPauseConfirm = false
+    @State private var isUpdatingPause  = false
+    @State private var pauseError: String?
     @State private var isDeletingAccount = false
 
     var body: some View {
@@ -684,19 +871,33 @@ struct PrivacyDataView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Pause Account")
                                 .font(.system(size: 15))
-                            Text("Applications & visibility will be disabled")
+                            Text(pauseSubtitle)
                                 .font(.system(size: 11))
                                 .foregroundColor(.secondary)
                         }
                         Spacer()
-                        Toggle("", isOn: $accountPaused)
+                        if isUpdatingPause {
+                            ProgressView().padding(.trailing, 14)
+                        } else {
+                            Toggle("", isOn: Binding(
+                                get: { accountPaused },
+                                set: { wantsPause in
+                                    if wantsPause { showPauseConfirm = true } else { Task { await setPaused(false) } }
+                                }
+                            ))
                             .labelsHidden()
-                            .onChange(of: accountPaused) { _, newValue in
-                                if newValue { showPauseConfirm = true }
-                            }
                             .padding(.trailing, 14)
+                        }
                     }
                     .padding(.vertical, 14)
+
+                    if let pauseError {
+                        Text(pauseError)
+                            .font(.system(size: 12))
+                            .foregroundColor(.red)
+                            .padding(.horizontal, 14)
+                            .padding(.bottom, 12)
+                    }
                 }
 
                 // Konto löschen
@@ -739,34 +940,52 @@ struct PrivacyDataView: View {
             Text("All your data will be permanently deleted. This action cannot be undone.")
         }
         .alert("Pause Account?", isPresented: $showPauseConfirm) {
-            Button("Pause") {
-                UserDefaults.standard.set(true, forKey: "accountPaused")
-            }
-            Button("Cancel", role: .cancel) { accountPaused = false }
+            Button("Pause") { Task { await setPaused(true) } }
+            Button("Cancel", role: .cancel) {}
         } message: {
-            Text("You will no longer appear in search results and will not be able to submit applications.")
+            Text(isEmployer
+                 ? "Your job posts will be hidden from workers and nobody can apply until you resume."
+                 : "You won't be able to apply for jobs until you resume your account.")
         }
-        .onAppear {
-            accountPaused = UserDefaults.standard.bool(forKey: "accountPaused")
+        .task {
+            accountPaused = userStore.currentUser?.isPaused == true
+            if let fresh = try? await APIClient.shared.fetchAccountSettings().paused {
+                accountPaused = fresh
+            }
         }
+    }
+
+    private var isEmployer: Bool { userStore.currentUser?.role == .employer }
+
+    private var pauseSubtitle: String {
+        if accountPaused {
+            return isEmployer ? "Paused · your jobs are hidden from workers" : "Paused · you can't apply for jobs"
+        }
+        return isEmployer ? "Hide your jobs and stop new applications" : "Stop applying for jobs for a while"
+    }
+
+    private func setPaused(_ paused: Bool) async {
+        isUpdatingPause = true
+        pauseError = nil
+        do {
+            accountPaused = try await APIClient.shared.setAccountPaused(paused)
+            await userStore.refreshMe()
+        } catch {
+            pauseError = "Couldn't update your account status. Please try again."
+        }
+        isUpdatingPause = false
     }
 }
 
 // MARK: - App Preferences
 
 struct AppPreferencesView: View {
-    enum AppColorScheme: String, CaseIterable {
-        case system = "System"
-        case light  = "Light"
-        case dark   = "Dark"
-    }
-    enum AppLanguage: String, CaseIterable {
-        case german  = "German"
-        case english = "English"
-    }
+    // Pro Geraet gespeichert, wirkt sofort (swipeShiftApp liest denselben Key)
+    @AppStorage(AppColorSchemePreference.storageKey) private var colorSchemeRaw = AppColorSchemePreference.system.rawValue
 
-    @State private var colorScheme: AppColorScheme = .system
-    @State private var language:    AppLanguage     = .german
+    private var colorScheme: AppColorSchemePreference {
+        AppColorSchemePreference(rawValue: colorSchemeRaw) ?? .system
+    }
 
     var body: some View {
         SubScreenShell(title: "App Preferences") {
@@ -774,9 +993,9 @@ struct AppPreferencesView: View {
                 // Erscheinungsbild
                 sectionCard("Appearance") {
                     VStack(spacing: 0) {
-                        ForEach(AppColorScheme.allCases, id: \.self) { scheme in
+                        ForEach(AppColorSchemePreference.allCases, id: \.self) { scheme in
                             Button {
-                                colorScheme = scheme
+                                colorSchemeRaw = scheme.rawValue
                             } label: {
                                 HStack(spacing: 14) {
                                     Image(systemName: schemeIcon(scheme))
@@ -784,7 +1003,7 @@ struct AppPreferencesView: View {
                                         .foregroundColor(SS.primary)
                                         .frame(width: 28)
                                         .padding(.leading, 14)
-                                    Text(scheme.rawValue)
+                                    Text(scheme.label)
                                         .font(.system(size: 15))
                                         .foregroundColor(.primary)
                                     Spacer()
@@ -799,53 +1018,39 @@ struct AppPreferencesView: View {
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
-                            if scheme != AppColorScheme.allCases.last {
+                            if scheme != AppColorSchemePreference.allCases.last {
                                 Divider().padding(.leading, 52)
                             }
                         }
                     }
                 }
 
-                // Sprache
+                // Sprache — die App ist bisher nur auf Englisch; keine Auswahl ohne Wirkung anbieten.
+                // TODO: Mit Lokalisierung (Localizable.xcstrings) hier auf die iOS-App-Spracheinstellung verlinken
                 sectionCard("Language") {
-                    VStack(spacing: 0) {
-                        ForEach(AppLanguage.allCases, id: \.self) { lang in
-                            Button {
-                                language = lang
-                            } label: {
-                                HStack(spacing: 14) {
-                                    Image(systemName: "globe")
-                                        .font(.system(size: 16))
-                                        .foregroundColor(SS.primary)
-                                        .frame(width: 28)
-                                        .padding(.leading, 14)
-                                    Text(lang.rawValue)
-                                        .font(.system(size: 15))
-                                        .foregroundColor(.primary)
-                                    Spacer()
-                                    if language == lang {
-                                        Image(systemName: "checkmark")
-                                            .font(.system(size: 14, weight: .semibold))
-                                            .foregroundColor(SS.primary)
-                                            .padding(.trailing, 14)
-                                    }
-                                }
-                                .padding(.vertical, 14)
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            if lang != AppLanguage.allCases.last {
-                                Divider().padding(.leading, 52)
-                            }
+                    HStack(spacing: 14) {
+                        Image(systemName: "globe")
+                            .font(.system(size: 16))
+                            .foregroundColor(SS.primary)
+                            .frame(width: 28)
+                            .padding(.leading, 14)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("English")
+                                .font(.system(size: 15))
+                            Text("More languages are coming soon.")
+                                .font(.system(size: 12))
+                                .foregroundColor(.secondary)
                         }
+                        Spacer()
                     }
+                    .padding(.vertical, 14)
                 }
             }
             .padding(.horizontal, 16)
         }
     }
 
-    private func schemeIcon(_ scheme: AppColorScheme) -> String {
+    private func schemeIcon(_ scheme: AppColorSchemePreference) -> String {
         switch scheme {
         case .system: return "circle.lefthalf.filled"
         case .light:  return "sun.max.fill"

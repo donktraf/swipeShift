@@ -20,6 +20,7 @@ enum ApplyResult {
     case shiftAlreadyTaken
     case shiftUnavailable
     case schedulingConflict
+    case accountPaused
 }
 
 // MARK: - ApplyFlowView
@@ -138,6 +139,7 @@ struct ApplyFlowView: View {
             case .shiftTaken:         withAnimation { step = .result(.shiftAlreadyTaken) }
             case .jobUnavailable:     withAnimation { step = .result(.shiftUnavailable) }
             case .schedulingConflict: withAnimation { step = .result(.schedulingConflict) }
+            case .accountPaused:      withAnimation { step = .result(.accountPaused) }
             }
         } catch {
             withAnimation { step = .result(.connectionLost) }
@@ -533,6 +535,8 @@ struct ApplyResultView: View {
             onRetry()
         case .shiftAlreadyTaken, .shiftUnavailable:
             onExitToJobList()
+        case .accountPaused:
+            onDone()
         case .schedulingConflict:
             showCalendarSheet = true
         }
@@ -662,6 +666,16 @@ private struct ResultConfig {
             primaryActionLabel   = "View My Calendar"
             primaryActionColor   = .orange
             secondaryActionLabel = "Go Back Anyway"
+
+        case .accountPaused:
+            iconName        = "pause.circle.fill"
+            iconColor       = .orange
+            iconBackground  = Color.orange.opacity(0.1)
+            title           = "Your Account Is Paused"
+            message         = "You can't apply while your account is paused. Resume it under Account Settings → Privacy & Data."
+            primaryActionLabel   = "OK"
+            primaryActionColor   = SS.primary
+            secondaryActionLabel = nil
         }
     }
 }

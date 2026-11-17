@@ -62,6 +62,8 @@ struct UserDTO: Decodable {
     let hasSocialLogin: Bool?
     /// 2FA per E-Mail-Code aktiv (nur in GET /auth/me enthalten)
     let twoFactorEnabled: Bool?
+    /// Konto pausiert (nur in GET /auth/me enthalten)
+    let isPaused: Bool?
 }
 
 // Login/Register Response

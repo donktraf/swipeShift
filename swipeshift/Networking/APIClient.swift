@@ -13,6 +13,7 @@ enum ApplyError: Error {
     case shiftTaken
     case jobUnavailable
     case schedulingConflict
+    case accountPaused
 }
 
 // Einfacher API-Client fürs MVP (später: Error-Typen, Refresh-Token, etc.)
@@ -71,6 +72,7 @@ final class APIClient {
                 case "SHIFT_TAKEN":          throw ApplyError.shiftTaken
                 case "JOB_UNAVAILABLE":      throw ApplyError.jobUnavailable
                 case "SCHEDULING_CONFLICT":  throw ApplyError.schedulingConflict
+                case "ACCOUNT_PAUSED":       throw ApplyError.accountPaused
                 default: break
                 }
             }
@@ -1011,6 +1013,37 @@ extension APIClient {
         try validate(response: resp, data: data)
         let sent = try JSONDecoder().decode(TwoFactorCodeSentDTO.self, from: data)
         return TwoFactorChallenge(challengeId: sent.challengeId, emailHint: sent.emailHint)
+    }
+}
+
+// MARK: - Account Settings
+
+extension APIClient {
+    // GET /auth/me/settings
+    func fetchAccountSettings() async throws -> AccountSettingsResponseDTO {
+        let req = try makeRequest(path: "/auth/me/settings", method: "GET")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+        return try JSONDecoder().decode(AccountSettingsResponseDTO.self, from: data)
+    }
+
+    // PATCH /auth/me/settings
+    func updateAccountSettings(_ patch: AccountSettingsPatch) async throws -> AccountSettingsDTO {
+        var req = try makeRequest(path: "/auth/me/settings", method: "PATCH")
+        req.httpBody = try JSONEncoder().encode(patch)
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+        return try JSONDecoder().decode(AccountSettingsResponseDTO.self, from: data).settings
+    }
+
+    // POST /auth/me/pause
+    func setAccountPaused(_ paused: Bool) async throws -> Bool {
+        var req = try makeRequest(path: "/auth/me/pause", method: "POST")
+        req.httpBody = try JSONEncoder().encode(["paused": paused])
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+        struct R: Decodable { let paused: Bool }
+        return try JSONDecoder().decode(R.self, from: data).paused
     }
 }
 
