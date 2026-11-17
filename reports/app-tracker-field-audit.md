@@ -178,3 +178,15 @@ Code: `SavedView.swift` (Worker) — Jobs/Companies-Tabs ✓, nach Datum gruppie
 | Financial (Employer) | ~~Zeitraum-Dropdown fehlt~~ ✅ umgesetzt 2026-11-16 |
 
 **Nicht tief geprüft:** Profile Screen (Edit-Profile-Felder für Worker+Employer) — umfangreichste Notion-Struktur, nur grob verifiziert. Bei Bedarf gezielt nachprüfen.
+
+---
+
+## Vollständiger Feld-Abgleich in Notion (2026-11-17)
+
+Alle Feldzeilen des App Development Trackers wurden gegen den Code geprüft (außer **Profile Screen**, da steht der Abgleich noch aus — Notion-Abfragelimit erreicht). Regel: gebaut → „Erledigt“; fehlt → bleibt „Nicht begonnen“; Abschnitte/Screens mit offenen Feldern → „In Arbeit“ mit Kommentar, was fehlt. Die offenen Punkte sind gebündelt als Aufgaben im Notion-Aufgaben-Tracker angelegt.
+
+**Neue Funde (vorher als „fertig“ geführt):**
+- `DetailedWorkerView.swift` (Worker-Profil für Arbeitgeber) zeigt **fest eingetragene Beispieldaten**: Bewertung 4.6 / „18 Jobs“, Kategorie-Bewertungen, Verfügbarkeit, Erfahrung, Präferenzen, Legal. Nur Name, Foto, Ort, Job und Accept/Decline sind echt.
+- `AccountSettingsView.swift`: Benachrichtigungen, Quiet Hours, Auszahlungsdaten, Konto pausieren, Dark Mode und Sprache sind nur lokaler `@State` — werden nicht gespeichert, haben keine Wirkung.
+- Währung ist überall fest „€“ (für US-Launch umstellen).
+- Arbeitgeber-Entwürfe lassen sich nicht bearbeiten oder löschen.
