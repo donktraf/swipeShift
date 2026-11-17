@@ -595,3 +595,17 @@ Fehlschlag.
 **Entscheidung Orchestrator:** ganze Beträge ohne Cent, sonst immer 2 Nachkommastellen ($18 / $15.50), Rundung nur auf Cent.
 **Runde 2 – implementer:** statische Formatter, Regel in iOS (`Money.format`/`Money.hourly`) und Backend (`formatAmount`/`formatPayText`, „$X / hr“) identisch, Seeds englisch (bis auf lange Beschreibungstexte im alten Seed). Vom Orchestrator nachgeprüft: 106/106 grün, Build ok, „€“ nur noch in der Migration.
 **Offen:** Migration anwenden; ältere `payText` behalten ihr Format („$15.5 / hour“), nur das Symbol wechselt; Auszahlung per IBAN ist EU-spezifisch (US: Routing + Kontonummer) – eigener Punkt.
+
+---
+
+# Dev-Loop 2026-11-18 — Chat: Melden/Blockieren, Fotos, Job-Kontext
+
+**Runde 1 – implementer:** `UserBlock`/`UserReport` + `src/routes.safety.js` (Melden mit Mail an Support, Blockieren/Entblocken), Senden bei Block in beide Richtungen gesperrt; Chat-Menü (Report, Block/Unblock, Contact support, Job details, beim Arbeitgeber View worker profile), Sicherheitshinweis, Profilfotos, Datums-Trenner, Datum/Schicht im Header, einklappbare Job-Infokarte, nach Jobende Zahlungsstatus + Merken. Migration `20261118090000_chat_safety`.
+**Tester (parallel):** 110/110 grün (+2 Randfall-Tests), Routen laden, Build ok.
+**Review 1:** keine kritischen Punkte. Warnungen: Blockierte konnten sich weiter auf Jobs bewerben (Belästigung über Bewerbungen), kein Rate-Limit auf Melden (Spam-Mails an Support), Rollback beim Senden entfernte falsche Nachricht, mailto-Betreff falsch kodiert, „gemerkt“-Status case-sensitiv.
+**Entscheidung Orchestrator:** Bewerbung bei Block wird abgelehnt (403 BLOCKED).
+**Runde 2 – implementer:** Apply-Block + eigener Zustand im Apply-Flow, Jobs blockierter Arbeitgeber im Feed ausgeblendet, Rate-Limits (10 Meldungen/h), Meldung ohne Chat nur bei bestehender Verbindung, exakter Rollback + Text zurück in die Eingabe, Kodierung, Avatar-URLs relativ/absolut.
+**Review 2:** keine kritischen Punkte. Vom Orchestrator behoben: Text einer fehlgeschlagenen Nachricht ging verloren, wenn der Chat inzwischen geschlossen war oder schon Text in der Eingabe stand; Kommentar, dass blockierte Arbeitgeber bewusst nur im Feed ausgeblendet werden. 112/112 grün, Build ok.
+
+**Bewusst nicht gebaut:** „Erneut buchen“ (braucht Einladungs-Flow), Liste blockierter Nutzer in den Einstellungen (Endpunkt vorhanden), Admin-Oberfläche für Meldungen (gehen per Mail an Support).
+**Offen:** Migration anwenden, Klick-Test (Meldung in MailHog, Block in beide Richtungen, Merken); Rate-Limit-Speicher ist pro Serverprozess.

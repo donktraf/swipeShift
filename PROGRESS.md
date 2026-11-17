@@ -772,3 +772,10 @@ Gefunden beim Profile-Screen-Abgleich: Legal-Schalter (Worker + Arbeitgeber) und
 - Backend: `formatAmount`/`formatPayText` in `src/utils/jobData.js` („$X / hr“, gleiche Regel wie iOS); Seeds auf $ und englische Texte
 - Migration `20261117230000_currency_usd` ersetzt das Symbol in bestehenden Lohn-/Schichttexten (keine Umrechnung)
 - Offen: Auszahlung per IBAN ist EU-spezifisch — für US Bankverbindung (Routing/Account Number) nötig
+
+### Chat: Melden, Blockieren, Fotos, Job-Kontext (2026-11-18)
+- Backend: `UserBlock`, `UserReport` (bewusst ohne Fremdschlüssel, Meldungen überleben Kontolöschung; Migration `20261118090000_chat_safety`); `src/routes.safety.js` — `POST /safety/reports` (Mail an `SUPPORT_EMAIL`, 10/h, nur bei bestehender Verbindung), `POST/DELETE/GET /safety/blocks`; `src/utils/safety.js` (+ Tests)
+- Block wirkt in beide Richtungen: Senden 403 `BLOCKED`, Bewerben 403 `BLOCKED`, Jobs im Feed ausgeblendet
+- Conversation-Payload: Gegenüber-ID + Foto, Ort, Lohn, Schicht, Zahlungsstatus, Block- und Merk-Status
+- iOS: `ChatSafety.swift`, `ChatView+Header.swift` — Menü (Report, Block/Unblock, Contact support per Mail, Job details, View worker profile), Sicherheitshinweis, Profilfotos in Liste und Header, Datums-Trenner, Datum/Schicht im Header, einklappbare Job-Infokarte, nach Jobende Zahlungsstatus + Firma/Worker merken; fehlgeschlagene Nachrichten landen wieder in der Eingabe
+- Offen: „Erneut buchen“, Liste blockierter Nutzer in den Einstellungen, Admin-Oberfläche für Meldungen
