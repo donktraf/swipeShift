@@ -570,3 +570,18 @@ Fehlschlag.
 **Bewusst nicht geändert:** Beim Veröffentlichen bleibt `createdAt` das Entwurfsdatum (Produktentscheidung).
 **Offen:** Migrationen `20261117180000_add_legal_consents` + `20261117200000_add_job_updated_at` lokal anwenden (Docker war aus), Klick-Test Edit/Delete/Publish im Simulator.
 **Status:** erfolgreich, 2 Review-Runden.
+
+---
+
+# Dev-Loop 2026-11-17 — Bewertungen vervollständigen
+
+**Aufgabe:** Drafts-Tab beim Bewerten war Platzhalter; es fehlten „Work quality“, „Top Worker“, „Würde wieder für die Firma arbeiten“ und die Zustimmung zur Veröffentlichung.
+
+**Runde 1 – implementer:** `ReviewDraft` + GET/PUT/DELETE `/employer/reviews/drafts`, `Review.workQuality` (nullable, Pflicht für neue Bewertungen) + `Review.topWorker`, `WorkerReview.wouldWorkAgain` + Quote im Firmenprofil (ab 3 Antworten), Pflicht-Checkbox `publishConsent`; Logik in `src/utils/reviewLogic.js`; alle Durchschnitte null-sicher. Nebenbei behoben: Worker-Bewertungsliste zeigte fast immer „Unknown Company“ (Name aus falschem Datensatz); doppelte Bewertung gab 500.
+**Tester (parallel):** 104/104 grün (+4 Randfall-Tests), Build ok.
+**Review 1:** keine kritischen Punkte. Warnungen: Bewertungsformular aus dem Chat überschrieb vorhandenen Entwurf mit Leerwerten; Worker-Bewertungen ohne Werte-/Statusprüfung (Quote manipulierbar); Doppel-Tipp → 500.
+**Runde 2 – implementer:** Chat lädt vorhandenen Entwurf vor (vorher nicht speicherbar), Toast „Draft saved“; Worker-Bewertung nur 1–5 und nur für eigenen, abgeschlossenen Job (gleiche Regel wie Job Applications/Kalender); P2002 → 409. Vom Orchestrator nachgeprüft (Import, Besitz-/Statusprüfung, 104/104 grün) statt weiterer Review-Runde.
+
+**Bewusst nicht gebaut:** Schalter „zählt zur Firmenbewertung“ (Produktentscheidung), Inhaltsmoderation (NOT MVP).
+**Offen:** Migration `20261117220000_review_drafts_and_fields` anwenden (Docker aus); Klick-Test; ältere App-Versionen können ohne `publishConsent`/`wouldWorkAgain` keine Firmen mehr bewerten (kein Release-Bestand, daher ok).
+**Status:** erfolgreich, 1 Review-Runde + Nachprüfung.

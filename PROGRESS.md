@@ -758,3 +758,11 @@ Gefunden beim Profile-Screen-Abgleich: Legal-Schalter (Worker + Arbeitgeber) und
 - `PUT /jobs/:id` (nur eigener Entwurf, optional direkt veröffentlichen, `company` bleibt wenn nicht gesendet) und `DELETE /jobs/:id` (nur eigener Entwurf) — beide atomar (`updateMany`/`deleteMany` mit `status: "draft"`), damit ein inzwischen veröffentlichter Job nie überschrieben/gelöscht wird; Fehler 404/403/409 `NOT_DRAFT`
 - iOS: `PostJobView(editingJobId:)` lädt und befüllt den Entwurf („Edit Draft“, Save Draft / Post Job, Fehlerzustand mit Retry/Close); Entwurfskarten mit Edit / Publish / Delete (Bestätigung) und „Last saved …“, Entwürfe nach letzter Änderung sortiert; „View Applicants“ auf veröffentlichten Jobs mit Bewerbern (`AllApplicantsView(jobId:jobTitle:)`); Fehler als Alert statt ganzer Fehleransicht
 - Offen: Klick-Test; beim Veröffentlichen bleibt das Erstelldatum das des Entwurfs
+
+### Bewertungen: Entwürfe, Work quality, Top Worker, Would work again (2026-11-17)
+- Backend: Modell `ReviewDraft`, `Review.workQuality` (nullable für Bestand) + `Review.topWorker`, `WorkerReview.wouldWorkAgain` (Migration `20261117220000_review_drafts_and_fields`); `src/utils/reviewLogic.js` (+ Tests) — Durchschnitte nur über vorhandene Werte, Draft-/Review-Validierung, Would-work-again-Quote (ab 3 Antworten)
+- `GET/PUT/DELETE /employer/reviews/drafts`; `POST /employer/reviews` verlangt 5 Kategorien, löscht den Entwurf in derselben Transaktion; Pending blendet Einträge mit Entwurf aus
+- `POST /worker/reviews` verlangt `wouldWorkAgain` + `publishConsent`, nur Werte 1–5 und nur für eigene, abgeschlossene Jobs; doppelte Bewertung → 409 statt 500
+- Firmenprofil: `wouldWorkAgainPercent`; Worker-Bewertungsliste zeigt den richtigen Firmennamen (vorher fast immer „Unknown Company“)
+- iOS: Bewertungsformular (Arbeitgeber) mit Work quality, „Highlight as Top Worker“, „Save as Draft“ + Toast; Drafts-Tab mit echten Entwürfen (öffnen, löschen); Chat-Formular lädt vorhandenen Entwurf; Firmen-Bewertung mit „Would you work here again?“ + Pflicht-Zustimmung; Worker-Bewertungen/Detailprofil zeigen Work quality und „Top Worker ×N“; Firmenprofil zeigt „X% would work here again“
+- Bewusst offen: Schalter „zählt zur Firmenbewertung“, Inhaltsmoderation
