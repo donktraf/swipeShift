@@ -190,3 +190,17 @@ Alle Feldzeilen des App Development Trackers wurden gegen den Code geprüft (au�
 - `AccountSettingsView.swift`: Benachrichtigungen, Quiet Hours, Auszahlungsdaten, Konto pausieren, Dark Mode und Sprache sind nur lokaler `@State` — werden nicht gespeichert, haben keine Wirkung. **✅ Behoben 2026-11-17:** im Konto gespeichert (`User.settings`, IBAN geprüft + nur maskiert zurück), Pause wirkt (Worker kann sich nicht bewerben, Jobs pausierter Arbeitgeber ausgeblendet), Dark Mode pro Gerät. Sprachauswahl entfernt (App nur Englisch).
 - Währung ist überall fest „€“ (für US-Launch umstellen).
 - Arbeitgeber-Entwürfe lassen sich nicht bearbeiten oder löschen.
+
+---
+
+## Profile Screen — Feld-Abgleich (2026-11-17, nachgeholt)
+
+Alle 93 Feld-/Abschnittszeilen unter „Profile Screen“ gegen `EditProfileView.swift`, `WorkerProfileView.swift`, `ReviewsView.swift`, `EditEmployerProfileView.swift`, `routes.employer.js` (PATCH /employer/profile), `routes.companies.js` und `schema.prisma` geprüft. Ergebnis in Notion: 36 Erledigt / 14 In Arbeit / 43 Nicht begonnen; Profile Screen selbst → „In Arbeit“.
+
+**Worker (Employee) — weitgehend da.** Fehlt: Tageszeiten-Verfügbarkeit, Schicht-Typen One-day/Weekend (Last-minute = „same-day jobs“), Vorerfahrung pro Bereich, Zustimmung zum Bewertungssystem, Zuverlässigkeits-Score. **Bug-artig:** Schalter „I am at least 18“ (und „Terms“) in EditProfileView sind nur lokaler `@State`, werden nicht gespeichert; Geburtsdatum wird nirgends auf 18+ geprüft (Onboarding-Schema: `dateOfBirth: z.string().min(1)`).
+
+**Arbeitgeber (Company) — Basisdaten da** (Name, Logo, Website, Größe, Branche/Business Areas, Bio, Standorte, Firmen-E-Mail/Telefon, Bewertung + abgeschlossene Jobs im Firmenprofil, AGB im Onboarding). Fehlt: Gründungsjahr, Slogan, Social Links, Straße/PLZ/Kartenpin, mehrere Bundesstaaten/Remote, öffentlicher Ansprechpartner, Zuverlässigkeit, „Would work again“-Quote, Werte/Dresscode-Hinweise, **Payment & Billing komplett**, **Rechtsdaten** (EIN, Registernr., Rechtsname, Rechnungsadresse, Plattformgebühren, Worker-Klassifizierung), **Company Preferences (Matching) komplett**. **Bug-artig:** die fünf Legal-Schalter im Firmenprofil werden nicht gespeichert (nicht in `UpdateEmployerProfileRequest`).
+
+**Einheiten:** Reisedistanz im Worker-Profil als „km“, im DetailedWorkerView als „mi“; JobListView/RadarView ebenfalls „km“ — zusammen mit der €-Währung für den US-Launch vereinheitlichen.
+
+Gebündelt als Aufgabe im Aufgaben-Tracker: „App: Profil-Lücken (Worker + Arbeitgeber)“.
