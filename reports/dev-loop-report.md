@@ -585,3 +585,13 @@ Fehlschlag.
 **Bewusst nicht gebaut:** Schalter „zählt zur Firmenbewertung“ (Produktentscheidung), Inhaltsmoderation (NOT MVP).
 **Offen:** Migration `20261117220000_review_drafts_and_fields` anwenden (Docker aus); Klick-Test; ältere App-Versionen können ohne `publishConsent`/`wouldWorkAgain` keine Firmen mehr bewerten (kein Release-Bestand, daher ok).
 **Status:** erfolgreich, 1 Review-Runde + Nachprüfung.
+
+---
+
+# Dev-Loop 2026-11-17 — Währung € → US-Dollar
+
+**Runde 1 – implementer:** zentrale Formatierung `utils/Money.swift` (feste Locale en_US, USD), alle €-Hartcodierungen und Euro-Symbole in iOS ersetzt; Backend `formatPayText` in `jobData.js`, Seeds auf $; Migration `20261117230000_currency_usd` ersetzt das Symbol in `Job.payText` und `Job.shifts` (keine Umrechnung, keine Nutzer-Freitexte).
+**Review 1:** keine kritischen Punkte. Warnungen: Formatter pro Aufruf neu; Rundung geändert (vorher abgeschnitten, jetzt auf ganze Dollar gerundet → $15.50 erschien als „$16“, Summen inkonsistent); App „/ hr“ vs. Backend „/ hour“; deutsche Reste in Seed-Daten.
+**Entscheidung Orchestrator:** ganze Beträge ohne Cent, sonst immer 2 Nachkommastellen ($18 / $15.50), Rundung nur auf Cent.
+**Runde 2 – implementer:** statische Formatter, Regel in iOS (`Money.format`/`Money.hourly`) und Backend (`formatAmount`/`formatPayText`, „$X / hr“) identisch, Seeds englisch (bis auf lange Beschreibungstexte im alten Seed). Vom Orchestrator nachgeprüft: 106/106 grün, Build ok, „€“ nur noch in der Migration.
+**Offen:** Migration anwenden; ältere `payText` behalten ihr Format („$15.5 / hour“), nur das Symbol wechselt; Auszahlung per IBAN ist EU-spezifisch (US: Routing + Kontonummer) – eigener Punkt.

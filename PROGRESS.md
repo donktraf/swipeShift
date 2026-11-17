@@ -766,3 +766,9 @@ Gefunden beim Profile-Screen-Abgleich: Legal-Schalter (Worker + Arbeitgeber) und
 - Firmenprofil: `wouldWorkAgainPercent`; Worker-Bewertungsliste zeigt den richtigen Firmennamen (vorher fast immer „Unknown Company“)
 - iOS: Bewertungsformular (Arbeitgeber) mit Work quality, „Highlight as Top Worker“, „Save as Draft“ + Toast; Drafts-Tab mit echten Entwürfen (öffnen, löschen); Chat-Formular lädt vorhandenen Entwurf; Firmen-Bewertung mit „Would you work here again?“ + Pflicht-Zustimmung; Worker-Bewertungen/Detailprofil zeigen Work quality und „Top Worker ×N“; Firmenprofil zeigt „X% would work here again“
 - Bewusst offen: Schalter „zählt zur Firmenbewertung“, Inhaltsmoderation
+
+### Währung € → US-Dollar (2026-11-17)
+- iOS: `utils/Money.swift` — einheitliche Formatierung (en_US, USD): ganze Beträge ohne Cent, sonst 2 Nachkommastellen („$18“, „$15.50“, „$1,250.75“); alle Beträge, Labels („Hourly Rate ($)“) und Euro-Symbole umgestellt
+- Backend: `formatAmount`/`formatPayText` in `src/utils/jobData.js` („$X / hr“, gleiche Regel wie iOS); Seeds auf $ und englische Texte
+- Migration `20261117230000_currency_usd` ersetzt das Symbol in bestehenden Lohn-/Schichttexten (keine Umrechnung)
+- Offen: Auszahlung per IBAN ist EU-spezifisch — für US Bankverbindung (Routing/Account Number) nötig
