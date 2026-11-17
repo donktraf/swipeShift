@@ -7,6 +7,7 @@ const { requireVerifiedEmail } = require("./middlewares/requireVerifiedEmail");
 const { resolvePeriod, isInPeriod, buildBuckets } = require("./utils/period");
 const { jobCosts, shiftHours } = require("./utils/jobCost");
 const { mergeConsents, allowedKeysForRole } = require("./utils/consents");
+const { validateDraftData, validateReviewSubmission, reviewOverall } = require("./utils/reviewLogic");
 const { ageFromBirthDate, availableDays, summarizeReviews, summarizeCompletedJobs, cleanSelfRatedSkills, stringList } = require("./utils/workerProfile");
 
 const router = express.Router();
@@ -111,8 +112,8 @@ router.get("/workers/:userId", requireAuth, requireVerifiedEmail, async (req, re
         where: { workerId: userId },
         orderBy: { createdAt: "desc" },
         select: {
-          communication: true, teamwork: true, reliability: true, underPressure: true,
-          wouldRehire: true, comment: true, createdAt: true,
+          communication: true, teamwork: true, reliability: true, underPressure: true, workQuality: true,
+          topWorker: true, wouldRehire: true, comment: true, createdAt: true,
           apply: { select: { job: { select: { title: true } } } },
         },
       }),
@@ -165,6 +166,7 @@ router.get("/workers/:userId", requireAuth, requireVerifiedEmail, async (req, re
           createdAt: r.createdAt,
           rating: summarizeReviews([r]).overallRating,
           wouldRehire: r.wouldRehire,
+          topWorker: r.topWorker,
         })),
     });
   } catch (err) {
@@ -582,9 +584,45 @@ router.post("/jobs/:jobId/pay-all", requireAuth, requireVerifiedEmail, async (re
   }
 });
 
+// Worker-/Job-Infos fuer Pending-/Draft-Eintraege
+const REVIEW_APPLY_INCLUDE = {
+  user: { select: { id: true, firstName: true, lastName: true } },
+  job:  { select: { id: true, title: true, category: true, startTime: true, logoEmoji: true } },
+};
+
+function mapReviewApply(a) {
+  return {
+    applyId:     a.id,
+    workerId:    a.userId,
+    workerName:  `${a.user?.firstName ?? ""} ${a.user?.lastName ?? ""}`.trim() || "Unknown Worker",
+    workerPhoto: null,
+    jobId:       a.jobId,
+    jobTitle:    a.job?.title    ?? "—",
+    jobCategory: a.job?.category ?? "—",
+    shiftDate:   a.job?.startTime ?? a.createdAt,
+    logoEmoji:   a.job?.logoEmoji ?? "🏢",
+  };
+}
+
+// Gemeinsame Pruefung fuer POST /reviews und PUT /reviews/drafts/:applyId:
+// Apply gehoert zu einem Job dieses Arbeitgebers, wurde angenommen und hat noch keine Bewertung.
+// → { apply } | { status, error }
+async function loadReviewableApply(applyId, employerId) {
+  const apply = await prisma.apply.findUnique({
+    where:   { id: applyId },
+    include: { job: { select: { employerId: true } }, review: { select: { id: true } } },
+  });
+  if (!apply)                              return { status: 404, error: "Application not found" };
+  if (apply.job.employerId !== employerId) return { status: 403, error: "Forbidden" };
+  if (apply.status !== "accepted")         return { status: 400, error: "Only accepted workers can be reviewed" };
+  if (apply.review)                        return { status: 409, error: "This worker has already been reviewed" };
+  return { apply };
+}
+
 // ─────────────────────────────────────────────
 // GET /employer/reviews/pending
-// Akzeptierte Worker ohne Bewertung
+// Akzeptierte Worker ohne Bewertung UND ohne Entwurf.
+// Entscheidung: Eintraege mit Entwurf erscheinen nur im Drafts-Tab (nicht doppelt).
 // ─────────────────────────────────────────────
 router.get("/reviews/pending", requireAuth, requireVerifiedEmail, async (req, res) => {
   try {
@@ -595,27 +633,13 @@ router.get("/reviews/pending", requireAuth, requireVerifiedEmail, async (req, re
         status: "accepted",
         job:    { employerId },
         review: null,
+        reviewDraft: null,
       },
-      include: {
-        user: { select: { id: true, firstName: true, lastName: true } },
-        job:  { select: { id: true, title: true, category: true, startTime: true, logoEmoji: true } },
-      },
+      include: REVIEW_APPLY_INCLUDE,
       orderBy: { createdAt: "desc" },
     });
 
-    const pending = applies.map((a) => ({
-      applyId:     a.id,
-      workerId:    a.userId,
-      workerName:  `${a.user?.firstName ?? ""} ${a.user?.lastName ?? ""}`.trim() || "Unknown Worker",
-      workerPhoto: null,
-      jobId:       a.jobId,
-      jobTitle:    a.job?.title    ?? "—",
-      jobCategory: a.job?.category ?? "—",
-      shiftDate:   a.job?.startTime ?? a.createdAt,
-      logoEmoji:   a.job?.logoEmoji ?? "🏢",
-    }));
-
-    return res.json({ pending });
+    return res.json({ pending: applies.map(mapReviewApply) });
   } catch (err) {
     console.error("GET /employer/reviews/pending error:", err);
     return res.status(500).json({ error: "Internal server error" });
@@ -623,43 +647,115 @@ router.get("/reviews/pending", requireAuth, requireVerifiedEmail, async (req, re
 });
 
 // ─────────────────────────────────────────────
+// GET /employer/reviews/drafts
+// Gespeicherte Entwuerfe (nur fuer Applies ohne endgueltige Bewertung)
+// ─────────────────────────────────────────────
+router.get("/reviews/drafts", requireAuth, requireVerifiedEmail, async (req, res) => {
+  try {
+    const employerId = req.auth.sub;
+
+    const drafts = await prisma.reviewDraft.findMany({
+      where:   { employerId, apply: { review: null, job: { employerId } } },
+      include: { apply: { include: REVIEW_APPLY_INCLUDE } },
+      orderBy: { updatedAt: "desc" },
+    });
+
+    return res.json({
+      drafts: drafts.map((d) => {
+        const parsed = validateDraftData(d.data);
+        return {
+          ...mapReviewApply(d.apply),
+          draft:     parsed.ok ? parsed.data : {},
+          updatedAt: d.updatedAt,
+        };
+      }),
+    });
+  } catch (err) {
+    console.error("GET /employer/reviews/drafts error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─────────────────────────────────────────────
+// PUT /employer/reviews/drafts/:applyId
+// Entwurf anlegen/ueberschreiben (upsert)
+// ─────────────────────────────────────────────
+router.put("/reviews/drafts/:applyId", requireAuth, requireVerifiedEmail, async (req, res) => {
+  try {
+    const employerId = req.auth.sub;
+    const { applyId } = req.params;
+
+    const parsed = validateDraftData(req.body);
+    if (!parsed.ok) return res.status(400).json({ error: parsed.error });
+
+    const check = await loadReviewableApply(applyId, employerId);
+    if (check.error) return res.status(check.status).json({ error: check.error });
+
+    const draft = await prisma.reviewDraft.upsert({
+      where:  { applyId },
+      create: { applyId, employerId, data: parsed.data },
+      update: { data: parsed.data },
+    });
+
+    return res.json({ ok: true, draft: { applyId, draft: parsed.data, updatedAt: draft.updatedAt } });
+  } catch (err) {
+    console.error("PUT /employer/reviews/drafts/:applyId error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─────────────────────────────────────────────
+// DELETE /employer/reviews/drafts/:applyId
+// ─────────────────────────────────────────────
+router.delete("/reviews/drafts/:applyId", requireAuth, requireVerifiedEmail, async (req, res) => {
+  try {
+    const employerId = req.auth.sub;
+    const { count } = await prisma.reviewDraft.deleteMany({
+      where: { applyId: req.params.applyId, employerId },
+    });
+    if (!count) return res.status(404).json({ error: "Draft not found" });
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("DELETE /employer/reviews/drafts/:applyId error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─────────────────────────────────────────────
 // POST /employer/reviews
-// Bewertung einreichen
+// Bewertung einreichen (loescht einen vorhandenen Entwurf in derselben Transaktion)
 // ─────────────────────────────────────────────
 router.post("/reviews", requireAuth, requireVerifiedEmail, async (req, res) => {
   try {
     const employerId = req.auth.sub;
-    const { applyId, communication, teamwork, reliability, underPressure, comment, wouldRehire } = req.body;
-
-    if (!applyId || !communication || !teamwork || !reliability || !underPressure) {
+    const applyId = req.body?.applyId;
+    if (!applyId || typeof applyId !== "string") {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    const apply = await prisma.apply.findUnique({
-      where:   { id: applyId },
-      include: { job: { select: { employerId: true } } },
-    });
+    const parsed = validateReviewSubmission(req.body);
+    if (!parsed.ok) return res.status(400).json({ error: parsed.error });
 
-    if (!apply)                              return res.status(404).json({ error: "Application not found" });
-    if (apply.job.employerId !== employerId) return res.status(403).json({ error: "Forbidden" });
+    const check = await loadReviewableApply(applyId, employerId);
+    if (check.error) return res.status(check.status).json({ error: check.error });
+    const { apply } = check;
 
-    const review = await prisma.review.create({
-      data: {
-        employerId,
-        workerId:     apply.userId,
-        jobId:        apply.jobId,
-        applyId,
-        communication: Number(communication),
-        teamwork:      Number(teamwork),
-        reliability:   Number(reliability),
-        underPressure: Number(underPressure),
-        comment:       comment ?? null,
-        wouldRehire:   wouldRehire ?? true,
-      },
-    });
+    const [review] = await prisma.$transaction([
+      prisma.review.create({
+        data: {
+          employerId,
+          workerId: apply.userId,
+          jobId:    apply.jobId,
+          applyId,
+          ...parsed.data,
+        },
+      }),
+      prisma.reviewDraft.deleteMany({ where: { applyId } }),
+    ]);
 
     return res.json({ ok: true, review });
   } catch (err) {
+    if (err?.code === "P2002") return res.status(409).json({ error: "This worker has already been reviewed." });
     console.error("POST /employer/reviews error:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
@@ -675,14 +771,7 @@ router.get("/reviews", requireAuth, requireVerifiedEmail, async (req, res) => {
 
     const reviews = await prisma.review.findMany({
       where:   { employerId },
-      include: {
-        apply: {
-          include: {
-            user: { select: { id: true, firstName: true, lastName: true } },
-            job:  { select: { id: true, title: true, category: true, startTime: true, logoEmoji: true } },
-          },
-        },
-      },
+      include: { apply: { include: REVIEW_APPLY_INCLUDE } },
       orderBy: { createdAt: "desc" },
     });
 
@@ -698,6 +787,9 @@ router.get("/reviews", requireAuth, requireVerifiedEmail, async (req, res) => {
       teamwork:      r.teamwork,
       reliability:   r.reliability,
       underPressure: r.underPressure,
+      workQuality:   r.workQuality,
+      overall:       reviewOverall(r),
+      topWorker:     r.topWorker,
       comment:       r.comment,
       wouldRehire:   r.wouldRehire,
       createdAt:     r.createdAt,

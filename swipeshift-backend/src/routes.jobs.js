@@ -1,5 +1,6 @@
 // src/routes.jobs.js
 
+const { reviewOverall } = require("./utils/reviewLogic");
 const express = require("express");
 const { prisma } = require("./prisma");
 const { requireAuth } = require("./auth");
@@ -655,11 +656,12 @@ router.get("/:id/applicants", requireAuth, requireVerifiedEmail, async (req, res
     // Ratings pro Worker aggregieren
     const reviews = await prisma.review.findMany({
       where: { workerId: { in: userIds } },
-      select: { workerId: true, communication: true, teamwork: true, reliability: true, underPressure: true },
+      select: { workerId: true, communication: true, teamwork: true, reliability: true, underPressure: true, workQuality: true },
     });
     const ratingMap = {};
     for (const r of reviews) {
-      const avg = (r.communication + r.teamwork + r.reliability + r.underPressure) / 4;
+      const avg = reviewOverall(r); // Mittel der vorhandenen Kategorien (workQuality kann null sein)
+      if (avg === null) continue;
       if (!ratingMap[r.workerId]) ratingMap[r.workerId] = { sum: 0, count: 0 };
       ratingMap[r.workerId].sum   += avg;
       ratingMap[r.workerId].count += 1;

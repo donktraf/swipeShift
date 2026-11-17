@@ -3,6 +3,7 @@
 // (GET /employer/workers/:userId). Ersetzt die frueher fest eingetragenen Beispieldaten.
 
 const { deriveApplicationStatus } = require("./applicationStatus");
+const { summarizeEmployerReviews } = require("./reviewLogic");
 
 const RATING_KEYS = ["communication", "teamwork", "reliability", "underPressure"];
 
@@ -49,29 +50,18 @@ function stringList(value) {
   return Array.isArray(value) ? value.filter((v) => typeof v === "string" && v.trim()) : [];
 }
 
-// Bewertungen anderer Arbeitgeber (Review-Model) → Durchschnitte
+// Bewertungen anderer Arbeitgeber (Review-Model) → Durchschnitte.
+// workQuality kann bei Bestandsdaten null sein → Durchschnitte nur ueber vorhandene Werte.
 function summarizeReviews(reviews) {
   const list = Array.isArray(reviews) ? reviews : [];
-  if (!list.length) {
-    return { reviewCount: 0, overallRating: null, ratings: null, wouldRehirePercent: null };
-  }
-  const ratings = {};
-  for (const key of RATING_KEYS) {
-    const values = list.map((r) => Number(r[key])).filter((v) => Number.isFinite(v) && v > 0);
-    ratings[key] = values.length ? round1(values.reduce((a, b) => a + b, 0) / values.length) : null;
-  }
-  const perReview = list
-    .map((r) => {
-      const v = RATING_KEYS.map((k) => Number(r[k])).filter((x) => Number.isFinite(x) && x > 0);
-      return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
-    })
-    .filter((v) => v !== null);
+  const base = summarizeEmployerReviews(list);
   const rehire = list.filter((r) => r.wouldRehire === true).length;
   return {
-    reviewCount: list.length,
-    overallRating: perReview.length ? round1(perReview.reduce((a, b) => a + b, 0) / perReview.length) : null,
-    ratings,
-    wouldRehirePercent: Math.round((rehire / list.length) * 100),
+    reviewCount: base.reviewCount,
+    overallRating: base.overallRating,
+    ratings: base.ratings,
+    wouldRehirePercent: list.length ? Math.round((rehire / list.length) * 100) : null,
+    topWorkerCount: base.topWorkerCount,
   };
 }
 

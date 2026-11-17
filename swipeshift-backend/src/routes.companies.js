@@ -5,6 +5,7 @@ const express = require("express");
 const router  = express.Router();
 const { prisma } = require("./prisma.js");
 const { computeResponseStats } = require("./utils/responseStats");
+const { computeWouldWorkAgain } = require("./utils/reviewLogic");
 
 // GET /companies/:name
 // Gibt Company-Daten aus Jobs + Employer-Profil zurück
@@ -64,6 +65,14 @@ router.get("/:name", async (req, res) => {
     });
     const responseStats = computeResponseStats(applies);
 
+    // Anteil "would work here again" (nur nicht-null Werte; null bei < 3 Antworten)
+    // (eigene Abfrage ueber alle Reviews, da workerReviews oben auf 20 begrenzt ist)
+    const workAgainRows = await prisma.workerReview.findMany({
+      where:  { apply: { job: { company: { equals: companyName, mode: "insensitive" } } } },
+      select: { wouldWorkAgain: true },
+    });
+    const wouldWorkAgain = computeWouldWorkAgain(workAgainRows);
+
     // Aggregierte Werte
     const activeJobs         = jobs.filter(j => j.status === "published").length;
     const completedJobsCount = jobs.filter(j => j.status === "completed").length;
@@ -116,6 +125,8 @@ router.get("/:name", async (req, res) => {
       // 0..1 bzw. Stunden; null = zu wenig Daten ("New on platform")
       responseRate:         responseStats.responseRate,
       typicalResponseHours: responseStats.typicalResponseHours,
+      // 0..100; null = zu wenig Antworten (< 3)
+      wouldWorkAgainPercent: wouldWorkAgain.percent,
       // Aus Employer-Profil (falls vorhanden)
       about:          employerProfile?.companyDescription ?? null,
       website:        employerProfile?.websiteOrInstagram ?? null,

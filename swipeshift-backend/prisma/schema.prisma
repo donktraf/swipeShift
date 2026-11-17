@@ -252,6 +252,7 @@ model Apply {
   review         Review?
   savedApplicant SavedApplicant?
   workerReview   WorkerReview?
+  reviewDraft    ReviewDraft?
 
   @@unique([userId, jobId])
   @@index([userId])
@@ -269,8 +270,11 @@ model Review {
   teamwork      Int
   reliability   Int
   underPressure Int
+  // Nullable: Bestandsbewertungen haben diese Kategorie nicht
+  workQuality   Int?
   comment       String?  @db.Text
   wouldRehire   Boolean  @default(true)
+  topWorker     Boolean  @default(false)
 
   createdAt DateTime @default(now())
 
@@ -279,6 +283,20 @@ model Review {
   @@index([employerId])
   @@index([workerId])
   @@index([jobId])
+}
+
+// Gespeicherter Entwurf einer Arbeitgeber→Worker-Bewertung
+model ReviewDraft {
+  id         String   @id @default(uuid())
+  applyId    String   @unique
+  employerId String
+  data       Json
+  updatedAt  DateTime @updatedAt
+  createdAt  DateTime @default(now())
+
+  apply Apply @relation(fields: [applyId], references: [id], onDelete: Cascade)
+
+  @@index([employerId])
 }
 
 model WorkerReview {
@@ -292,6 +310,8 @@ model WorkerReview {
   workEnvironment        Int
   jobDescriptionAccuracy Int
   overallExperience      Int
+  // Nullable: Bestandsbewertungen kennen diese Frage nicht
+  wouldWorkAgain         Boolean?
   comment                String?  @db.Text
   createdAt              DateTime @default(now())
 

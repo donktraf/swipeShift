@@ -38,7 +38,7 @@ test("availableDays filtert verfuegbare Tage", () => {
 });
 
 test("summarizeReviews: leer → null-Werte", () => {
-  assert.deepEqual(summarizeReviews([]), { reviewCount: 0, overallRating: null, ratings: null, wouldRehirePercent: null });
+  assert.deepEqual(summarizeReviews([]), { reviewCount: 0, overallRating: null, ratings: null, wouldRehirePercent: null, topWorkerCount: 0 });
 });
 
 test("summarizeReviews: Durchschnitte + Rehire-Quote", () => {
@@ -47,7 +47,7 @@ test("summarizeReviews: Durchschnitte + Rehire-Quote", () => {
     { communication: 3, teamwork: 4, reliability: 3, underPressure: 2, wouldRehire: false },
   ]);
   assert.equal(s.reviewCount, 2);
-  assert.deepEqual(s.ratings, { communication: 4, teamwork: 4, reliability: 4, underPressure: 3 });
+  assert.deepEqual(s.ratings, { communication: 4, teamwork: 4, reliability: 4, underPressure: 3, workQuality: null });
   assert.equal(s.overallRating, 3.8); // (4.5 + 3) / 2 = 3.75 → 3.8
   assert.equal(s.wouldRehirePercent, 50);
 });

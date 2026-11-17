@@ -7,6 +7,7 @@ const { requireVerifiedEmail } = require("./middlewares/requireVerifiedEmail");
 const { resolvePeriod, prismaRange } = require("./utils/period");
 const { payPerWorker } = require("./utils/jobCost");
 const { deriveApplicationStatus } = require("./utils/applicationStatus");
+const { reviewOverall, summarizeEmployerReviews, computeWouldWorkAgain, validateWorkerReviewBody } = require("./utils/reviewLogic");
 
 const router = express.Router();
 
@@ -167,7 +168,7 @@ router.get("/reviews", requireAuth, requireVerifiedEmail, async (req, res) => {
         apply: {
           include: {
             job: {
-              select: { title: true, category: true, startTime: true, logoEmoji: true },
+              select: { title: true, category: true, startTime: true, logoEmoji: true, company: true },
             },
             user: {
               include: {
@@ -182,26 +183,29 @@ router.get("/reviews", requireAuth, requireVerifiedEmail, async (req, res) => {
 
     const mapped = reviews.map((r) => ({
       id:            r.id,
-      companyName:   r.apply.user?.employer?.companyName ?? "Unknown Company",
+      companyName:   r.apply.job?.company ?? "Unknown Company",
       jobType:       r.apply.job?.category ?? "—",
       date:          r.createdAt,
       communication: r.communication,
       teamwork:      r.teamwork,
       reliability:   r.reliability,
       underPressure: r.underPressure,
+      workQuality:   r.workQuality, // null bei Bestandsbewertungen
+      overall:       reviewOverall(r),
+      topWorker:     r.topWorker,
       feedback:      r.comment ?? "",
       wouldRehire:   r.wouldRehire,
     }));
 
-    const avg = (arr) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
-    const overallRating = mapped.length
-      ? avg(mapped.map((r) => (r.communication + r.teamwork + r.reliability + r.underPressure) / 4))
-      : 0;
+    // Durchschnitte nur ueber vorhandene Werte (workQuality kann null sein)
+    const summary = summarizeEmployerReviews(reviews);
 
     return res.json({
-      reviews:       mapped,
-      overallRating: Math.round(overallRating * 10) / 10,
-      totalJobs:     mapped.length,
+      reviews:        mapped,
+      overallRating:  summary.overallRating ?? 0,
+      totalJobs:      mapped.length,
+      skillAverages:  summary.ratings, // null wenn keine Bewertungen
+      topWorkerCount: summary.topWorkerCount,
     });
   } catch (err) {
     console.error("GET /worker/reviews error:", err);
@@ -223,8 +227,12 @@ router.post("/reviews", requireAuth, requireVerifiedEmail, async (req, res) => {
       workEnvironment,
       jobDescriptionAccuracy,
       overallExperience,
+      wouldWorkAgain,
       comment,
     } = req.body;
+
+    const consentError = validateWorkerReviewBody(req.body);
+    if (consentError) return res.status(400).json({ error: consentError });
 
     if (
       !applyId ||
@@ -237,9 +245,13 @@ router.post("/reviews", requireAuth, requireVerifiedEmail, async (req, res) => {
 
     const apply = await prisma.apply.findFirst({
       where:   { id: applyId, userId: workerId },
-      include: { job: { select: { employerId: true } } },
+      include: { job: { select: { employerId: true, status: true, endTime: true } } },
     });
     if (!apply) return res.status(404).json({ error: "Application not found" });
+    // Gleiche Regel wie Job Applications/Kalender: nur angenommene, abgeschlossene Jobs sind bewertbar
+    if (deriveApplicationStatus(apply, apply.job).displayStatus !== "completed") {
+      return res.status(400).json({ error: "You can rate an employer once the job is completed." });
+    }
 
     const review = await prisma.workerReview.upsert({
       where:  { applyId },
@@ -253,6 +265,7 @@ router.post("/reviews", requireAuth, requireVerifiedEmail, async (req, res) => {
         workEnvironment,
         jobDescriptionAccuracy,
         overallExperience,
+        wouldWorkAgain,
         comment:               comment ?? null,
       },
       update: {
@@ -261,12 +274,14 @@ router.post("/reviews", requireAuth, requireVerifiedEmail, async (req, res) => {
         workEnvironment,
         jobDescriptionAccuracy,
         overallExperience,
+        wouldWorkAgain,
         comment: comment ?? null,
       },
     });
 
     return res.json({ ok: true, review });
   } catch (err) {
+    if (err?.code === "P2002") return res.status(409).json({ error: "You have already rated this employer." });
     console.error("POST /worker/reviews error:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
