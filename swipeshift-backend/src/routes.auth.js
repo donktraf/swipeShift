@@ -26,6 +26,8 @@ const router = express.Router();
 // Gemeinsame Felder (für beide Rollen)
 const baseRegisterSchema = z.object({
   role: z.enum(["worker", "employer"]),
+  // optional (alte Clients senden es nicht); wird nur gespeichert, wenn true
+  acceptedTerms: z.boolean().optional(),
   firstName: z.string().min(1),
   lastName: z.string().min(1),
 
@@ -37,19 +39,9 @@ const baseRegisterSchema = z.object({
   lng: z.number(),
 });
 
-// Helper: 18+ Check (ISO String)
-function isAtLeast18(dateISO) {
-  const dob = new Date(dateISO);
-  if (Number.isNaN(dob.getTime())) return false;
-
-  const today = new Date();
-  const eighteenYearsAgo = new Date(
-    today.getFullYear() - 18,
-    today.getMonth(),
-    today.getDate()
-  );
-  return dob <= eighteenYearsAgo;
-}
+// 18+ Check: siehe utils/age.js
+const { isAtLeast18 } = require("./utils/age");
+const { mergeConsents } = require("./utils/consents");
 
 // Worker-spezifisch
 const workerRegisterSchema = baseRegisterSchema.extend({
@@ -194,6 +186,9 @@ router.post("/register", registerLimiter, async (req, res) => {
       lat: data.lat,
       lng: data.lng,
       onboarding: "complete",
+      ...(data.acceptedTerms === true
+        ? { legalConsents: mergeConsents(null, { terms: true }, ["terms"]) }
+        : {}),
 
       worker: data.role === "worker"
         ? {

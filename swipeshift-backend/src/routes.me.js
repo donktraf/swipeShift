@@ -3,6 +3,8 @@ const express = require("express");
 const { prisma } = require("./prisma.js");
 const { requireAuth } = require("./auth");
 const { z } = require("zod");
+const { isAtLeast18, UNDERAGE_MESSAGE } = require("./utils/age");
+const { mergeConsents, consentsToFlags, allowedKeysForRole } = require("./utils/consents");
 
 const router = express.Router();
 
@@ -23,7 +25,7 @@ router.get("/me", requireAuth, async (req, res) => {
       select: {
         id: true, email: true, role: true, onboarding: true,
         firstName: true, lastName: true, location: true, lat: true, lng: true,
-        emailVerifiedAt: true, passwordHash: true, createdAt: true, twoFactorEnabled: true, pausedAt: true,
+        emailVerifiedAt: true, passwordHash: true, createdAt: true, twoFactorEnabled: true, pausedAt: true, legalConsents: true,
         worker: {
           select: {
             bio: true, dateOfBirth: true, jobInterests: true, availability: true, profilePhotoUrl: true,
@@ -60,10 +62,11 @@ router.get("/me", requireAuth, async (req, res) => {
       hasSocialLogin:   user.passwordHash === "SOCIAL_LOGIN",
       twoFactorEnabled: user.twoFactorEnabled,
       isPaused:         !!user.pausedAt,
+      legalConsents:    consentsToFlags(user.legalConsents),
       createdAt:        user.createdAt,
       // Worker fields
       bio:                  user.worker?.bio                ?? null,
-      dateOfBirth:          user.worker?.dateOfBirth?.toISOString() ?? null,
+      dateOfBirth:          user.worker?.dateOfBirth?.toISOString().slice(0, 10) ?? null, // reines yyyy-MM-dd
       jobInterests:         user.worker?.jobInterests        ?? [],
       availability:         user.worker?.availability        ?? [],
       profilePhotoUrl:      user.worker?.profilePhotoUrl     ?? null,
@@ -110,8 +113,13 @@ router.patch("/me", requireAuth, async (req, res) => {
       firstName, lastName, location, bio, dateOfBirth, availability, jobInterests,
       phone, willingToRelocate, maxTravelDistance, transport,
       availableForSameDay, preferredCategories, payRangeMin, payRangeMax,
-      skills, workAuthorization, profilePhotoUrl,
+      skills, workAuthorization, profilePhotoUrl, legalConsents,
     } = req.body;
+
+    // 18+ serverseitig pruefen, bevor irgendetwas gespeichert wird
+    if (dateOfBirth && !isAtLeast18(dateOfBirth)) {
+      return res.status(400).json({ error: UNDERAGE_MESSAGE });
+    }
 
     // User-Felder aktualisieren
     const userUpdate = {};
@@ -127,6 +135,12 @@ router.patch("/me", requireAuth, async (req, res) => {
           if (coords) { userUpdate.lat = coords.lat; userUpdate.lng = coords.lng; }
         } catch (_) {}
       }
+    }
+
+    // Rechtliche Zustimmungen (Whitelist je Rolle)
+    if (legalConsents !== undefined) {
+      const current = await prisma.user.findUnique({ where: { id: userId }, select: { role: true, legalConsents: true } });
+      userUpdate.legalConsents = mergeConsents(current?.legalConsents, legalConsents, allowedKeysForRole(current?.role));
     }
 
     if (Object.keys(userUpdate).length > 0) {

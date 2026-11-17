@@ -4,7 +4,7 @@ const express = require("express");
 const { prisma } = require("./prisma");
 const { requireAuth } = require("./auth");
 const { requireVerifiedEmail } = require("./middlewares/requireVerifiedEmail");
-const { haversineDistance } = require("./utils/haversine");
+const { haversineDistance, kmToMiles, milesToKm } = require("./utils/haversine");
 const { geocodeLocation }  = require("./utils/geocode");
 const { normalizeCancellationReason } = require("./utils/applicationStatus");
 
@@ -204,14 +204,20 @@ router.get("/", requireAuth, requireVerifiedEmail, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────
-// GET /jobs/nearby?lat=48.77&lng=9.18&radius=100
+// GET /jobs/nearby?lat=48.77&lng=9.18&radius=100[&unit=mi]
+// radius ist standardmaessig in km (abwaertskompatibel); mit unit=mi in Meilen (so ruft die iOS-App auf).
+// Angezeigt wird immer in Meilen (distanceText "x.x mi away", distanceMiles); distanceKm bleibt fuer Sortierung/Kompatibilitaet.
 // ─────────────────────────────────────────────
 router.get("/nearby", requireAuth, requireVerifiedEmail, async (req, res) => {
   try {
     const userId = req.auth.sub;
     const lat    = parseFloat(req.query.lat);
     const lng    = parseFloat(req.query.lng);
-    const radius = parseFloat(req.query.radius) || 100;
+    const radiusUnit = req.query.unit === "mi" ? "mi" : "km";
+    const rawRadius = parseFloat(req.query.radius);
+    const maxRadius = 500; // sinnvolle Obergrenze in der gewaehlten Einheit
+    const radius = rawRadius > 0 && rawRadius <= maxRadius ? rawRadius : (radiusUnit === "mi" ? 60 : 100);
+    const radiusKm = radiusUnit === "mi" ? milesToKm(radius) : radius;
 
     if (isNaN(lat) || isNaN(lng)) {
       return res.status(400).json({ error: "Missing or invalid lat/lng query params." });
@@ -229,18 +235,21 @@ router.get("/nearby", requireAuth, requireVerifiedEmail, async (req, res) => {
 
     const nearbyJobs = allJobs
       .map((job) => {
-        const distanceKm = haversineDistance(lat, lng, job.lat, job.lng);
-        return { ...job, distanceKm: Math.round(distanceKm * 10) / 10, distanceText: `${Math.round(distanceKm * 10) / 10} km away` };
+        const rawKm = haversineDistance(lat, lng, job.lat, job.lng);
+        const distanceMiles = Math.round(kmToMiles(rawKm) * 10) / 10;
+        // _rawKm (ungerundet) nur fuer Filter/Sortierung; gerundete Werte nur zur Anzeige
+        return { ...job, _rawKm: rawKm, distanceKm: Math.round(rawKm * 10) / 10, distanceMiles, distanceText: `${distanceMiles} mi away` };
       })
-      .filter((job) => job.distanceKm <= radius)
-      .sort((a, b) => a.distanceKm - b.distanceKm);
+      .filter((job) => job._rawKm <= radiusKm)
+      .sort((a, b) => a._rawKm - b._rawKm)
+      .map(({ _rawKm, ...job }) => job);
 
-    console.log(`Found ${nearbyJobs.length} jobs within ${radius}km of (${lat}, ${lng})`);
+    console.log(`Found ${nearbyJobs.length} jobs within ${radius}${radiusUnit} of (${lat}, ${lng})`);
 
     const enrichedNearby = await enrichJobsWithRatings(nearbyJobs, userId);
     return res.json({
       jobs: enrichedNearby,
-      meta: { lat, lng, radius, total: nearbyJobs.length },
+      meta: { lat, lng, radius, unit: radiusUnit, total: nearbyJobs.length },
     });
   } catch (err) {
     console.error("GET /jobs/nearby error:", err);

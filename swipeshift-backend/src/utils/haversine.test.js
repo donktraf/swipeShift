@@ -25,3 +25,10 @@ test("haversineDistance ist symmetrisch (A->B == B->A)", () => {
   const backward = haversineDistance(50.1109, 8.6821, 52.52, 13.405);
   assert.equal(forward, backward);
 });
+
+test("kmToMiles / milesToKm rechnen korrekt um und sind invers", () => {
+  const { kmToMiles, milesToKm } = require("./haversine");
+  assert.ok(Math.abs(kmToMiles(1.609344) - 1) < 1e-9);
+  assert.ok(Math.abs(milesToKm(10) - 16.09344) < 1e-9);
+  assert.ok(Math.abs(kmToMiles(milesToKm(25)) - 25) < 1e-9);
+});

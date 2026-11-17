@@ -3,8 +3,20 @@ const express = require("express");
 const { prisma } = require("./prisma");
 const { requireAuth } = require("./auth");
 const { z } = require("zod");
+const { isAtLeast18, UNDERAGE_MESSAGE } = require("./utils/age");
+const { mergeConsents } = require("./utils/consents");
+
+// AGB muessen beim Abschluss des Onboardings akzeptiert sein (wird als legalConsents.terms gespeichert)
+const TERMS_REQUIRED_MESSAGE = "You must accept the Terms of Service to continue.";
+const acceptedTermsField = z.literal(true, { error: TERMS_REQUIRED_MESSAGE });
 
 const router = express.Router();
+
+// Klare Meldung fuer Terms/18+ statt generischem "Invalid input"
+function firstIssueMessage(error) {
+  const known = error.issues.find((i) => i.message === TERMS_REQUIRED_MESSAGE || i.message === UNDERAGE_MESSAGE);
+  return known ? known.message : "Invalid input";
+}
 
 /**
  * Worker onboarding body
@@ -24,6 +36,11 @@ const workerSchema = z.object({
 
   bio: z.string().max(300).optional(),
   profilePhotoUrl: z.string().url().optional(),
+  acceptedTerms: acceptedTermsField,
+}).superRefine((data, ctx) => {
+  if (!isAtLeast18(data.dateOfBirth)) {
+    ctx.addIssue({ code: "custom", path: ["dateOfBirth"], message: UNDERAGE_MESSAGE });
+  }
 });
 
 router.patch("/worker", requireAuth, async (req, res) => {
@@ -32,7 +49,7 @@ router.patch("/worker", requireAuth, async (req, res) => {
   console.log("Aufruf API. onBoarding Worker. Empfangende Daten: ", parsed);
 
   if (!parsed.success) {
-    return res.status(400).json({ error: "Invalid input", details: parsed.error.flatten() });
+    return res.status(400).json({ error: firstIssueMessage(parsed.error), details: parsed.error.flatten() });
   }
 
   try {
@@ -71,6 +88,7 @@ router.patch("/worker", requireAuth, async (req, res) => {
       where: { id: userId },
       data: {
         onboarding: "complete",
+        legalConsents: mergeConsents(user.legalConsents, { terms: true }, ["terms"]),
         location: data.location,
         lat: data.lat,
         lng: data.lng,
@@ -119,12 +137,13 @@ const employerSchema = z.object({
   companyLogoUrl: z.string().url().optional(),
   websiteOrInstagram: z.string().min(1).optional(),
   companyDescription: z.string().max(300).optional(),
+  acceptedTerms: acceptedTermsField,
 });
 
 router.patch("/employer", requireAuth, async (req, res) => {
   const parsed = employerSchema.safeParse(req.body);
   if (!parsed.success) {
-    return res.status(400).json({ error: "Invalid input", details: parsed.error.flatten() });
+    return res.status(400).json({ error: firstIssueMessage(parsed.error), details: parsed.error.flatten() });
   }
 
   try {
@@ -165,6 +184,7 @@ router.patch("/employer", requireAuth, async (req, res) => {
       where: { id: userId },
       data: {
         onboarding: "complete",
+        legalConsents: mergeConsents(user.legalConsents, { terms: true }, ["terms"]),
         location: data.location,
         ...(data.firstName ? { firstName: data.firstName } : {}),
         ...(data.lastName ? { lastName: data.lastName } : {}),

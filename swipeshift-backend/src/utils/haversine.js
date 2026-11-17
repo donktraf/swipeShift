@@ -30,4 +30,15 @@ function toRad(deg) {
   return (deg * Math.PI) / 180;
 }
 
-module.exports = { haversineDistance };
+// Umrechnung km <-> Meilen. Intern wird in km gerechnet, angezeigt/gefiltert wird in Meilen (US-Launch).
+const KM_PER_MILE = 1.609344;
+
+function kmToMiles(km) {
+  return km / KM_PER_MILE;
+}
+
+function milesToKm(miles) {
+  return miles * KM_PER_MILE;
+}
+
+module.exports = { haversineDistance, kmToMiles, milesToKm, KM_PER_MILE };

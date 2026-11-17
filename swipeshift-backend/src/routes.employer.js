@@ -6,6 +6,7 @@ const { requireAuth } = require("./auth");
 const { requireVerifiedEmail } = require("./middlewares/requireVerifiedEmail");
 const { resolvePeriod, isInPeriod, buildBuckets } = require("./utils/period");
 const { jobCosts, shiftHours } = require("./utils/jobCost");
+const { mergeConsents, allowedKeysForRole } = require("./utils/consents");
 const { ageFromBirthDate, availableDays, summarizeReviews, summarizeCompletedJobs, cleanSelfRatedSkills, stringList } = require("./utils/workerProfile");
 
 const router = express.Router();
@@ -870,12 +871,18 @@ router.patch("/profile", requireAuth, async (req, res) => {
       companyBio, website, teamMembers, profilePhotoUrl,
       // Your Profile
       firstName, lastName, jobTitle, managerRole,
+      // Legal Agreements: { key: Bool }
+      legalConsents,
     } = req.body;
 
     // User-Felder
     const userUpdate = {};
     if (firstName !== undefined) userUpdate.firstName = firstName;
     if (lastName  !== undefined) userUpdate.lastName  = lastName;
+    if (legalConsents !== undefined) {
+      const current = await prisma.user.findUnique({ where: { id: userId }, select: { role: true, legalConsents: true } });
+      userUpdate.legalConsents = mergeConsents(current?.legalConsents, legalConsents, allowedKeysForRole(current?.role));
+    }
     if (Object.keys(userUpdate).length > 0) {
       await prisma.user.update({ where: { id: userId }, data: userUpdate });
     }
