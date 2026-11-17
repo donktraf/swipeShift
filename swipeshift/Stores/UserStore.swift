@@ -18,7 +18,13 @@ final class UserStore: ObservableObject {
 
     /// Der aktuell eingeloggte User, wie er vom Backend zurückkommt.
     /// Wenn `nil` → User ist nicht eingeloggt.
-    @Published var currentUser: UserDTO? = nil
+    @Published var currentUser: UserDTO? = nil {
+        didSet {
+            // Nutzerwechsel oder Logout: Stadt des vorherigen Profils nie weiterverwenden
+            if currentUser == nil || currentUser?.id != oldValue?.id { DeviceInfo.clearCity() }
+            if let location = currentUser?.location { DeviceInfo.updateCity(fromLocation: location) }
+        }
+    }
 
     /// Optionaler Fehlertext für UI (z. B. Toast, Inline-Error).
     @Published var errorMessage: String? = nil
@@ -478,6 +484,7 @@ final class UserStore: ObservableObject {
         }
         APIClient.shared.token = nil
         currentUser = nil
+        DeviceInfo.clearCity()   // Ort gehoert zum Profil des ausgeloggten Users
         errorMessage = nil
         pendingTwoFactor = nil
     }

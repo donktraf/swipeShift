@@ -17,16 +17,24 @@ struct TwoFactorCodeView: View {
     /// Fordert einen neuen Code an. Rueckgabe: Fehlermeldung oder nil.
     let onResend: () async -> String?
     let onCancel: () -> Void
+    /// Bei `.totp`: kein "Send a new code", dafuer "Use a backup code"
+    var method: TwoFactorMethod = .email
 
     @State private var code = ""
     @State private var errorMessage: String?
     @State private var infoMessage: String?
     @State private var isSubmitting = false
     @State private var isResending = false
+    @State private var useBackupCode = false
     @FocusState private var fieldFocused: Bool
 
     private var digitsOnly: String { code.filter(\.isNumber) }
-    private var canSubmit: Bool { digitsOnly.count == 6 && !isSubmitting }
+    /// Backup-Code ohne Bindestrich/Leerzeichen, gross
+    private var backupNormalized: String { code.uppercased().filter { $0.isLetter || $0.isNumber } }
+    private var enteredCode: String { useBackupCode ? backupNormalized : digitsOnly }
+    private var canSubmit: Bool {
+        !isSubmitting && (useBackupCode ? backupNormalized.count == 10 : digitsOnly.count == 6)
+    }
 
     var body: some View {
         NavigationStack {
@@ -34,7 +42,7 @@ struct TwoFactorCodeView: View {
                 SS.background().ignoresSafeArea()
 
                 VStack(spacing: 20) {
-                    Image(systemName: "envelope.badge.shield.half.filled")
+                    Image(systemName: method == .totp ? "lock.shield.fill" : "envelope.badge.shield.half.filled")
                         .font(.system(size: 44))
                         .foregroundColor(SS.primary)
                         .padding(.top, 24)
@@ -42,17 +50,19 @@ struct TwoFactorCodeView: View {
                     VStack(spacing: 8) {
                         Text(title)
                             .font(.system(size: 22, weight: .bold))
-                        Text(message)
+                        Text(useBackupCode ? "Enter one of the backup codes you saved when you set up two-factor. Each code works once." : message)
                             .font(.system(size: 14))
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
                     }
                     .padding(.horizontal, 24)
 
-                    TextField("000000", text: $code)
-                        .keyboardType(.numberPad)
-                        .textContentType(.oneTimeCode)
-                        .font(.system(size: 28, weight: .semibold, design: .monospaced))
+                    TextField(useBackupCode ? "XXXXX-XXXXX" : "000000", text: $code)
+                        .keyboardType(useBackupCode ? .asciiCapable : .numberPad)
+                        .textInputAutocapitalization(.characters)
+                        .autocorrectionDisabled()
+                        .textContentType(useBackupCode ? nil : .oneTimeCode)
+                        .font(.system(size: useBackupCode ? 22 : 28, weight: .semibold, design: .monospaced))
                         .multilineTextAlignment(.center)
                         .padding(.vertical, 14)
                         .background(Color(uiColor: .systemBackground))
@@ -61,11 +71,13 @@ struct TwoFactorCodeView: View {
                         .padding(.horizontal, 48)
                         .focused($fieldFocused)
                         .onChange(of: code) { _, newValue in
-                            let cleaned = String(newValue.filter(\.isNumber).prefix(6))
+                            let cleaned = useBackupCode
+                                ? String(newValue.uppercased().filter { $0.isLetter || $0.isNumber || $0 == "-" }.prefix(11))
+                                : String(newValue.filter(\.isNumber).prefix(6))
                             if cleaned != newValue { code = cleaned }
                             errorMessage = nil
                         }
-                        .accessibilityLabel("6-digit code")
+                        .accessibilityLabel(useBackupCode ? "Backup code" : "6-digit code")
 
                     if let errorMessage {
                         Text(errorMessage)
@@ -90,13 +102,26 @@ struct TwoFactorCodeView: View {
                     .disabled(!canSubmit)
                     .padding(.horizontal, 24)
 
-                    Button(action: resend) {
-                        Text(isResending ? "Sending…" : "Send a new code")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(SS.primary)
+                    if method == .totp {
+                        Button {
+                            useBackupCode.toggle()
+                            code = ""
+                            errorMessage = nil
+                        } label: {
+                            Text(useBackupCode ? "Use the authenticator code instead" : "Use a backup code")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(SS.primary)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Button(action: resend) {
+                            Text(isResending ? "Sending…" : "Send a new code")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(SS.primary)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isResending)
                     }
-                    .buttonStyle(.plain)
-                    .disabled(isResending)
 
                     Spacer()
                 }
@@ -118,7 +143,7 @@ struct TwoFactorCodeView: View {
         errorMessage = nil
         infoMessage = nil
         Task {
-            let error = await onSubmit(digitsOnly)
+            let error = await onSubmit(enteredCode)
             isSubmitting = false
             if let error {
                 errorMessage = error
@@ -156,11 +181,14 @@ struct TwoFactorLoginSheetModifier: ViewModifier {
         )) { challenge in
             TwoFactorCodeView(
                 title: "Enter your code",
-                message: "We sent a 6-digit sign-in code to \(challenge.emailHint).",
+                message: challenge.method == .totp
+                    ? "Enter the code from your authenticator app."
+                    : "We sent a 6-digit sign-in code to \(challenge.emailHint).",
                 confirmLabel: "Verify & Sign In",
                 onSubmit: { await userStore.verifyTwoFactorLogin(code: $0) },
                 onResend: { await userStore.resendTwoFactorLoginCode() },
-                onCancel: { userStore.cancelTwoFactorLogin() }
+                onCancel: { userStore.cancelTwoFactorLogin() },
+                method: challenge.method
             )
         }
     }

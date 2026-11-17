@@ -53,6 +53,10 @@ struct AccountSecurityView: View {
     @State private var isRequestingCode   = false
     @State private var twoFactorError: String? = nil
     @State private var showDisableConfirm = false
+    @State private var showMethodChoice   = false
+    @State private var showTotpSetup      = false
+    @State private var showRegenerate     = false
+    @State private var backupRemaining: Int? = nil
 
     private var isSocialUser: Bool {
         userStore.currentUser?.hasSocialLogin == true
@@ -60,6 +64,10 @@ struct AccountSecurityView: View {
 
     private var twoFactorEnabled: Bool {
         userStore.currentUser?.twoFactorEnabled == true
+    }
+
+    private var twoFactorMethod: TwoFactorMethod {
+        TwoFactorMethod(rawValue: userStore.currentUser?.twoFactorMethod ?? "email") ?? .email
     }
 
     var body: some View {
@@ -90,7 +98,9 @@ struct AccountSecurityView: View {
                             Text("Two-Factor Authentication")
                                 .font(.system(size: 15))
                             Text(twoFactorEnabled
-                                 ? "On · we email you a code when you sign in"
+                                 ? (twoFactorMethod == .totp
+                                    ? "On · authenticator app code when you sign in"
+                                    : "On · we email you a code when you sign in")
                                  : "Off · add a code by email when you sign in")
                                 .font(.system(size: 12))
                                 .foregroundColor(.secondary)
@@ -102,7 +112,7 @@ struct AccountSecurityView: View {
                             Toggle("", isOn: Binding(
                                 get: { twoFactorEnabled },
                                 set: { wantsOn in
-                                    if wantsOn { startTwoFactorChange(enable: true) }
+                                    if wantsOn { showMethodChoice = true }
                                     else { showDisableConfirm = true }
                                 }
                             ))
@@ -121,6 +131,30 @@ struct AccountSecurityView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
+                    if twoFactorEnabled && twoFactorMethod == .totp {
+                        Divider().padding(.leading, 52)
+                        HStack(spacing: 14) {
+                            Image(systemName: "key.fill")
+                                .font(.system(size: 16))
+                                .foregroundColor(SS.primary)
+                                .frame(width: 28)
+                                .padding(.leading, 14)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Backup Codes")
+                                    .font(.system(size: 15))
+                                Text(backupRemaining.map { "\($0) of 8 left" } ?? "Loading…")
+                                    .font(.system(size: 12))
+                                    .foregroundColor((backupRemaining ?? 8) <= 2 ? .red : .secondary)
+                            }
+                            Spacer()
+                            Button("Regenerate") { showRegenerate = true }
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(SS.primary)
+                                .padding(.trailing, 14)
+                        }
+                        .padding(.vertical, 14)
+                    }
+
                     Divider().padding(.leading, 52)
 
                     NavigationLink {
@@ -133,7 +167,10 @@ struct AccountSecurityView: View {
             .padding(.horizontal, 16)
         }
         // refreshMe (nicht ...IfPossible): ein Netzwerkfehler soll hier nicht ausloggen
-        .task { await userStore.refreshMe() }
+        .task {
+            await userStore.refreshMe()
+            await loadBackupRemaining()
+        }
         .sheet(isPresented: $showChangeEmail)    { ChangeEmailSheet() }
         .sheet(isPresented: $showChangePhone)    { ChangePhoneSheet() }
         .sheet(isPresented: $showChangePassword) { ChangePasswordSheet() }
@@ -141,19 +178,54 @@ struct AccountSecurityView: View {
         .sheet(item: $twoFactorChallenge) { challenge in
             TwoFactorCodeView(
                 title: pendingEnable ? "Turn on two-factor" : "Turn off two-factor",
-                message: "Enter the 6-digit code we sent to \(challenge.emailHint).",
+                message: challenge.method == .totp
+                    ? "Enter the code from your authenticator app to turn off two-factor."
+                    : "Enter the 6-digit code we sent to \(challenge.emailHint).",
                 confirmLabel: pendingEnable ? "Turn On" : "Turn Off",
                 onSubmit: { code in await confirmTwoFactorChange(code: code) },
                 onResend: { await resendTwoFactorCode() },
-                onCancel: { twoFactorChallenge = nil }
+                onCancel: { twoFactorChallenge = nil },
+                method: challenge.method
             )
+        }
+        .sheet(isPresented: $showTotpSetup) {
+            TotpSetupView(
+                onFinished: {
+                    showTotpSetup = false
+                    Task {
+                        await userStore.refreshMe()
+                        await loadBackupRemaining()
+                    }
+                },
+                onCancel: { showTotpSetup = false }
+            )
+        }
+        .sheet(isPresented: $showRegenerate) {
+            RegenerateBackupCodesView(
+                onFinished: {
+                    showRegenerate = false
+                    Task { await loadBackupRemaining() }
+                },
+                onCancel: { showRegenerate = false }
+            )
+        }
+        .confirmationDialog("Choose how to get your codes", isPresented: $showMethodChoice, titleVisibility: .visible) {
+            Button("Email code") { startTwoFactorChange(enable: true) }
+            Button("Authenticator app") { showTotpSetup = true }
+            Button("Cancel", role: .cancel) {}
         }
         .alert("Turn off two-factor authentication?", isPresented: $showDisableConfirm) {
             Button("Turn Off", role: .destructive) { startTwoFactorChange(enable: false) }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Signing in will only need your password or Google/Apple account. We'll email you a code to confirm.")
+            Text(twoFactorMethod == .totp
+                 ? "Signing in will only need your password or Google/Apple account. Confirm with a code from your authenticator app."
+                 : "Signing in will only need your password or Google/Apple account. We'll email you a code to confirm.")
         }
+    }
+
+    private func loadBackupRemaining() async {
+        backupRemaining = (try? await APIClient.shared.fetchTwoFactorStatus())?.backupCodesRemaining
     }
 
     // MARK: 2FA-Ablauf: Code anfordern → Code eingeben → Zustand neu laden
@@ -351,7 +423,7 @@ struct ActiveSessionsView: View {
         .padding(.vertical, 14)
     }
 
-    // TODO: Standort pro Geraet (Wireframe) braucht IP-Geolocation im Backend — bisher nicht vorhanden
+    // Ort kommt vom Geraet selbst (grober App-Standort, "City, ST") — keine IP-Ortung
     private func detailLine(for session: DeviceSessionDTO) -> String {
         let activity: String
         if session.isCurrent || Date().timeIntervalSince(session.lastActiveAt) < 120 {
@@ -359,7 +431,7 @@ struct ActiveSessionsView: View {
         } else {
             activity = "Active " + session.lastActiveAt.formatted(.relative(presentation: .named))
         }
-        return [session.osVersion, activity].compactMap { $0 }.joined(separator: " · ")
+        return [session.osVersion, session.city.map { "\($0) (approx.)" }, activity].compactMap { $0 }.joined(separator: " · ")
     }
 
     private func load() async {

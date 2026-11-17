@@ -51,6 +51,8 @@ final class APIClient {
         if let token {
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
+        // Grober Geraete-Ort ("Austin, TX"), falls bekannt — haelt "Active Sessions" aktuell
+        DeviceInfo.applyCity(to: &req)
         return req
     }
 
@@ -196,7 +198,11 @@ final class APIClient {
     private func handleLoginResponse(_ data: Data) throws -> LoginOutcome {
         let decoded = try JSONDecoder().decode(LoginResponseDTO.self, from: data)
         if decoded.twoFactorRequired == true, let challengeId = decoded.challengeId {
-            return .twoFactorRequired(TwoFactorChallenge(challengeId: challengeId, emailHint: decoded.emailHint ?? "your email"))
+            return .twoFactorRequired(TwoFactorChallenge(
+                challengeId: challengeId,
+                emailHint: decoded.emailHint ?? "your email",
+                method: TwoFactorMethod(rawValue: decoded.method ?? "email") ?? .email
+            ))
         }
         guard let token = decoded.token, let user = decoded.user else {
             throw URLError(.cannotParseResponse)
@@ -1058,13 +1064,23 @@ extension APIClient {
         _ = try? await URLSession.shared.data(for: req)
     }
 
-    /// POST /auth/2fa/request — schickt einen Code, um 2FA ein- (`enable`) oder auszuschalten (`disable`)
-    func requestTwoFactorChange(enable: Bool) async throws -> TwoFactorChallenge {
-        let req = try securityRequest("/auth/2fa/request", body: ["action": enable ? "enable" : "disable"])
+    /// POST /auth/2fa/request — schickt einen Code, um 2FA ein- (`enable`) oder auszuschalten (`disable`).
+    /// `method: .totp` beim Einschalten = Mail-Code als Bestaetigung vor der Authenticator-Einrichtung.
+    func requestTwoFactorChange(enable: Bool, method: TwoFactorMethod = .email) async throws -> TwoFactorChallenge {
+        var body = ["action": enable ? "enable" : "disable"]
+        if enable { body["method"] = method.rawValue }
+        let req = try securityRequest("/auth/2fa/request", body: body)
         let (data, resp) = try await URLSession.shared.data(for: req)
         try validate(response: resp, data: data)
-        let sent = try JSONDecoder().decode(TwoFactorCodeSentDTO.self, from: data)
-        return TwoFactorChallenge(challengeId: sent.challengeId, emailHint: sent.emailHint)
+        return try JSONDecoder().decode(TwoFactorCodeSentDTO.self, from: data).asChallenge
+    }
+
+    /// GET /auth/2fa — Methode + verbleibende Backup-Codes
+    func fetchTwoFactorStatus() async throws -> TwoFactorStatusDTO {
+        let req = try securityRequest("/auth/2fa", method: "GET")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+        return try JSONDecoder().decode(TwoFactorStatusDTO.self, from: data)
     }
 
     /// POST /auth/2fa/confirm — liefert den neuen Zustand (an/aus)
@@ -1086,14 +1102,37 @@ extension APIClient {
         return try handleLoginResponse(data)
     }
 
+    /// POST /auth/2fa/totp/setup — Pending-Secret + otpauth-URI, erst nach gueltigem Mail-Code
+    func startTotpSetup(challengeId: String, code: String) async throws -> TotpSetupDTO {
+        let req = try securityRequest("/auth/2fa/totp/setup", body: ["challengeId": challengeId, "code": code])
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+        return try JSONDecoder().decode(TotpSetupDTO.self, from: data)
+    }
+
+    /// POST /auth/2fa/totp/backup-codes — neue Backup-Codes (mit aktuellem Authenticator-Code)
+    func regenerateBackupCodes(code: String) async throws -> [String] {
+        let req = try securityRequest("/auth/2fa/totp/backup-codes", body: ["code": code])
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+        return try JSONDecoder().decode(BackupCodesDTO.self, from: data).backupCodes
+    }
+
+    /// POST /auth/2fa/totp/confirm — aktiviert TOTP, liefert die Backup-Codes (einmalig)
+    func confirmTotpSetup(code: String) async throws -> [String] {
+        let req = try securityRequest("/auth/2fa/totp/confirm", body: ["code": code])
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+        return try JSONDecoder().decode(TotpConfirmDTO.self, from: data).backupCodes
+    }
+
     /// POST /auth/2fa/resend — neuer Login-Code (neue challengeId)
     func resendTwoFactorLoginCode(challengeId: String) async throws -> TwoFactorChallenge {
         var req = try securityRequest("/auth/2fa/resend", body: ["challengeId": challengeId])
         req.setValue(nil, forHTTPHeaderField: "Authorization")
         let (data, resp) = try await URLSession.shared.data(for: req)
         try validate(response: resp, data: data)
-        let sent = try JSONDecoder().decode(TwoFactorCodeSentDTO.self, from: data)
-        return TwoFactorChallenge(challengeId: sent.challengeId, emailHint: sent.emailHint)
+        return try JSONDecoder().decode(TwoFactorCodeSentDTO.self, from: data).asChallenge
     }
 }
 
