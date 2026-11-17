@@ -6,6 +6,7 @@ const { requireAuth } = require("./auth");
 const { requireVerifiedEmail } = require("./middlewares/requireVerifiedEmail");
 const { haversineDistance, kmToMiles, milesToKm } = require("./utils/haversine");
 const { geocodeLocation }  = require("./utils/geocode");
+const { buildJobData, validateJobBody, checkDraftAccess } = require("./utils/jobData");
 const { normalizeCancellationReason } = require("./utils/applicationStatus");
 
 const router = express.Router();
@@ -262,66 +263,35 @@ router.get("/nearby", requireAuth, requireVerifiedEmail, async (req, res) => {
 // ─────────────────────────────────────────────
 router.post("/", requireAuth, requireVerifiedEmail, async (req, res) => {
   try {
-    const {
-      title, company, location, lat: bodyLat, lng: bodyLng, category, tags,
-      shifts, openSpots, payAmount, payText,
-      jobDescription, tasks, dressCode, languages,
-      experienceLevel, minAge, paymentMethod, contractType,
-      status = "published",
-    } = req.body;
+    const { title, category, location } = req.body;
+    const status = req.body.status ?? "published";
 
     if (!title || !category) {
       return res.status(400).json({ error: "title and category are required." });
     }
 
+    const invalid = validateJobBody(req.body);
+    if (invalid) return res.status(400).json({ error: invalid });
+
+    const data = buildJobData(req.body);
+
     // Koordinaten: direkt aus dem Request nutzen (vom iOS Location-Picker),
     // sonst Geocoding als Fallback (z.B. bei API-Calls ohne Picker)
-    let lat = bodyLat != null ? parseFloat(bodyLat) : null;
-    let lng = bodyLng != null ? parseFloat(bodyLng) : null;
-
-    if (lat == null && location) {
+    if (data.lat == null && location) {
       const coords = await geocodeLocation(location);
       if (coords) {
-        lat = coords.lat;
-        lng = coords.lng;
-        console.log(`geocode fallback: "${location}" → lat=${lat}, lng=${lng}`);
+        data.lat = coords.lat;
+        data.lng = coords.lng;
+        console.log(`geocode fallback: "${location}" → lat=${data.lat}, lng=${data.lng}`);
       } else {
         console.warn(`geocode: Keine Koordinaten für "${location}" — Job wird ohne lat/lng gespeichert`);
       }
-    } else if (lat != null) {
-      console.log(`geocode: lat/lng vom Client übernommen (${lat}, ${lng})`);
+    } else if (data.lat != null) {
+      console.log(`geocode: lat/lng vom Client übernommen (${data.lat}, ${data.lng})`);
     }
 
     const newJob = await prisma.job.create({
-      data: {
-        title,
-        company:     company || "Unknown",
-        location:    location || "",
-        lat,
-        lng,
-        category:    category || null,
-        tags:        tags || [],
-        payText:     payText || (payAmount ? `€${payAmount} / hour` : "On request"),
-        payAmount:   payAmount ? parseFloat(payAmount) : null,
-        shiftText:   shifts?.[0] ? `${shifts[0].date}, ${shifts[0].timeRange}` : "",
-        startTime:   shifts?.[0]?.startTimeISO ? new Date(shifts[0].startTimeISO) : null,
-        endTime:     shifts?.[0]?.endTimeISO   ? new Date(shifts[0].endTimeISO)   : null,
-        duration:    shifts?.[0]?.duration || null,
-        shortInfo:   jobDescription ? jobDescription.slice(0, 120) : "",
-        jobDescription: jobDescription || null,
-        tasks:       tasks || [],
-        openSpots:   openSpots || 1,
-        shifts:      shifts || [],
-        dressCode:   dressCode || null,
-        languages:   languages || [],
-        experienceLevel: experienceLevel || null,
-        minAge:      minAge ? parseInt(minAge) : null,
-        paymentMethod: paymentMethod || null,
-        contractType:  contractType || null,
-        logoEmoji:   "🏢",
-        status,
-        employerId:  req.auth.sub,
-      },
+      data: { ...data, status, employerId: req.auth.sub },
     });
 
     console.log(`POST /jobs — neuer Job: "${title}" (${status}), ID: ${newJob.id}`);
@@ -541,6 +511,94 @@ router.patch("/:id/status", requireAuth, requireVerifiedEmail, async (req, res) 
     return res.json({ job: updated });
   } catch (err) {
     console.error("PATCH /jobs/:id/status error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─────────────────────────────────────────────
+// Helper: Fehler fuer PUT/DELETE auf Nicht-Drafts (404/403/409) beantworten
+// ─────────────────────────────────────────────
+async function respondDraftError(req, res) {
+  const job = await prisma.job.findUnique({ where: { id: req.params.id } });
+  const denied = checkDraftAccess(job, req.auth.sub);
+  if (denied) {
+    const { status, ...body } = denied;
+    return res.status(status).json(body);
+  }
+  // Zwischenzeitlich geaendert (Race): sicherheitshalber als Konflikt melden
+  return res.status(409).json({ error: "Only drafts can be edited or deleted.", code: "NOT_DRAFT" });
+}
+
+// ─────────────────────────────────────────────
+// PUT /jobs/:id — Draft bearbeiten (optional direkt veroeffentlichen via status: "published")
+// Atomar: updateMany mit id + employerId + status "draft" im where.
+// ─────────────────────────────────────────────
+router.put("/:id", requireAuth, requireVerifiedEmail, async (req, res) => {
+  try {
+    const { title, category, location, status } = req.body;
+    if (!title || !category) {
+      return res.status(400).json({ error: "title and category are required." });
+    }
+    if (status != null && status !== "draft" && status !== "published") {
+      return res.status(400).json({ error: "status must be 'draft' or 'published'." });
+    }
+    const invalid = validateJobBody(req.body);
+    if (invalid) return res.status(400).json({ error: invalid });
+
+    const existing = await prisma.job.findUnique({ where: { id: req.params.id } });
+    const denied = checkDraftAccess(existing, req.auth.sub);
+    if (denied) {
+      const { status: code, ...body } = denied;
+      return res.status(code).json(body);
+    }
+
+    const data = buildJobData(req.body);
+    // company nur uebernehmen, wenn mitgeschickt
+    if (!req.body.company) delete data.company;
+
+    // Geocoding nur, wenn der Ort geaendert wurde und der Client keine Koordinaten schickt
+    if (data.lat == null) {
+      if (location && location === existing.location && existing.lat != null) {
+        data.lat = existing.lat;
+        data.lng = existing.lng;
+      } else if (location) {
+        const coords = await geocodeLocation(location);
+        if (coords) { data.lat = coords.lat; data.lng = coords.lng; }
+      }
+    }
+
+    const result = await prisma.job.updateMany({
+      where: { id: existing.id, employerId: req.auth.sub, status: "draft" },
+      data: { ...data, status: status ?? "draft", updatedAt: new Date() },
+    });
+    if (result.count === 0) return respondDraftError(req, res);
+
+    const updated = await prisma.job.findUnique({ where: { id: existing.id } });
+    // Zwischen Update und Lesen geloescht (sehr unwahrscheinlich)
+    if (!updated) return res.status(404).json({ error: "Job not found" });
+    console.log(`PUT /jobs/${existing.id} — "${title}" (${updated.status})`);
+    return res.json({ job: updated });
+  } catch (err) {
+    console.error("PUT /jobs/:id error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─────────────────────────────────────────────
+// DELETE /jobs/:id — Draft endgueltig loeschen
+// Atomar via deleteMany (id + employerId + status "draft"), damit ein zwischenzeitlich
+// veroeffentlichter Job nie per Cascade samt Bewerbungen/Chats geloescht wird.
+// ─────────────────────────────────────────────
+router.delete("/:id", requireAuth, requireVerifiedEmail, async (req, res) => {
+  try {
+    const result = await prisma.job.deleteMany({
+      where: { id: req.params.id, employerId: req.auth.sub, status: "draft" },
+    });
+    if (result.count === 0) return respondDraftError(req, res);
+    console.log(`DELETE /jobs/${req.params.id}`);
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("DELETE /jobs/:id error:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
 });

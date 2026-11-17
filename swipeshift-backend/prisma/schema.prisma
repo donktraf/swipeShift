@@ -228,6 +228,7 @@ model Job {
   employerId String?
 
   createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
 
   applies       Apply[]
   skips         Skip[]
