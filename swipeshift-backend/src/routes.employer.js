@@ -10,6 +10,9 @@ const { mergeConsents, allowedKeysForRole } = require("./utils/consents");
 const { validateDraftData, validateReviewSubmission, reviewOverall } = require("./utils/reviewLogic");
 const { validateEmployerProfileFields, cleanExperience, cleanWhitelist, AVAILABLE_TIMES, SHIFT_TYPES } = require("./utils/profileFields");
 const { Prisma } = require("@prisma/client");
+const { loadApplicantSummaries } = require("./applicantSummaries");
+const { averageRating } = require("./utils/applicantSummary");
+const { truncateText } = require("./utils/companyStats");
 const { ageFromBirthDate, availableDays, summarizeReviews, summarizeCompletedJobs, cleanSelfRatedSkills, stringList } = require("./utils/workerProfile");
 
 const router = express.Router();
@@ -36,6 +39,7 @@ router.get("/applicants", requireAuth, requireVerifiedEmail, async (req, res) =>
     const applies = await prisma.apply.findMany({
       where:   { jobId: { in: jobIds } },
       orderBy: { createdAt: "desc" },
+      include: { conversation: { select: { id: true } } },
     });
 
     // User-Daten laden
@@ -55,11 +59,17 @@ router.get("/applicants", requireAuth, requireVerifiedEmail, async (req, res) =>
 
     const userMap = Object.fromEntries(users.map((u) => [u.id, u]));
 
+    // Bewertungen/Jobzahlen/Profilfelder aller Bewerber gebuendelt (kein N+1)
+    const summaries = await loadApplicantSummaries(userIds);
+
     const applicants = applies.map((a) => ({
       applyId:       a.id,
       userId:        a.userId,
       appliedAt:     a.createdAt,
       status:        a.status,
+      // Conversation entsteht schon beim Bewerben; die App zeigt den Chat-Button erst nach Annahme
+      conversationId: a.conversation?.id ?? null,
+      summary:       summaries.get(a.userId) ?? null,
       job:           jobMap[a.jobId] ?? null,
       user:          userMap[a.userId]
         ? {
@@ -862,9 +872,10 @@ router.get("/saved-applicants", requireAuth, requireVerifiedEmail, async (req, r
       include: {
         apply: {
           include: {
+            conversation: { select: { id: true } },
             user: {
               select: {
-                id: true, firstName: true, lastName: true,
+                id: true, firstName: true, lastName: true, location: true,
                 worker: { select: { profilePhotoUrl: true, bio: true, jobInterests: true } },
               },
             },
@@ -878,14 +889,21 @@ router.get("/saved-applicants", requireAuth, requireVerifiedEmail, async (req, r
       orderBy: { createdAt: "desc" },
     });
 
+    const summaries = await loadApplicantSummaries(saved.map((s) => s.apply.userId));
+
     const result = saved.map((s) => ({
       savedId:    s.id,
       applyId:    s.applyId,
+      userId:     s.apply.userId,
       savedAt:    s.createdAt,
       workerName: `${s.apply.user?.firstName ?? ""} ${s.apply.user?.lastName ?? ""}`.trim() || "Unknown",
       workerPhoto: s.apply.user?.worker?.profilePhotoUrl ?? null,
+      workerCity:  s.apply.user?.location ?? null,
       bio:         s.apply.user?.worker?.bio ?? null,
+      bioShort:    truncateText(s.apply.user?.worker?.bio, 140),
       jobInterests: s.apply.user?.worker?.jobInterests ?? [],
+      summary:     summaries.get(s.apply.userId) ?? null,
+      conversationId: s.apply.conversation?.id ?? null,
       applyStatus: s.apply.status,
       jobId:       s.apply.job?.id ?? "",
       jobTitle:    s.apply.job?.title ?? "—",
@@ -926,25 +944,52 @@ router.get("/calendar", requireAuth, requireVerifiedEmail, async (req, res) => {
         endTime: true,
         openSpots: true,
         status: true,
+        category: true,
+        payAmount: true,
+        payText: true,
+        shiftText: true,
         applies: {
           where: { status: "accepted" },
-          select: { id: true },
+          select: {
+            id: true, userId: true, isPaid: true,
+            user: { select: { firstName: true, lastName: true, worker: { select: { profilePhotoUrl: true } } } },
+          },
         },
       },
       orderBy: { startTime: "asc" },
     });
 
-    const result = jobs.map((j) => ({
-      id:            j.id,
-      title:         j.title,
-      location:      j.location,
-      logoEmoji:     j.logoEmoji ?? "🏢",
-      startTime:     j.startTime,
-      endTime:       j.endTime,
-      openSpots:     j.openSpots ?? 1,
-      assignedCount: j.applies.length,
-      status:        j.status,
-    }));
+    // Bewertungen der bestaetigten Worker gebuendelt (ein Satz Queries fuer alle Jobs)
+    const summaries = await loadApplicantSummaries(jobs.flatMap((j) => j.applies.map((a) => a.userId)));
+
+    const result = jobs.map((j) => {
+      const workerSummaries = j.applies.map((a) => summaries.get(a.userId)).filter(Boolean);
+      // Kosten wie in /employer/financials: abgeschlossen = geschuldet, sonst geplant
+      const costs = jobCosts(j, j.applies);
+      return {
+        id:            j.id,
+        title:         j.title,
+        location:      j.location,
+        logoEmoji:     j.logoEmoji ?? "🏢",
+        startTime:     j.startTime,
+        endTime:       j.endTime,
+        openSpots:     j.openSpots ?? 1,
+        assignedCount: j.applies.length,
+        status:        j.status,
+        category:      j.category ?? null,
+        payText:       j.payText ?? "",
+        shiftText:     j.shiftText ?? "",
+        shiftCost:     j.status === "completed" ? costs.completed : costs.planned,
+        workers: j.applies.map((a) => ({
+          applyId:  a.id,
+          userId:   a.userId,
+          name:     `${a.user?.firstName ?? ""} ${a.user?.lastName ?? ""}`.trim() || "Unknown",
+          photoUrl: a.user?.worker?.profilePhotoUrl ?? null,
+          summary:  summaries.get(a.userId) ?? null,
+        })),
+        averageWorkerRating: averageRating(workerSummaries),
+      };
+    });
 
     return res.json(result);
   } catch (err) {
