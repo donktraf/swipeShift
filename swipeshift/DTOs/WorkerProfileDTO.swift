@@ -27,6 +27,9 @@ struct WorkerProfileInfo: Decodable {
     let maxTravelDistance: Int?
     let willingToRelocate: Bool
     let availableForSameDay: Bool
+    let availableTimes: [String]
+    let shiftTypes: [String]
+    let experience: [WorkerExperienceEntry]
     let transport: String?
     let preferredCategories: [String]
     let jobInterests: [String]

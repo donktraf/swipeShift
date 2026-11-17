@@ -69,6 +69,9 @@ private struct CompanyInfoTab: View {
     @State private var locations: [String] = []
     @State private var newLocationText: String = ""
     @State private var showAddLocation = false
+    @State private var publicForm = EmployerPublicProfileForm()
+    /// Prefill nur einmal, damit erneutes onAppear ungespeicherte Eingaben nicht ueberschreibt
+    @State private var didPrefill = false
     @State private var showLogoPicker = false
     @State private var selectedLogo: UIImage? = nil
 
@@ -220,6 +223,9 @@ private struct CompanyInfoTab: View {
                 .padding(.vertical, 12)
             }
 
+            // Oeffentliche Infos (Slogan, Social, Adresse, Ansprechpartner)
+            EmployerPublicProfileSection(form: $publicForm)
+
             // Bio
             empSection(title: "Company Bio") {
                 VStack(alignment: .leading, spacing: 6) {
@@ -271,7 +277,8 @@ private struct CompanyInfoTab: View {
     }
 
     private func prefill() {
-        guard let u = userStore.currentUser else { return }
+        guard !didPrefill, let u = userStore.currentUser else { return }
+        didPrefill = true
         companyName     = u.companyName      ?? ""
         email           = u.companyEmail     ?? u.email
         phone           = u.companyPhone     ?? ""
@@ -279,6 +286,7 @@ private struct CompanyInfoTab: View {
         website         = u.websiteOrInstagram ?? ""
         primaryLocation = u.primaryHiringLocation ?? u.location ?? ""
         companySize     = u.companySize      ?? "1–10"
+        publicForm      = EmployerPublicProfileForm(user: u)
 
         if let areas = u.businessAreas, !areas.isEmpty {
             businessAreas = Set(areas)
@@ -306,7 +314,7 @@ private struct CompanyInfoTab: View {
             if let img = selectedLogo {
                 uploadedPhotoUrl = try await APIClient.shared.uploadProfilePhoto(img)
             }
-            try await APIClient.shared.updateEmployerProfile(UpdateEmployerProfileRequest(
+            var request = UpdateEmployerProfileRequest(
                 companyName:           companyName.isEmpty ? nil : companyName,
                 companySize:           companySize,
                 companyPhone:          phone.isEmpty   ? nil : phone,
@@ -329,7 +337,9 @@ private struct CompanyInfoTab: View {
                     "accurateJobInfo":       accurateJobInfo,
                     "legalHiring":           legalHiring,
                 ]
-            ))
+            )
+            publicForm.apply(to: &request)
+            try await APIClient.shared.updateEmployerProfile(request)
             await userStore.refreshMe()
             isSaving = false
             dismiss()
@@ -359,6 +369,7 @@ private struct PersonalProfileTab: View {
     @State private var inviteRole: ManagerRole = .hiringManager
     @State private var showInviteSheet = false
     @State private var memberToRemove: TeamMember? = nil
+    @State private var didPrefill = false
     @State private var isSaving = false
     @State private var saveError: String? = nil
 
@@ -598,7 +609,8 @@ private struct PersonalProfileTab: View {
     }
 
     private func prefill() {
-        guard let u = userStore.currentUser else { return }
+        guard !didPrefill, let u = userStore.currentUser else { return }
+        didPrefill = true
         firstName = u.firstName ?? ""
         lastName  = u.lastName  ?? ""
         workEmail = u.email

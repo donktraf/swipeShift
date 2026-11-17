@@ -38,6 +38,8 @@ struct CompanyProfileView: View {
                     if let about = p.about, !about.isEmpty { aboutSection(about) }
                     ratingsSection(p)
                     if !p.locations.isEmpty { locationsSection(p) }
+                    if p.hasAddress { CompanyAddressCard(company: p) }
+                    if p.hasContactPerson || p.hasSocialLinks { CompanyPeopleAndLinksCard(company: p) }
                     if hasContact(p) { contactSection(p) }
                     viewOpenJobsButton(p)
                     Spacer().frame(height: 20)
@@ -128,6 +130,9 @@ struct CompanyProfileView: View {
                             .padding(.horizontal, 8).padding(.vertical, 3)
                             .background(SS.primary).clipShape(Capsule())
                     }
+                }
+                if p.hasTaglineInfo {
+                    CompanyTaglineView(tagline: p.tagline, yearFounded: p.yearFounded)
                 }
                 if let loc = p.locations.first {
                     Label(loc, systemImage: "mappin")

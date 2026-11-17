@@ -139,6 +139,16 @@ struct CompanyProfileDTO: Decodable {
     let email:            String?
     let industry:         String?
     let companySize:      String?
+    // Oeffentliche Firmeninfos (alle optional, leere Felder werden nicht angezeigt)
+    let tagline:          String?
+    let yearFounded:      Int?
+    let socialLinks:      SocialLinksDTO?
+    let streetAddress:    String?
+    let zipCode:          String?
+    let addressLat:       Double?
+    let addressLng:       Double?
+    let contactName:      String?
+    let contactRole:      String?
     let openJobs:         [CompanyOpenJobDTO]
     let reviewBreakdown:  ReviewBreakdownDTO?
     let workerReviews:    [WorkerReviewDTO]?

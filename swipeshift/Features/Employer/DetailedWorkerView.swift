@@ -44,6 +44,7 @@ struct DetailedWorkerView: View {
                             aboutSection(bio)
                         }
                         availabilitySection(profile.worker)
+                        selfDeclaredExperienceSection(profile.worker)
                         experienceSection(profile)
                         preferencesSection(profile.worker)
                         legalSection(profile.worker)
@@ -363,6 +364,9 @@ struct DetailedWorkerView: View {
                 infoRow(icon: "calendar.badge.clock", label: "Available Days",
                         value: w.availableDays.isEmpty ? "Not specified" : w.availableDays.joined(separator: ", "))
                 Divider().padding(.leading, 52)
+                infoRow(icon: "clock.fill", label: "Available Times",
+                        value: timesText(w.availableTimes))
+                Divider().padding(.leading, 52)
                 infoRow(icon: "location.circle.fill", label: "Max. Travel Distance",
                         value: w.maxTravelDistance.map { "\($0) mi" } ?? "Not specified")
                 Divider().padding(.leading, 52)
@@ -381,10 +385,39 @@ struct DetailedWorkerView: View {
 
     // MARK: - Experience
 
-    // TODO: Erfahrungslevel pro Kategorie (<3 Monate / 3-12 Monate / 1+ Jahre) wird im
-    // Worker-Profil noch nicht gespeichert — daher hier nur auf SwipeShift abgeschlossene Jobs.
+    private func timesText(_ raw: [String]) -> String {
+        let titles = WorkerAvailableTime.allCases.filter { raw.contains($0.rawValue) }.map(\.title)
+        return titles.isEmpty ? "Not specified" : titles.joined(separator: ", ")
+    }
+
+    private func shiftTypesText(_ raw: [String]) -> String {
+        let titles = WorkerShiftType.allCases.filter { raw.contains($0.rawValue) }.map(\.title)
+        return titles.isEmpty ? "Not specified" : titles.joined(separator: ", ")
+    }
+
+    /// Selbst angegebene Vorerfahrung je Kategorie (Worker-Profil)
+    @ViewBuilder
+    private func selfDeclaredExperienceSection(_ w: WorkerProfileInfo) -> some View {
+        sectionCard("Work Experience") {
+            VStack(spacing: 0) {
+                if w.experience.isEmpty {
+                    Text("No prior experience specified.")
+                        .font(.system(size: 14))
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(16)
+                } else {
+                    ForEach(Array(w.experience.enumerated()), id: \.element.id) { index, item in
+                        if index > 0 { Divider().padding(.leading, 52) }
+                        infoRow(icon: "person.badge.clock.fill", label: item.category, value: item.level.title)
+                    }
+                }
+            }
+        }
+    }
+
     private func experienceSection(_ profile: WorkerProfileDTO) -> some View {
-        sectionCard("Work Experience on SwipeShift") {
+        sectionCard("Completed on SwipeShift") {
             VStack(spacing: 0) {
                 if profile.stats.completedByCategory.isEmpty {
                     Text("No completed jobs on SwipeShift yet.")
@@ -411,6 +444,8 @@ struct DetailedWorkerView: View {
             VStack(spacing: 0) {
                 infoRow(icon: "square.grid.2x2.fill", label: "Preferred Categories",
                         value: categories.isEmpty ? "Not specified" : categories.joined(separator: ", "))
+                Divider().padding(.leading, 52)
+                infoRow(icon: "calendar", label: "Shift Types", value: shiftTypesText(w.shiftTypes))
                 Divider().padding(.leading, 52)
                 infoRow(icon: "dollarsign.circle", label: "Hourly Rate", value: payRangeText(w))
             }

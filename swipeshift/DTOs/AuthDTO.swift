@@ -41,6 +41,9 @@ struct UserDTO: Decodable {
     let payRangeMax: Double?
     let skills: WorkerSkillsDTO?
     let workAuthorization: Bool?
+    let availableTimes: [String]?
+    let shiftTypes: [String]?
+    let experience: [WorkerExperienceEntry]?
 
     // Employer-only (optional, weil Worker hat sie nicht)
     let companyName: String?
@@ -57,7 +60,19 @@ struct UserDTO: Decodable {
     let teamMembers: [TeamMemberDTO]?
     let jobTitle: String?
     let managerRole: String?
-    
+    // Oeffentliches Firmenprofil
+    let yearFounded: Int?
+    let tagline: String?
+    let socialLinks: SocialLinksDTO?
+    let streetAddress: String?
+    let zipCode: String?
+    let addressLat: Double?
+    let addressLng: Double?
+    let publicContactName: String?
+    let publicContactRole: String?
+    let postsInMultipleStates: Bool?
+    let remoteFriendly: Bool?
+
     let isEmailVerified: Bool
     let hasSocialLogin: Bool?
     /// 2FA per E-Mail-Code aktiv (nur in GET /auth/me enthalten)
@@ -114,6 +129,9 @@ struct UpdateProfileRequest: Encodable {
     let workAuthorization: Bool?
     let profilePhotoUrl: String?
     let legalConsents: [String: Bool]?
+    let availableTimes: [String]?
+    let shiftTypes: [String]?
+    let experience: [WorkerExperienceEntry]?
 
     init(
         firstName: String? = nil, lastName: String? = nil,
@@ -125,7 +143,9 @@ struct UpdateProfileRequest: Encodable {
         preferredCategories: [String]? = nil, payRangeMin: Double? = nil,
         payRangeMax: Double? = nil, skills: WorkerSkillsDTO? = nil,
         workAuthorization: Bool? = nil, profilePhotoUrl: String? = nil,
-        legalConsents: [String: Bool]? = nil
+        legalConsents: [String: Bool]? = nil,
+        availableTimes: [String]? = nil, shiftTypes: [String]? = nil,
+        experience: [WorkerExperienceEntry]? = nil
     ) {
         self.firstName = firstName; self.lastName = lastName
         self.location = location; self.bio = bio
@@ -137,6 +157,8 @@ struct UpdateProfileRequest: Encodable {
         self.payRangeMax = payRangeMax; self.skills = skills
         self.workAuthorization = workAuthorization; self.profilePhotoUrl = profilePhotoUrl
         self.legalConsents = legalConsents
+        self.availableTimes = availableTimes; self.shiftTypes = shiftTypes
+        self.experience = experience
     }
 }
 
@@ -167,6 +189,18 @@ struct UpdateEmployerProfileRequest: Encodable {
     let managerRole: String?
     // Legal Agreements (Key -> zugestimmt)
     var legalConsents: [String: Bool]? = nil
+    // Oeffentliche Firmeninfos. Leerer String loescht das Feld (nil wird nicht gesendet).
+    var yearFounded: String? = nil
+    var tagline: String? = nil
+    var socialLinks: SocialLinksDTO? = nil
+    var streetAddress: String? = nil
+    var zipCode: String? = nil
+    var addressLat: NullableDouble? = nil
+    var addressLng: NullableDouble? = nil
+    var publicContactName: String? = nil
+    var publicContactRole: String? = nil
+    var postsInMultipleStates: Bool? = nil
+    var remoteFriendly: Bool? = nil
 }
 
 struct RegisterRequestDTO: Encodable {

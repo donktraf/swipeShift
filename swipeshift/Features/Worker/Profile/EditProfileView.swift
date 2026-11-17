@@ -29,6 +29,10 @@ struct EditProfileView: View {
         "Thu": true, "Fri": true, "Sat": false, "Sun": false
     ]
     @State private var sameDayAvailable: Bool = true
+    @State private var availableTimes: Set<WorkerAvailableTime> = []
+    @State private var shiftTypes: Set<WorkerShiftType> = []
+    /// Vorerfahrung je Kategorie (fehlender Key = None)
+    @State private var experienceLevels: [String: ExperienceLevel] = [:]
 
     // Job Preferences
     @State private var selectedCategories: Set<String> = ["Hospitality", "Events"]
@@ -49,6 +53,8 @@ struct EditProfileView: View {
     @State private var termsLocked: Bool = false
 
     @State private var isSaving: Bool = false
+    /// Prefill nur einmal, damit erneutes onAppear ungespeicherte Eingaben nicht ueberschreibt
+    @State private var didPrefill: Bool = false
     @State private var saveError: String? = nil
     /// Geladenes Geburtsdatum (yyyy-MM-dd); nur bei Aenderung wird es mitgesendet
     @State private var loadedDOB: String? = nil
@@ -70,6 +76,7 @@ struct EditProfileView: View {
                 locationSection
                 availabilitySection
                 jobPreferencesSection
+                experienceSection
                 skillsSection
                 legalSection
                 bioSection
@@ -213,6 +220,13 @@ struct EditProfileView: View {
             }
             .padding(.vertical, 4)
 
+            ProfileChipPicker(
+                title: "Available Times",
+                options: WorkerAvailableTime.allCases,
+                label: { $0.title },
+                selection: $availableTimes
+            )
+
             HStack {
                 Text("Available for same-day jobs")
                     .font(.system(size: 14))
@@ -279,6 +293,27 @@ struct EditProfileView: View {
                 }
             }
             .padding(.vertical, 4)
+
+            // "Same-day" bleibt der Schalter oben (Verfuegbarkeit) - hier nur die uebrigen Schicht-Typen
+            ProfileChipPicker(
+                title: "Shift Types",
+                options: WorkerShiftType.allCases,
+                label: { $0.title },
+                selection: $shiftTypes
+            )
+        }
+    }
+
+    // MARK: - Experience
+
+    private var experienceSection: some View {
+        EditSection(title: "Experience") {
+            Text("How long have you worked in each category?")
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 4)
+            ExperienceEditor(categories: allCategories, levels: $experienceLevels)
         }
     }
 
@@ -354,7 +389,8 @@ struct EditProfileView: View {
     // MARK: - Helpers
 
     private func prefillFromUser() {
-        guard let user = userStore.currentUser else { return }
+        guard !didPrefill, let user = userStore.currentUser else { return }
+        didPrefill = true
         firstName = user.firstName ?? ""
         lastName  = user.lastName  ?? ""
         email     = user.email
@@ -396,6 +432,13 @@ struct EditProfileView: View {
         }
 
         workPermit = user.workAuthorization ?? false
+
+        availableTimes = Set((user.availableTimes ?? []).compactMap(WorkerAvailableTime.init(rawValue:)))
+        shiftTypes     = Set((user.shiftTypes ?? []).compactMap(WorkerShiftType.init(rawValue:)))
+        experienceLevels = Dictionary(
+            (user.experience ?? []).map { ($0.category, $0.level) },
+            uniquingKeysWith: { first, _ in first }
+        )
 
         let consents = user.legalConsents ?? [:]
         termsAccepted        = consents["terms"] ?? false
@@ -443,7 +486,12 @@ struct EditProfileView: View {
                 skills:              skills,
                 workAuthorization:   workPermit,
                 profilePhotoUrl:     uploadedPhotoUrl,
-                legalConsents:       ["terms": termsAccepted, "ratingSystem": ratingSystemAccepted]
+                legalConsents:       ["terms": termsAccepted, "ratingSystem": ratingSystemAccepted],
+                availableTimes:      WorkerAvailableTime.allCases.filter { availableTimes.contains($0) }.map(\.rawValue),
+                shiftTypes:          WorkerShiftType.allCases.filter { shiftTypes.contains($0) }.map(\.rawValue),
+                experience:          allCategories.compactMap { cat in
+                    experienceLevels[cat].map { WorkerExperienceEntry(category: cat, level: $0) }
+                }
             ))
             await userStore.refreshMe()
             isSaving = false
