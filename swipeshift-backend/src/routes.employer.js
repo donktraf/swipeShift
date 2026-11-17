@@ -8,6 +8,8 @@ const { resolvePeriod, isInPeriod, buildBuckets } = require("./utils/period");
 const { jobCosts, shiftHours } = require("./utils/jobCost");
 const { mergeConsents, allowedKeysForRole } = require("./utils/consents");
 const { validateDraftData, validateReviewSubmission, reviewOverall } = require("./utils/reviewLogic");
+const { validateEmployerProfileFields, cleanExperience, cleanWhitelist, AVAILABLE_TIMES, SHIFT_TYPES } = require("./utils/profileFields");
+const { Prisma } = require("@prisma/client");
 const { ageFromBirthDate, availableDays, summarizeReviews, summarizeCompletedJobs, cleanSelfRatedSkills, stringList } = require("./utils/workerProfile");
 
 const router = express.Router();
@@ -100,7 +102,7 @@ router.get("/workers/:userId", requireAuth, requireVerifiedEmail, async (req, re
             dateOfBirth: true, bio: true, profilePhotoUrl: true, jobInterests: true, availability: true,
             willingToRelocate: true, maxTravelDistance: true, transport: true, availableForSameDay: true,
             preferredCategories: true, payRangeMin: true, payRangeMax: true, skills: true,
-            workAuthorization: true,
+            workAuthorization: true, availableTimes: true, shiftTypes: true, experience: true,
           },
         },
       },
@@ -145,6 +147,9 @@ router.get("/workers/:userId", requireAuth, requireVerifiedEmail, async (req, re
         maxTravelDistance: w?.maxTravelDistance ?? null,
         willingToRelocate: w?.willingToRelocate ?? false,
         availableForSameDay: w?.availableForSameDay ?? false,
+        availableTimes: cleanWhitelist(w?.availableTimes, AVAILABLE_TIMES),
+        shiftTypes: cleanWhitelist(w?.shiftTypes, SHIFT_TYPES),
+        experience: cleanExperience(w?.experience),
         transport: w?.transport ?? null,
         preferredCategories: stringList(w?.preferredCategories),
         jobInterests: stringList(w?.jobInterests),
@@ -967,6 +972,12 @@ router.patch("/profile", requireAuth, async (req, res) => {
       legalConsents,
     } = req.body;
 
+    // Oeffentliche Profil-Zusatzfelder validieren, bevor irgendetwas gespeichert wird
+    const extra = validateEmployerProfileFields(req.body);
+    if (extra.errors.length > 0) {
+      return res.status(400).json({ error: extra.errors.join(" ") });
+    }
+
     // User-Felder
     const userUpdate = {};
     if (firstName !== undefined) userUpdate.firstName = firstName;
@@ -999,6 +1010,9 @@ router.patch("/profile", requireAuth, async (req, res) => {
     if (jobTitle              !== undefined) employerUpdate.jobTitle              = jobTitle ?? null;
     if (managerRole           !== undefined) employerUpdate.managerRole           = managerRole ?? null;
     if (profilePhotoUrl       !== undefined) employerUpdate.companyLogoUrl        = profilePhotoUrl ?? null;
+    Object.assign(employerUpdate, extra.data);
+    // Json-Spalte: "kein Wert" muss als DbNull geschrieben werden
+    if ("socialLinks" in employerUpdate && employerUpdate.socialLinks === null) employerUpdate.socialLinks = Prisma.DbNull;
 
     if (Object.keys(employerUpdate).length > 0) {
       await prisma.employer.upsert({

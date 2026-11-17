@@ -4,6 +4,7 @@ const { prisma } = require("./prisma.js");
 const { requireAuth } = require("./auth");
 const { z } = require("zod");
 const { isAtLeast18, UNDERAGE_MESSAGE } = require("./utils/age");
+const { validateWorkerProfileFields, cleanExperience, cleanWhitelist, cleanSocialLinks, AVAILABLE_TIMES, SHIFT_TYPES } = require("./utils/profileFields");
 const { mergeConsents, consentsToFlags, allowedKeysForRole } = require("./utils/consents");
 
 const router = express.Router();
@@ -32,6 +33,7 @@ router.get("/me", requireAuth, async (req, res) => {
             phone: true, willingToRelocate: true, maxTravelDistance: true, transport: true,
             availableForSameDay: true, preferredCategories: true, payRangeMin: true, payRangeMax: true,
             skills: true, workAuthorization: true,
+            availableTimes: true, shiftTypes: true, experience: true,
           },
         },
         employer: {
@@ -41,6 +43,9 @@ router.get("/me", requireAuth, async (req, res) => {
             companyPhone: true, companyEmail: true, businessAreas: true,
             locations: true, primaryHiringLocation: true, teamMembers: true,
             jobTitle: true, managerRole: true,
+            yearFounded: true, tagline: true, socialLinks: true, streetAddress: true, zipCode: true,
+            addressLat: true, addressLng: true, publicContactName: true, publicContactRole: true,
+            postsInMultipleStates: true, remoteFriendly: true,
           },
         },
       },
@@ -80,6 +85,9 @@ router.get("/me", requireAuth, async (req, res) => {
       payRangeMax:          user.worker?.payRangeMax         ?? null,
       skills:               user.worker?.skills              ?? null,
       workAuthorization:    user.worker?.workAuthorization   ?? false,
+      availableTimes:       cleanWhitelist(user.worker?.availableTimes, AVAILABLE_TIMES),
+      shiftTypes:           cleanWhitelist(user.worker?.shiftTypes, SHIFT_TYPES),
+      experience:           cleanExperience(user.worker?.experience),
       // Employer fields
       companyName:              user.employer?.companyName              ?? null,
       companySize:              user.employer?.companySize              ?? null,
@@ -95,6 +103,17 @@ router.get("/me", requireAuth, async (req, res) => {
       teamMembers:              user.employer?.teamMembers              ?? null,
       jobTitle:                 user.employer?.jobTitle                 ?? null,
       managerRole:              user.employer?.managerRole              ?? null,
+      yearFounded:              user.employer?.yearFounded              ?? null,
+      tagline:                  user.employer?.tagline                  ?? null,
+      socialLinks:              cleanSocialLinks(user.employer?.socialLinks),
+      streetAddress:            user.employer?.streetAddress            ?? null,
+      zipCode:                  user.employer?.zipCode                  ?? null,
+      addressLat:               user.employer?.addressLat               ?? null,
+      addressLng:               user.employer?.addressLng               ?? null,
+      publicContactName:        user.employer?.publicContactName        ?? null,
+      publicContactRole:        user.employer?.publicContactRole        ?? null,
+      postsInMultipleStates:    user.employer?.postsInMultipleStates    ?? false,
+      remoteFriendly:           user.employer?.remoteFriendly           ?? false,
     });
   } catch (err) {
     console.error("GET /auth/me error:", err);
@@ -119,6 +138,12 @@ router.patch("/me", requireAuth, async (req, res) => {
     // 18+ serverseitig pruefen, bevor irgendetwas gespeichert wird
     if (dateOfBirth && !isAtLeast18(dateOfBirth)) {
       return res.status(400).json({ error: UNDERAGE_MESSAGE });
+    }
+
+    // Neue Worker-Felder (Tageszeiten, Schicht-Typen, Erfahrung) validieren, bevor etwas gespeichert wird
+    const extra = validateWorkerProfileFields(req.body);
+    if (extra.errors.length > 0) {
+      return res.status(400).json({ error: extra.errors.join(" ") });
     }
 
     // User-Felder aktualisieren
@@ -167,6 +192,7 @@ router.patch("/me", requireAuth, async (req, res) => {
       if (skills              !== undefined) workerUpdate.skills             = skills ?? null;
       if (workAuthorization   !== undefined) workerUpdate.workAuthorization  = !!workAuthorization;
       if (profilePhotoUrl     !== undefined) workerUpdate.profilePhotoUrl    = profilePhotoUrl ?? null;
+      Object.assign(workerUpdate, extra.data);
 
       if (Object.keys(workerUpdate).length > 0) {
         await prisma.worker.upsert({

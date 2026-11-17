@@ -128,6 +128,12 @@ model Worker {
   skills              Json?
   workAuthorization   Boolean  @default(false)
 
+  // Tageszeiten (morning/afternoon/evening/night), Schicht-Typen (oneDay/weekend/eventBased),
+  // Vorerfahrung [{category, level: lt3m|m3to12|gt1y}] - Whitelists in src/utils/profileFields.js
+  availableTimes String[] @default([])
+  shiftTypes     String[] @default([])
+  experience     Json?
+
   createdAt DateTime @default(now())
 }
 
@@ -152,6 +158,19 @@ model Employer {
   teamMembers             Json?
   jobTitle                String?
   managerRole             String?
+
+  // Oeffentliches Firmenprofil (Worker-Sicht)
+  yearFounded            Int?
+  tagline                String?
+  socialLinks            Json?
+  streetAddress          String?
+  zipCode                String?
+  addressLat             Float?
+  addressLng             Float?
+  publicContactName      String?
+  publicContactRole      String?
+  postsInMultipleStates  Boolean @default(false)
+  remoteFriendly         Boolean @default(false)
 }
 
 model PasswordResetToken {

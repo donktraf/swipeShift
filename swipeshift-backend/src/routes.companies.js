@@ -4,6 +4,7 @@
 const express = require("express");
 const router  = express.Router();
 const { prisma } = require("./prisma.js");
+const { cleanSocialLinks } = require("./utils/profileFields");
 const { computeResponseStats } = require("./utils/responseStats");
 const { computeWouldWorkAgain } = require("./utils/reviewLogic");
 
@@ -53,6 +54,8 @@ router.get("/:name", async (req, res) => {
           companyLogoUrl: true, websiteOrInstagram: true, companyDescription: true,
           // Oeffentliche Firmen-Kontaktdaten (vom Employer in "Company Information" gepflegt)
           companyPhone: true, companyEmail: true,
+          yearFounded: true, tagline: true, socialLinks: true, streetAddress: true, zipCode: true,
+          addressLat: true, addressLng: true, publicContactName: true, publicContactRole: true,
         },
       });
       if (emp) employerProfile = emp;
@@ -134,6 +137,15 @@ router.get("/:name", async (req, res) => {
       email:          employerProfile?.companyEmail ?? null,
       industry:       employerProfile?.industry ?? null,
       companySize:    employerProfile?.companySize ?? null,
+      tagline:        employerProfile?.tagline ?? null,
+      yearFounded:    employerProfile?.yearFounded ?? null,
+      socialLinks:    cleanSocialLinks(employerProfile?.socialLinks),
+      streetAddress:  employerProfile?.streetAddress ?? null,
+      zipCode:        employerProfile?.zipCode ?? null,
+      addressLat:     employerProfile?.addressLat ?? null,
+      addressLng:     employerProfile?.addressLng ?? null,
+      contactName:    employerProfile?.publicContactName ?? null,
+      contactRole:    employerProfile?.publicContactRole ?? null,
       // Offene Jobs für "View Open Jobs"
       openJobs: jobs
         .filter(j => j.status === "published")
