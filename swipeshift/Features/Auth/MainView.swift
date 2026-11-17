@@ -144,6 +144,17 @@ struct LandingView: View {
             RegisterView()
                 .environmentObject(userStore)
         }
+        // 2FA-Code nach Google/Apple-Login (der Login-Screen hat sein eigenes Sheet)
+        .twoFactorLoginSheet(isActive: !showLogin && !showRegister && !userStore.showLogin)
+        // Hinweis, wenn die Sitzung serverseitig beendet wurde
+        .alert("Signed out", isPresented: Binding(
+            get: { userStore.signedOutNotice != nil && !showLogin && !userStore.showLogin },
+            set: { if !$0 { userStore.signedOutNotice = nil } }
+        )) {
+            Button("OK", role: .cancel) { userStore.signedOutNotice = nil }
+        } message: {
+            Text(userStore.signedOutNotice ?? "")
+        }
     }
 }
 

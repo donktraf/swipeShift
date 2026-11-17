@@ -175,37 +175,30 @@ final class APIClient {
        }
 
     
-    /// Loggt den User ein und speichert den JWT Token für weitere Requests (Bearer Auth)
+    /// Loggt den User ein. Bei aktivierter 2FA kommt statt Token eine Code-Challenge zurueck.
     // POST /auth/login
-    func login(email: String, password: String) async throws -> UserDTO {
-        print("Login aufgerufen")
-        
-        
+    func login(email: String, password: String) async throws -> LoginOutcome {
         var request = URLRequest(url: baseURL.appendingPathComponent("auth/login"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        DeviceInfo.apply(to: &request)
         request.httpBody = try JSONEncoder().encode(["email": email, "password": password])
         let (data, response) = try await URLSession.shared.data(for: request)
-
-        if let http = response as? HTTPURLResponse {
-            print("IOS LOGIN status:", http.statusCode)
-            print("IOS LOGIN headers:", http.allHeaderFields)
-        } else {
-            print("IOS LOGIN response is not HTTPURLResponse")
-        }
-        print("IOS LOGIN raw:", String(data: data, encoding: .utf8) ?? "nil")
-        //try validate(response: response, data: data)
-        
         try validate(response: response, data: data)
-        
-        do {
-            let decoded = try JSONDecoder().decode(AuthResponseDTO.self, from: data)
-            self.token = decoded.token
-            return decoded.user //  User zurückgeben
-        } catch {
-            print("IOS LOGIN decode error:", error)
-            throw error
+        return try handleLoginResponse(data)
+    }
+
+    /// Gemeinsame Auswertung aller Login-Antworten (E-Mail, Google, Apple, 2FA-Verify)
+    private func handleLoginResponse(_ data: Data) throws -> LoginOutcome {
+        let decoded = try JSONDecoder().decode(LoginResponseDTO.self, from: data)
+        if decoded.twoFactorRequired == true, let challengeId = decoded.challengeId {
+            return .twoFactorRequired(TwoFactorChallenge(challengeId: challengeId, emailHint: decoded.emailHint ?? "your email"))
         }
+        guard let token = decoded.token, let user = decoded.user else {
+            throw URLError(.cannotParseResponse)
+        }
+        self.token = token
+        return .signedIn(user: user, isNewUser: decoded.isNewUser ?? false)
     }
 
     // POST /auth/register
@@ -214,6 +207,7 @@ final class APIClient {
         
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        DeviceInfo.apply(to: &request)
         request.httpBody = try JSONEncoder().encode(requestBody)
         
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -356,37 +350,33 @@ final class APIClient {
     }
     
         // POST /auth/apple
-        func loginWithApple(idToken: String) async throws -> AuthResponseDTO {
+        func loginWithApple(idToken: String) async throws -> LoginOutcome {
             var request = URLRequest(url: baseURL.appendingPathComponent("auth/apple"))
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            DeviceInfo.apply(to: &request)
 
             struct Body: Encodable { let idToken: String }
             request.httpBody = try JSONEncoder().encode(Body(idToken: idToken))
 
             let (data, response) = try await URLSession.shared.data(for: request)
             try validate(response: response, data: data)
-
-            let decoded = try JSONDecoder().decode(AuthResponseDTO.self, from: data)
-            self.token = decoded.token
-            return decoded
+            return try handleLoginResponse(data)
         }
 
         // POST /auth/google
-        func loginWithGoogle(idToken: String) async throws -> AuthResponseDTO {
+        func loginWithGoogle(idToken: String) async throws -> LoginOutcome {
             var request = URLRequest(url: baseURL.appendingPathComponent("auth/google"))
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            DeviceInfo.apply(to: &request)
 
             struct Body: Encodable { let idToken: String }
             request.httpBody = try JSONEncoder().encode(Body(idToken: idToken))
 
             let (data, response) = try await URLSession.shared.data(for: request)
             try validate(response: response, data: data)
-
-            let decoded = try JSONDecoder().decode(AuthResponseDTO.self, from: data)
-            self.token = decoded.token
-            return decoded
+            return try handleLoginResponse(data)
         }
     
     func resendVerification(email: String) async throws {
@@ -922,9 +912,115 @@ final class APIClient {
     }
 }
 
+// MARK: - Sessions & 2FA
+
+extension APIClient {
+    // `private`-Member von APIClient sind hier sichtbar (gleiche Datei)
+    private func securityRequest(_ path: String, method: String = "POST", body: [String: String]? = nil) throws -> URLRequest {
+        var req = try makeRequest(path: path, method: method)
+        if let body { req.httpBody = try JSONEncoder().encode(body) }
+        return req
+    }
+
+    // GET /auth/sessions
+    func fetchSessions() async throws -> [DeviceSessionDTO] {
+        let req = try securityRequest("/auth/sessions", method: "GET")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+        let dec = JSONDecoder()
+        dec.dateDecodingStrategy = .custom { decoder in
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            let withFraction = ISO8601DateFormatter()
+            withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = withFraction.date(from: raw) ?? ISO8601DateFormatter().date(from: raw) { return date }
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Bad date \(raw)"))
+        }
+        return try dec.decode(DeviceSessionsResponseDTO.self, from: data).sessions
+    }
+
+    // POST /auth/sessions/:id/revoke
+    func revokeSession(id: String) async throws {
+        let req = try securityRequest("/auth/sessions/\(id)/revoke")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+    }
+
+    // POST /auth/sessions/revoke-others
+    func revokeOtherSessions() async throws {
+        let req = try securityRequest("/auth/sessions/revoke-others")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+    }
+
+    /// POST /auth/logout — beendet die Sitzung serverseitig. Fehler sind egal (lokal wird trotzdem ausgeloggt).
+    func logoutRemote(token: String) async {
+        guard var req = try? securityRequest("/auth/logout") else { return }
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        _ = try? await URLSession.shared.data(for: req)
+    }
+
+    /// POST /auth/2fa/request — schickt einen Code, um 2FA ein- (`enable`) oder auszuschalten (`disable`)
+    func requestTwoFactorChange(enable: Bool) async throws -> TwoFactorChallenge {
+        let req = try securityRequest("/auth/2fa/request", body: ["action": enable ? "enable" : "disable"])
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+        let sent = try JSONDecoder().decode(TwoFactorCodeSentDTO.self, from: data)
+        return TwoFactorChallenge(challengeId: sent.challengeId, emailHint: sent.emailHint)
+    }
+
+    /// POST /auth/2fa/confirm — liefert den neuen Zustand (an/aus)
+    func confirmTwoFactorChange(challengeId: String, code: String) async throws -> Bool {
+        let req = try securityRequest("/auth/2fa/confirm", body: ["challengeId": challengeId, "code": code])
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+        struct R: Decodable { let enabled: Bool }
+        return try JSONDecoder().decode(R.self, from: data).enabled
+    }
+
+    /// POST /auth/2fa/verify-login — schliesst einen Login mit 2FA ab
+    func verifyTwoFactorLogin(challengeId: String, code: String) async throws -> LoginOutcome {
+        var req = try securityRequest("/auth/2fa/verify-login", body: ["challengeId": challengeId, "code": code])
+        req.setValue(nil, forHTTPHeaderField: "Authorization")
+        DeviceInfo.apply(to: &req)
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+        return try handleLoginResponse(data)
+    }
+
+    /// POST /auth/2fa/resend — neuer Login-Code (neue challengeId)
+    func resendTwoFactorLoginCode(challengeId: String) async throws -> TwoFactorChallenge {
+        var req = try securityRequest("/auth/2fa/resend", body: ["challengeId": challengeId])
+        req.setValue(nil, forHTTPHeaderField: "Authorization")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+        let sent = try JSONDecoder().decode(TwoFactorCodeSentDTO.self, from: data)
+        return TwoFactorChallenge(challengeId: sent.challengeId, emailHint: sent.emailHint)
+    }
+}
+
+/// Fehler mit der lesbaren Backend-Meldung ({ error }) als localizedDescription.
+struct APIError: LocalizedError {
+    let status: Int
+    let message: String
+    let code: String?
+    var errorDescription: String? { message }
+}
+
 func validate(response: URLResponse, data: Data) throws {
     guard let http = response as? HTTPURLResponse else { return }
     guard (200..<300).contains(http.statusCode) else {
+        let body = try? JSONDecoder().decode(APIErrorBody.self, from: data)
+
+        // Sitzung serverseitig beendet → App loggt sich lokal aus (UserStore hoert darauf)
+        if http.statusCode == 401, body?.code == "SESSION_REVOKED" {
+            NotificationCenter.default.post(name: .sessionRevoked, object: nil)
+        }
+
+        // Neue Sicherheits-Endpunkte liefern strukturierte Codes → lesbare Meldung durchreichen
+        if let code = body?.code, let message = body?.error {
+            throw APIError(status: http.statusCode, message: message, code: code)
+        }
+
         let raw = String(data: data, encoding: .utf8) ?? "<no body>"
         throw NSError(
             domain: "HTTP",

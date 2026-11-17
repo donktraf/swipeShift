@@ -33,6 +33,86 @@ final class UserStore: ObservableObject {
     // Token + Email die via Deep Link ankommen — warten auf "I have a token" Tap
     @Published var pendingResetToken: String? = nil
     @Published var pendingResetEmail: String? = nil
+
+    /// Offene 2FA-Abfrage beim Login (Code per E-Mail). Solange gesetzt, zeigt die
+    /// Login-Oberflaeche das Code-Eingabe-Sheet.
+    @Published var pendingTwoFactor: TwoFactorChallenge? = nil
+
+    /// Hinweis fuer den Login-Screen, warum man ausgeloggt wurde (z.B. auf anderem Geraet abgemeldet).
+    @Published var signedOutNotice: String? = nil
+
+    private var sessionRevokedObserver: NSObjectProtocol?
+
+    init() {
+        // Backend meldet SESSION_REVOKED → lokal ausloggen
+        sessionRevokedObserver = NotificationCenter.default.addObserver(
+            forName: .sessionRevoked, object: nil, queue: .main
+        ) { [weak self] _ in
+            // queue: .main → wir sind bereits auf dem Main Thread
+            MainActor.assumeIsolated { self?.handleSessionRevoked() }
+        }
+    }
+
+    deinit {
+        if let sessionRevokedObserver { NotificationCenter.default.removeObserver(sessionRevokedObserver) }
+    }
+
+    @MainActor
+    private func handleSessionRevoked() {
+        guard currentUser != nil || APIClient.shared.token != nil else { return }
+        APIClient.shared.token = nil
+        currentUser = nil
+        signedOutNotice = "You were signed out. Please sign in again."
+    }
+
+    /// Wertet ein Login-Ergebnis aus (alle Login-Wege inkl. 2FA-Abschluss).
+    @MainActor
+    private func applyLoginOutcome(_ outcome: LoginOutcome) {
+        switch outcome {
+        case .signedIn(let user, let isNewUser):
+            pendingTwoFactor = nil
+            signedOutNotice = nil
+            currentUser = user
+            // Nur neuer Social-User bekommt den Success Screen
+            if isNewUser { showSocialSuccess = true }
+        case .twoFactorRequired(let challenge):
+            pendingTwoFactor = challenge
+        }
+    }
+
+    // MARK: - Two-Factor (Login)
+
+    /// Prueft den Login-Code. Gibt bei Fehler eine lesbare Meldung zurueck, sonst nil.
+    @MainActor
+    func verifyTwoFactorLogin(code: String) async -> String? {
+        guard let challenge = pendingTwoFactor else { return "Please sign in again." }
+        do {
+            let outcome = try await APIClient.shared.verifyTwoFactorLogin(challengeId: challenge.challengeId, code: code)
+            applyLoginOutcome(outcome)
+            if case .signedIn = outcome { showLogin = false }
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    @MainActor
+    func resendTwoFactorLoginCode() async -> String? {
+        guard let challenge = pendingTwoFactor else { return "Please sign in again." }
+        do {
+            let fresh = try await APIClient.shared.resendTwoFactorLoginCode(challengeId: challenge.challengeId)
+            pendingTwoFactor?.challengeId = fresh.challengeId
+            pendingTwoFactor?.emailHint = fresh.emailHint
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    @MainActor
+    func cancelTwoFactorLogin() {
+        pendingTwoFactor = nil
+    }
     
     @MainActor
     func presentLoginAfterReset() {
@@ -56,15 +136,13 @@ final class UserStore: ObservableObject {
           let emailNorm = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 
         do {
-            let user = try await APIClient.shared.login(
+            let outcome = try await APIClient.shared.login(
                 email: emailNorm,
                 password: password
             )
-
-            self.currentUser = user
-            
-            self.showLogin = false
-            print("Login success:", user.email)
+            applyLoginOutcome(outcome)
+            // Bei 2FA bleibt der Login-Screen offen, bis der Code bestaetigt ist
+            if case .signedIn = outcome { self.showLogin = false }
 
         } catch {
             self.errorMessage = error.localizedDescription
@@ -220,14 +298,8 @@ final class UserStore: ObservableObject {
             }
 
             do {
-                let response = try await APIClient.shared.loginWithApple(idToken: identityToken)
-                self.currentUser = response.user
-
-                // ✅ Nur neuer User bekommt den Success Screen
-                if response.isNewUser == true {
-                    self.showSocialSuccess = true
-                }
-                // Bestehender User → direkt Home
+                let outcome = try await APIClient.shared.loginWithApple(idToken: identityToken)
+                applyLoginOutcome(outcome)
             } catch {
                 self.errorMessage = error.localizedDescription
             }
@@ -255,14 +327,8 @@ final class UserStore: ObservableObject {
                           userInfo: [NSLocalizedDescriptionKey: "Missing Google ID token."])
         }
 
-        let response = try await APIClient.shared.loginWithGoogle(idToken: idToken)
-        self.currentUser = response.user
-
-        // ✅ Nur neuer User bekommt den Success Screen
-        if response.isNewUser == true {
-            self.showSocialSuccess = true
-        }
-        // Bestehender User → currentUser ist gesetzt → ContentView zeigt direkt Home
+        let outcome = try await APIClient.shared.loginWithGoogle(idToken: idToken)
+        applyLoginOutcome(outcome)
     }
     
     @MainActor
@@ -394,9 +460,14 @@ final class UserStore: ObservableObject {
     /// - UI springt automatisch in den Logged-Out State
     @MainActor
     func logout() {
+        // Sitzung auch serverseitig beenden (fire-and-forget), damit sie aus "Active Sessions" verschwindet
+        if let token = APIClient.shared.token {
+            Task { await APIClient.shared.logoutRemote(token: token) }
+        }
         APIClient.shared.token = nil
         currentUser = nil
         errorMessage = nil
+        pendingTwoFactor = nil
     }
 }
 

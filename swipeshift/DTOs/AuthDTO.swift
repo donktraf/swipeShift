@@ -60,6 +60,8 @@ struct UserDTO: Decodable {
     
     let isEmailVerified: Bool
     let hasSocialLogin: Bool?
+    /// 2FA per E-Mail-Code aktiv (nur in GET /auth/me enthalten)
+    let twoFactorEnabled: Bool?
 }
 
 // Login/Register Response

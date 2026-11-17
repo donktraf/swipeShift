@@ -106,6 +106,14 @@ struct LoginView: View {
                 Spacer()
             }
         }
+        .twoFactorLoginSheet()
+        // Login per 2FA-Code abgeschlossen → Login-Screen schliessen
+        .onChange(of: userStore.currentUser?.id) { _, newValue in
+            if newValue != nil {
+                userStore.showLogin = false
+                dismiss()
+            }
+        }
     }
 
     private func handleLogin() {
@@ -121,6 +129,8 @@ struct LoginView: View {
             } else if userStore.currentUser != nil {
                 userStore.showLogin = false
                 dismiss()
+            } else if userStore.pendingTwoFactor != nil {
+                // 2FA: Code-Sheet ist offen, Login wird dort abgeschlossen (siehe onChange unten)
             } else {
                 errorMessage = "Invalid email or password. Please try again."
             }

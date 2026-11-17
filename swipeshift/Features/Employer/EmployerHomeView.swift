@@ -135,6 +135,7 @@ private struct EmployerProfileTab: View {
     @State private var showFinancial      = false
     @State private var showCalendar       = false
     @State private var showSavedApplicants = false
+    @State private var showSettings       = false
     @State private var showLogoutAlert = false
 
     var body: some View {
@@ -201,7 +202,7 @@ private struct EmployerProfileTab: View {
                     Divider().padding(.leading, 52)
                     ProfileNavRow(icon: "calendar",            label: "Calendar")             { showCalendar = true }
                     Divider().padding(.leading, 52)
-                    ProfileNavRow(icon: "gearshape",           label: "Settings")             {}
+                    ProfileNavRow(icon: "gearshape",           label: "Settings")             { showSettings = true }
                     Divider().padding(.leading, 52)
                     ProfileNavRow(icon: "person.crop.circle.badge.questionmark", label: "Help & Support") {}
                     Divider().padding(.leading, 52)
@@ -247,6 +248,12 @@ private struct EmployerProfileTab: View {
         }
         .navigationDestination(isPresented: $showSavedApplicants) {
             SavedApplicantsView()
+        }
+        // TODO: Employer-spezifisches "Payments & Billing" (Wireframe) — aktuell teilt sich der Employer
+        // die Account Settings des Workers (inkl. "Payments & Payouts")
+        .navigationDestination(isPresented: $showSettings) {
+            AccountSettingsView()
+                .environmentObject(userStore)
         }
         .alert("Log Out?", isPresented: $showLogoutAlert) {
             Button("Log Out", role: .destructive) { userStore.logout() }

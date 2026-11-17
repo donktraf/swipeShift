@@ -46,10 +46,20 @@ struct AccountSecurityView: View {
     @State private var showChangePhone    = false
     @State private var showChangePassword = false
     @State private var showSetPassword    = false
-    @State private var twoFAEnabled       = false
+
+    // 2FA: Zustand kommt aus GET /auth/me (twoFactorEnabled)
+    @State private var twoFactorChallenge: TwoFactorChallenge? = nil
+    @State private var pendingEnable      = false   // Ziel-Zustand der laufenden Aenderung
+    @State private var isRequestingCode   = false
+    @State private var twoFactorError: String? = nil
+    @State private var showDisableConfirm = false
 
     private var isSocialUser: Bool {
         userStore.currentUser?.hasSocialLogin == true
+    }
+
+    private var twoFactorEnabled: Bool {
+        userStore.currentUser?.twoFactorEnabled == true
     }
 
     var body: some View {
@@ -76,14 +86,40 @@ struct AccountSecurityView: View {
                             .foregroundColor(SS.primary)
                             .frame(width: 28)
                             .padding(.leading, 14)
-                        Text("Two-Factor Authentication")
-                            .font(.system(size: 15))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Two-Factor Authentication")
+                                .font(.system(size: 15))
+                            Text(twoFactorEnabled
+                                 ? "On · we email you a code when you sign in"
+                                 : "Off · add a code by email when you sign in")
+                                .font(.system(size: 12))
+                                .foregroundColor(.secondary)
+                        }
                         Spacer()
-                        Toggle("", isOn: $twoFAEnabled)
+                        if isRequestingCode {
+                            ProgressView().padding(.trailing, 14)
+                        } else {
+                            Toggle("", isOn: Binding(
+                                get: { twoFactorEnabled },
+                                set: { wantsOn in
+                                    if wantsOn { startTwoFactorChange(enable: true) }
+                                    else { showDisableConfirm = true }
+                                }
+                            ))
                             .labelsHidden()
                             .padding(.trailing, 14)
+                        }
                     }
                     .padding(.vertical, 14)
+
+                    if let twoFactorError {
+                        Text(twoFactorError)
+                            .font(.system(size: 12))
+                            .foregroundColor(.red)
+                            .padding(.horizontal, 14)
+                            .padding(.bottom, 12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
 
                     Divider().padding(.leading, 52)
 
@@ -96,10 +132,66 @@ struct AccountSecurityView: View {
             }
             .padding(.horizontal, 16)
         }
+        // refreshMe (nicht ...IfPossible): ein Netzwerkfehler soll hier nicht ausloggen
+        .task { await userStore.refreshMe() }
         .sheet(isPresented: $showChangeEmail)    { ChangeEmailSheet() }
         .sheet(isPresented: $showChangePhone)    { ChangePhoneSheet() }
         .sheet(isPresented: $showChangePassword) { ChangePasswordSheet() }
         .sheet(isPresented: $showSetPassword)    { SetPasswordSheet().environmentObject(userStore) }
+        .sheet(item: $twoFactorChallenge) { challenge in
+            TwoFactorCodeView(
+                title: pendingEnable ? "Turn on two-factor" : "Turn off two-factor",
+                message: "Enter the 6-digit code we sent to \(challenge.emailHint).",
+                confirmLabel: pendingEnable ? "Turn On" : "Turn Off",
+                onSubmit: { code in await confirmTwoFactorChange(code: code) },
+                onResend: { await resendTwoFactorCode() },
+                onCancel: { twoFactorChallenge = nil }
+            )
+        }
+        .alert("Turn off two-factor authentication?", isPresented: $showDisableConfirm) {
+            Button("Turn Off", role: .destructive) { startTwoFactorChange(enable: false) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Signing in will only need your password or Google/Apple account. We'll email you a code to confirm.")
+        }
+    }
+
+    // MARK: 2FA-Ablauf: Code anfordern → Code eingeben → Zustand neu laden
+
+    private func startTwoFactorChange(enable: Bool) {
+        pendingEnable = enable
+        twoFactorError = nil
+        isRequestingCode = true
+        Task {
+            do {
+                twoFactorChallenge = try await APIClient.shared.requestTwoFactorChange(enable: enable)
+            } catch {
+                twoFactorError = error.localizedDescription
+            }
+            isRequestingCode = false
+        }
+    }
+
+    private func resendTwoFactorCode() async -> String? {
+        do {
+            let fresh = try await APIClient.shared.requestTwoFactorChange(enable: pendingEnable)
+            twoFactorChallenge?.challengeId = fresh.challengeId
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    private func confirmTwoFactorChange(code: String) async -> String? {
+        guard let challenge = twoFactorChallenge else { return "Please try again." }
+        do {
+            _ = try await APIClient.shared.confirmTwoFactorChange(challengeId: challenge.challengeId, code: code)
+            await userStore.refreshMe()
+            twoFactorChallenge = nil
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
     }
 }
 
@@ -108,108 +200,198 @@ struct AccountSecurityView: View {
 struct ActiveSessionsView: View {
     @EnvironmentObject var userStore: UserStore
 
-    private struct DeviceSession: Identifiable {
-        let id = UUID()
-        let deviceName: String
-        let location: String
-        let lastActive: String
-        let isCurrent: Bool
-    }
+    @State private var sessions: [DeviceSessionDTO] = []
+    @State private var isLoading = true
+    @State private var loadError: String? = nil
+    @State private var actionError: String? = nil
+    @State private var sessionToRevoke: DeviceSessionDTO? = nil
+    @State private var showSignOutOthersAlert = false
+    @State private var busySessionId: String? = nil
 
-    private let sessions: [DeviceSession] = [
-        .init(deviceName: "iPhone 15 Pro",   location: "Berlin, DE",   lastActive: "Active now",   isCurrent: true),
-        .init(deviceName: "iPad Air (5th Gen)", location: "Hamburg, DE", lastActive: "2 days ago",   isCurrent: false),
-        .init(deviceName: "iPhone 13",       location: "Munich, DE",  lastActive: "1 week ago",    isCurrent: false),
-    ]
-
-    @State private var showSignOutAlert = false
+    private var otherSessions: [DeviceSessionDTO] { sessions.filter { !$0.isCurrent } }
 
     var body: some View {
         SubScreenShell(title: "Active Sessions") {
             VStack(spacing: 16) {
-                VStack(spacing: 0) {
-                    ForEach(sessions) { session in
-                        HStack(spacing: 14) {
-                            Image(systemName: session.deviceName.contains("iPad") ? "ipad" : "iphone")
-                                .font(.system(size: 22))
-                                .foregroundColor(session.isCurrent ? SS.primary : .secondary)
-                                .frame(width: 32)
-                                .padding(.leading, 14)
+                if isLoading && sessions.isEmpty {
+                    ProgressView()
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 40)
+                } else if let loadError, sessions.isEmpty {
+                    VStack(spacing: 12) {
+                        Text(loadError)
+                            .font(.system(size: 14))
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                        Button("Try Again") { Task { await load() } }
+                            .font(.system(size: 14, weight: .semibold))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 40)
+                } else {
+                    Text("These devices are signed in to your account. If you don't recognize one, sign it out and change your password.")
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 4)
 
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack(spacing: 6) {
-                                    Text(session.deviceName)
-                                        .font(.system(size: 14, weight: .semibold))
-                                    if session.isCurrent {
-                                        Text("This Device")
-                                            .font(.system(size: 11, weight: .semibold))
-                                            .foregroundColor(.white)
-                                            .padding(.horizontal, 7)
-                                            .padding(.vertical, 2)
-                                            .background(SS.primary)
-                                            .clipShape(Capsule())
-                                    }
-                                }
-                                Text("\(session.location) · \(session.lastActive)")
-                                    .font(.system(size: 12))
-                                    .foregroundColor(.secondary)
+                    VStack(spacing: 0) {
+                        ForEach(sessions) { session in
+                            sessionRow(session)
+                            if session.id != sessions.last?.id {
+                                Divider().padding(.leading, 60)
                             }
-
-                            Spacer()
-
-                            if !session.isCurrent {
-                                Button {
-                                    // TODO: POST /auth/sessions/:id/revoke
-                                } label: {
-                                    Text("Sign Out")
-                                        .font(.system(size: 12, weight: .semibold))
-                                        .foregroundColor(.red)
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 5)
-                                        .overlay(
-                                            Capsule().stroke(Color.red.opacity(0.5), lineWidth: 1)
-                                        )
-                                }
-                                .buttonStyle(.plain)
-                                .padding(.trailing, 14)
-                            }
-                        }
-                        .padding(.vertical, 14)
-
-                        if session.id != sessions.last?.id {
-                            Divider().padding(.leading, 52)
                         }
                     }
-                }
-                .background(Color(uiColor: .systemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 16))
-                .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
+                    .background(Color(uiColor: .systemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
 
-                Button {
-                    showSignOutAlert = true
-                } label: {
-                    Text("Sign out of all other devices")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.red)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(Color(uiColor: .systemBackground))
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
-                        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
+                    if let actionError {
+                        Text(actionError)
+                            .font(.system(size: 13))
+                            .foregroundColor(.red)
+                            .padding(.horizontal, 4)
+                    }
+
+                    if !otherSessions.isEmpty {
+                        Button {
+                            showSignOutOthersAlert = true
+                        } label: {
+                            Text("Sign out of all other devices")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.red)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                                .background(Color(uiColor: .systemBackground))
+                                .clipShape(RoundedRectangle(cornerRadius: 14))
+                                .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Text("No other devices are signed in.")
+                            .font(.system(size: 13))
+                            .foregroundColor(.secondary)
+                            .frame(maxWidth: .infinity)
+                    }
                 }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 0)
             }
             .padding(.horizontal, 16)
         }
-        .alert("Sign out of all other devices?", isPresented: $showSignOutAlert) {
-            Button("Sign Out", role: .destructive) {
-                TokenStore.shared.deleteToken()
-                userStore.logout()
-            }
+        .task { await load() }
+        .refreshable { await load() }
+        .alert("Sign out of all other devices?", isPresented: $showSignOutOthersAlert) {
+            Button("Sign Out", role: .destructive) { Task { await revokeOthers() } }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("You will be signed out on this device. Other sessions will expire on next use.")
+            Text("You'll stay signed in on this device. Everywhere else you'll need to sign in again.")
+        }
+        .alert(
+            "Sign out this device?",
+            isPresented: Binding(get: { sessionToRevoke != nil }, set: { if !$0 { sessionToRevoke = nil } }),
+            presenting: sessionToRevoke
+        ) { session in
+            Button("Sign Out", role: .destructive) { Task { await revoke(session) } }
+            Button("Cancel", role: .cancel) {}
+        } message: { session in
+            Text("\(session.displayName) will need to sign in again.")
+        }
+    }
+
+    private func sessionRow(_ session: DeviceSessionDTO) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: session.iconName)
+                .font(.system(size: 22))
+                .foregroundColor(session.isCurrent ? SS.primary : .secondary)
+                .frame(width: 32)
+                .padding(.leading, 14)
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(session.displayName)
+                        .font(.system(size: 14, weight: .semibold))
+                    if session.isCurrent {
+                        Text("This Device")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
+                            .background(SS.primary)
+                            .clipShape(Capsule())
+                    }
+                }
+                Text(detailLine(for: session))
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+                Text("Signed in \(session.createdAt.formatted(date: .abbreviated, time: .omitted))")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+            }
+
+            Spacer()
+
+            if !session.isCurrent {
+                if busySessionId == session.id {
+                    ProgressView().padding(.trailing, 14)
+                } else {
+                    Button {
+                        sessionToRevoke = session
+                    } label: {
+                        Text("Sign Out")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.red)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .overlay(Capsule().stroke(Color.red.opacity(0.5), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.trailing, 14)
+                }
+            }
+        }
+        .padding(.vertical, 14)
+    }
+
+    // TODO: Standort pro Geraet (Wireframe) braucht IP-Geolocation im Backend — bisher nicht vorhanden
+    private func detailLine(for session: DeviceSessionDTO) -> String {
+        let activity: String
+        if session.isCurrent || Date().timeIntervalSince(session.lastActiveAt) < 120 {
+            activity = "Active now"
+        } else {
+            activity = "Active " + session.lastActiveAt.formatted(.relative(presentation: .named))
+        }
+        return [session.osVersion, activity].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    private func load() async {
+        isLoading = true
+        do {
+            sessions = try await APIClient.shared.fetchSessions()
+            loadError = nil
+        } catch {
+            loadError = "Couldn't load your devices. Check your connection and try again."
+        }
+        isLoading = false
+    }
+
+    private func revoke(_ session: DeviceSessionDTO) async {
+        actionError = nil
+        busySessionId = session.id
+        do {
+            try await APIClient.shared.revokeSession(id: session.id)
+            sessions.removeAll { $0.id == session.id }
+        } catch {
+            actionError = "Couldn't sign out \(session.displayName). Please try again."
+        }
+        busySessionId = nil
+    }
+
+    private func revokeOthers() async {
+        actionError = nil
+        do {
+            try await APIClient.shared.revokeOtherSessions()
+            sessions.removeAll { !$0.isCurrent }
+        } catch {
+            actionError = "Couldn't sign out the other devices. Please try again."
         }
     }
 }
@@ -833,7 +1015,7 @@ private struct ChangePasswordSheet: View {
             .alert("Password Changed", isPresented: $success) {
                 Button("OK") { dismiss() }
             } message: {
-                Text("Your password has been updated successfully.")
+                Text("Your password has been updated. For your security, other devices have been signed out.")
             }
         }
     }
