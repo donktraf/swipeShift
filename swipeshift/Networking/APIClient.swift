@@ -625,7 +625,9 @@ final class APIClient {
         let (data, response) = try await URLSession.shared.data(for: req)
         try validate(response: response, data: data)
         struct Resp: Decodable { let applicants: [Applicant] }
-        return try JSONDecoder().decode(Resp.self, from: data).applicants
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .flexibleISO8601
+        return try decoder.decode(Resp.self, from: data).applicants
     }
 
     // GET /employer/workers/:userId — echtes Worker-Profil fuer DetailedWorkerView

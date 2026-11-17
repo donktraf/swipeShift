@@ -33,10 +33,14 @@ struct ApplicantJob: Decodable {
 struct Applicant: Identifiable, Decodable {
     let applyId:   String
     let userId:    String
-    let appliedAt: String
+    let appliedAt: Date?
     let status:    String
     let job:       ApplicantJob?
     let user:      ApplicantUser?
+    /// Kurzprofil (Bewertung, Jobs, Tags, 18+, Verfuegbarkeit); fehlt z.B. beim Oeffnen aus dem Chat
+    var summary:   ApplicantSummary? = nil
+    /// Conversation der Bewerbung (Chat-Button erst nach Annahme)
+    var conversationId: String? = nil
 
     var id: String { applyId }
 }
@@ -52,8 +56,10 @@ struct AllApplicantsView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
 
-    // Lokaler accepted/declined-State (MVP: nicht persistent bis Backend-Modell erweitert)
+    // accepted/declined: beim Laden aus dem Backend-Status, danach sofort lokal aktualisiert
     @State private var localStates: [String: ApplicantLocalState] = [:]
+    @StateObject private var chatNavigation = ApplicantChatNavigation()
+    @EnvironmentObject private var messageStore: MessageStore
 
     enum ApplicantLocalState { case accepted, declined }
 
@@ -110,7 +116,8 @@ struct AllApplicantsView: View {
                                 DetailedWorkerView(
                                     applicant: applicant,
                                     onAccept: { Task { await accept(applicant) } },
-                                    onDecline: { Task { await decline(applicant) } }
+                                    onDecline: { Task { await decline(applicant) } },
+                                    chatConversationId: chatId(for: applicant)
                                 )
                             } label: {
                                 ApplicantCard(
@@ -118,7 +125,10 @@ struct AllApplicantsView: View {
                                     localState: localStates[applicant.applyId],
                                     onAccept: { Task { await accept(applicant) } },
                                     onDecline: { Task { await decline(applicant) } },
-                                    onSave: { Task { await saveApplicant(applicant) } }
+                                    onSave: { Task { await saveApplicant(applicant) } },
+                                    onChat: chatId(for: applicant).map { id in
+                                        { chatNavigation.openChat(conversationId: id, messageStore: messageStore) }
+                                    }
                                 )
                             }
                             .buttonStyle(.plain)
@@ -130,6 +140,12 @@ struct AllApplicantsView: View {
         }
         .task { await load() }
         .refreshable { await load() }
+        .applicantChatNavigation(chatNavigation)
+    }
+
+    /// Chat nur bei angenommener Bewerbung (Backend oder gerade lokal angenommen) mit Conversation
+    private func chatId(for applicant: Applicant) -> String? {
+        localStates[applicant.applyId] == .accepted ? applicant.conversationId : nil
     }
 
     // MARK: - Filter Chip
@@ -211,6 +227,13 @@ struct AllApplicantsView: View {
         do {
             let all = try await APIClient.shared.fetchApplicants()
             applicants = jobId.map { id in all.filter { $0.job?.id == id } } ?? all
+            localStates = Dictionary(uniqueKeysWithValues: applicants.compactMap { a in
+                switch a.status {
+                case "accepted": return (a.applyId, ApplicantLocalState.accepted)
+                case "declined": return (a.applyId, ApplicantLocalState.declined)
+                default:         return nil
+                }
+            })
         }
         catch { errorMessage = error.localizedDescription }
         isLoading = false
@@ -240,161 +263,5 @@ struct AllApplicantsView: View {
     private func saveApplicant(_ applicant: Applicant) async {
         do { try await APIClient.shared.saveApplicant(applyId: applicant.applyId) }
         catch { }
-    }
-}
-
-// MARK: - ApplicantCard
-
-private struct ApplicantCard: View {
-    let applicant:  Applicant
-    let localState: AllApplicantsView.ApplicantLocalState?
-    let onAccept:   () -> Void
-    let onDecline:  () -> Void
-    var onSave:     (() -> Void)? = nil
-
-    private var isDecided: Bool { localState != nil }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-
-            // Worker-Info
-            HStack(spacing: 12) {
-                // Avatar
-                ZStack {
-                    Circle()
-                        .fill(Color.gray.opacity(0.12))
-                        .frame(width: 48, height: 48)
-                    if let urlStr = applicant.user?.profilePhotoUrl,
-                       let url = URL(string: urlStr) {
-                        AsyncImage(url: url) { img in
-                            img.resizable().scaledToFill()
-                        } placeholder: {
-                            Image(systemName: "person.fill")
-                                .font(.system(size: 22))
-                                .foregroundColor(.secondary)
-                        }
-                        .frame(width: 48, height: 48)
-                        .clipShape(Circle())
-                    } else {
-                        Image(systemName: "person.fill")
-                            .font(.system(size: 22))
-                            .foregroundColor(.secondary)
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack {
-                        Text(applicant.user?.fullName ?? "Unknown")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundColor(.primary)
-                        Spacer()
-                        stateBadge
-                        if let onSave {
-                            Button(action: onSave) {
-                                Image(systemName: "bookmark")
-                                    .font(.system(size: 16))
-                                    .foregroundColor(SS.primary)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    if let location = applicant.user?.location {
-                        Label(location, systemImage: "mappin")
-                            .font(.system(size: 12))
-                            .foregroundColor(.secondary)
-                    }
-                }
-            }
-            .padding(14)
-
-            Divider().padding(.horizontal, 14)
-
-            // Job-Info
-            if let job = applicant.job {
-                HStack(spacing: 10) {
-                    Text(job.logoEmoji)
-                        .font(.system(size: 20))
-                        .frame(width: 36, height: 36)
-                        .background(Color.gray.opacity(0.07))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(job.title)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(.primary)
-                        HStack(spacing: 8) {
-                            Label(job.shiftText, systemImage: "calendar")
-                            Label(job.payText,   systemImage: "banknote")
-                        }
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-
-                Divider().padding(.horizontal, 14)
-            }
-
-            // Accept / Decline Buttons
-            if !isDecided {
-                HStack(spacing: 8) {
-                    Button(action: onDecline) {
-                        Label("Decline", systemImage: "xmark")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(.red)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 10)
-                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.red.opacity(0.35), lineWidth: 1))
-                    }
-                    .buttonStyle(.plain)
-
-                    Button(action: onAccept) {
-                        Label("Accept", systemImage: "checkmark")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 10)
-                            .background(SS.primary)
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                    }
-                    .buttonStyle(.plain)
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-            }
-        }
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: .black.opacity(isDecided ? 0.03 : 0.05), radius: 5, x: 0, y: 2)
-        .opacity(isDecided ? 0.65 : 1)
-        .animation(.easeInOut(duration: 0.25), value: isDecided)
-    }
-
-    @ViewBuilder
-    private var stateBadge: some View {
-        switch localState {
-        case .accepted:
-            Text("Accepted")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(.white)
-                .padding(.horizontal, 8).padding(.vertical, 3)
-                .background(Color.green)
-                .clipShape(Capsule())
-        case .declined:
-            Text("Declined")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(.white)
-                .padding(.horizontal, 8).padding(.vertical, 3)
-                .background(Color.red)
-                .clipShape(Capsule())
-        case nil:
-            Text("Pending")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(SS.primary)
-                .padding(.horizontal, 8).padding(.vertical, 3)
-                .background(SS.primary.opacity(0.1))
-                .clipShape(Capsule())
-        }
     }
 }

@@ -16,6 +16,11 @@ struct DetailedWorkerView: View {
     let onDecline: () -> Void
     /// false → ohne Accept/Decline-Footer (z.B. wenn aus dem Chat geoeffnet)
     var showActions: Bool = true
+    /// gesetzt, wenn angenommen und Conversation vorhanden → "Chat"-Button im Header
+    var chatConversationId: String? = nil
+
+    @StateObject private var chatNavigation = ApplicantChatNavigation()
+    @EnvironmentObject private var messageStore: MessageStore
 
     @Environment(\.dismiss) private var dismiss
     @State private var showAcceptAlert  = false
@@ -75,6 +80,7 @@ struct DetailedWorkerView: View {
         }
         .navigationBarHidden(true)
         .task { await load() }
+        .applicantChatNavigation(chatNavigation)
         .alert("Accept applicant?", isPresented: $showAcceptAlert) {
             Button("Accept") { onAccept(); dismiss() }
             Button("Cancel", role: .cancel) {}
@@ -145,6 +151,21 @@ struct DetailedWorkerView: View {
                         if let top = stats.topWorkerCount, top > 0 {
                             TopWorkerBadge(text: "Top Worker ×\(top)")
                         }
+                    }
+
+                    if let chatConversationId {
+                        Button {
+                            chatNavigation.openChat(conversationId: chatConversationId, messageStore: messageStore)
+                        } label: {
+                            Label("Chat", systemImage: "bubble.left.and.bubble.right")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(SS.primary)
+                                .padding(.horizontal, 18).padding(.vertical, 8)
+                                .background(Color.white)
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.top, 6)
                     }
 
                     HStack(spacing: 12) {

@@ -16,6 +16,13 @@ struct EmployerCalendarJobDTO: Identifiable, Decodable {
     let endTime: Date?
     let openSpots: Int
     let assignedCount: Int
+    let category: String?
+    let payText: String
+    let shiftText: String
+    /// Schichtkosten, gleiche Berechnung wie Finanzen (abgeschlossen = geschuldet, sonst geplant)
+    let shiftCost: Double
+    let workers: [EmployerCalendarWorkerDTO]
+    let averageWorkerRating: Double?
 }
 
 // MARK: - Models
@@ -38,6 +45,12 @@ private struct EmployerCalJob: Identifiable {
     let durationHours: Int
     let openSpots: Int      // remaining open spots
     let totalSpots: Int     // total spots posted
+    let category: String?
+    let payText: String
+    let shiftText: String
+    let shiftCost: Double
+    let workers: [EmployerCalendarWorkerDTO]
+    let averageWorkerRating: Double?
 
     var isFullyStaffed: Bool { openSpots == 0 }
     var status: ShiftStatus { isFullyStaffed ? .fullyStaffed : (openSpots == totalSpots ? .needsWorkers : .partiallyStaffed) }
@@ -56,6 +69,12 @@ private struct EmployerCalJob: Identifiable {
         self.date          = dto.startTime
         self.startHour     = cal.component(.hour, from: dto.startTime)
         self.totalSpots    = dto.openSpots
+        self.category      = dto.category
+        self.payText       = dto.payText
+        self.shiftText     = dto.shiftText
+        self.shiftCost     = dto.shiftCost
+        self.workers       = dto.workers
+        self.averageWorkerRating = dto.averageWorkerRating
         self.openSpots     = max(dto.openSpots - dto.assignedCount, 0)
 
         if let end = dto.endTime {
@@ -96,6 +115,7 @@ struct EmployerCalendarView: View {
     @State private var selectedDate: Date = .now
     @State private var allJobs: [EmployerCalJob] = []
     @State private var isLoading = false
+    @State private var errorMessage: String?
 
     private let calendar = Calendar.current
 
@@ -119,8 +139,19 @@ struct EmployerCalendarView: View {
                 controlsRow
                     .padding(.bottom, 12)
 
-                if isLoading {
+                if isLoading && allJobs.isEmpty {
                     ProgressView().tint(.white).frame(maxWidth: .infinity).padding(.top, 40)
+                } else if let errorMessage, allJobs.isEmpty {
+                    VStack(spacing: 12) {
+                        Text(errorMessage)
+                            .font(.system(size: 14))
+                            .foregroundColor(.white.opacity(0.8))
+                            .multilineTextAlignment(.center)
+                        Button("Try Again") { Task { await load() } }
+                            .buttonStyle(SSPrimaryButtonStyle())
+                            .padding(.horizontal, 60)
+                    }
+                    .padding(.top, 40).padding(.horizontal, 24)
                 } else if mode == .month {
                     monthContent
                 } else {
@@ -131,12 +162,16 @@ struct EmployerCalendarView: View {
         .task { await load() }
     }
 
+    @MainActor
     private func load() async {
         isLoading = true
+        errorMessage = nil
         do {
             let dtos = try await APIClient.shared.fetchEmployerCalendar()
             allJobs = dtos.map { EmployerCalJob(dto: $0) }
-        } catch { }
+        } catch {
+            errorMessage = "The calendar could not be loaded. Check your connection and try again."
+        }
         isLoading = false
     }
 
@@ -453,6 +488,44 @@ private struct EmployerCalJobCard: View {
     let job: EmployerCalJob
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            header
+            details
+            if !job.workers.isEmpty {
+                Divider()
+                CalendarShiftWorkersSection(
+                    workers: job.workers,
+                    averageRating: job.averageWorkerRating,
+                    jobId: job.id, jobTitle: job.title, payText: job.payText,
+                    shiftText: job.shiftText, location: job.location, logoEmoji: job.logoEmoji
+                )
+            }
+        }
+        .padding(12)
+        .background(Color(uiColor: .systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
+    }
+
+    /// Kategorie + Schichtkosten
+    private var details: some View {
+        HStack(spacing: 10) {
+            if let category = job.category, !category.isEmpty {
+                Text(category)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(SS.primary)
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(SS.primary.opacity(0.1))
+                    .clipShape(Capsule())
+            }
+            Label("Shift cost \(Money.format(job.shiftCost))", systemImage: "banknote")
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+            Spacer()
+        }
+    }
+
+    private var header: some View {
         HStack(spacing: 12) {
             // Status-Stripe
             RoundedRectangle(cornerRadius: 3)
@@ -486,9 +559,5 @@ private struct EmployerCalJobCard: View {
                     .foregroundColor(.secondary)
             }
         }
-        .padding(12)
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
     }
 }

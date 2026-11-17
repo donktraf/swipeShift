@@ -174,7 +174,7 @@ extension ChatView {
                 applicant: Applicant(
                     applyId:   conversation.applyId,
                     userId:    userId,
-                    appliedAt: "",
+                    appliedAt: nil,
                     status:    "accepted",
                     job: ApplicantJob(
                         id: conversation.jobId, title: conversation.jobTitle,

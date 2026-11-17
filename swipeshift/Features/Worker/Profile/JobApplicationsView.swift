@@ -97,6 +97,8 @@ struct JobApplicationsView: View {
         HStack {
             Text(group.title)
                 .font(.system(size: 14, weight: .bold)).foregroundColor(.white)
+            Text("· \(group.items.count) \(group.items.count == 1 ? "job" : "jobs")")
+                .font(.system(size: 12, weight: .medium)).foregroundColor(.white.opacity(0.6))
             Spacer()
             if let total = group.totalEarnings {
                 Text("\(Money.format(total)) \(selectedTab == .completed ? "earned" : "expected")")
