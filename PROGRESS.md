@@ -1,6 +1,6 @@
 # SwipeShift — iOS Frontend Progress
 
-_Zuletzt aktualisiert: 2026-11-16 (Worker-Kalender + Fix stornierte Jobs)_
+_Zuletzt aktualisiert: 2026-11-17 (Active Sessions + 2FA per E-Mail-Code)_
 
 ---
 
@@ -706,3 +706,23 @@ Notion-Felder "Employer response rate" / "Typical response time" (Detailed Compa
   - `JobApplicationsView` — Grund auf stornierten Karten; `AllPostedJobsView` — optionales Grund-Feld beim Stornieren
 - Bewusst offen: Daily View (Wireframe: Monat/Woche), Zeitzonen-Label, Live-Aktualisierung ohne Neuöffnen
 
+
+### Settings: echte Active Sessions + 2FA per E-Mail-Code (2026-11-17)
+Vorher: Geräteliste hartcodiert, "Sign out of all other devices" hat nur lokal ausgeloggt, 2FA-Schalter ohne Funktion.
+- Backend:
+  - Prisma `UserSession` (eine pro Login/Gerät), `TwoFactorCode`, `User.twoFactorEnabled` (Migration `20261117100000_add_sessions_two_factor`)
+  - Jeder JWT trägt jetzt `sid`; `requireAuth` prüft die Session in der DB (widerrufen/abgelaufen → `401 { code: "SESSION_REVOKED" }`) und aktualisiert `lastActiveAt` gedrosselt. **Alte Tokens ohne `sid` sind ungültig → alle Nutzer müssen sich einmal neu einloggen.**
+  - `src/sessions.js` — gemeinsamer Login-Abschluss für E-Mail, Google, Apple, Register (`completeLogin`); bei aktivierter 2FA kommt statt Token `{ twoFactorRequired, challengeId, emailHint }`
+  - `src/routes.security.js` — `GET /auth/sessions`, `POST /auth/sessions/:id/revoke`, `POST /auth/sessions/revoke-others`, `POST /auth/logout`, `GET /auth/2fa`, `POST /auth/2fa/request|confirm|verify-login|resend`
+  - Codes: 6-stellig, HMAC-gehasht, 10 Min gültig, max. 5 Fehlversuche, einmal nutzbar, rate-limited; Mail via MailHog
+  - Passwort ändern → alle anderen Geräte abgemeldet; Passwort-Reset → alle Geräte abgemeldet
+  - `src/utils/twoFactor.js`, `src/utils/deviceInfo.js` (+ Tests); `GET /auth/me` liefert `twoFactorEnabled`
+- iOS:
+  - `DTOs/SecurityDTO.swift` (neu) — Login-Ergebnis, Challenge, Session-DTOs, Geräte-Header (`X-Device-Name/-Model`, `X-OS-Version`)
+  - `Features/Auth/TwoFactorCodeView.swift` (neu) — Code-Eingabe (Login + An/Aus), "Send a new code"
+  - `UserStore` — alle Login-Wege gehen über `applyLoginOutcome`; `pendingTwoFactor`; Logout beendet die Session auch serverseitig; bei `SESSION_REVOKED` automatisch ausloggen + Hinweis auf dem Startscreen
+  - `AccountSettingsView` — 2FA-Schalter echt (Code per Mail bestätigen, Abschalten mit Rückfrage); Active Sessions mit echten Geräten, einzeln oder alle anderen abmelden
+  - `validate()` reicht strukturierte Backend-Fehler (`{ error, code }`) als lesbare Meldung durch
+  - Employer: Profil-Zeile "Settings" öffnet jetzt die Account Settings (war leer)
+- End-to-End gegen lokale DB + MailHog getestet (28 Checks: Geräte, Abmelden, Logout, 2FA an/aus, Login mit Code, Resend, Brute-Force-Sperre, Passwortwechsel, alte Tokens)
+- Bewusst offen: Standort pro Gerät (bräuchte IP-Geolocation), Authenticator-App (TOTP) als Alternative zur E-Mail, eigenes Employer-"Payments & Billing"

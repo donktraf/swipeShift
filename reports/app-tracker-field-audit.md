@@ -117,6 +117,8 @@ Code: `AccountSettingsView.swift`. Navigation zu Account & Security, Notificatio
 - **2FA** — im Wireframe (CLAUDE.md: "Passwort aendern, 2FA, Active Sessions") explizit gefordert, kein `2FA`/`twoFactor`-Treffer im gesamten File.
 - **Active Sessions ist komplett mock** — nicht nur das Einzelgerät-Abmelden (schon bekannt): die Geräte-*Liste selbst* ist hardcodiert (`private let sessions: [DeviceSession] = [...]`), kommt nicht vom Backend. Das ist eine größere Lücke als bisher dokumentiert.
 
+**✅ Umgesetzt (2026-11-17):** Echte Sitzungen pro Gerät (Backend-Modell `UserSession`, jeder Token gehört zu einer Sitzung), Geräteliste mit "Active now"/zuletzt aktiv, einzelnes Gerät oder alle anderen abmelden, Logout beendet die Sitzung serverseitig, Passwortwechsel meldet andere Geräte ab. 2FA per 6-stelligem E-Mail-Code (an/aus mit Bestätigungscode, Abfrage bei jedem Login inkl. Google/Apple). Offen: Standort pro Gerät, Authenticator-App als Alternative.
+
 ## 11. Rating Screen — ⚠️ Lücke gefunden (Employer-Seite)
 
 Code: `ReviewsView.swift` (Worker, zeigt bewertet-zu-werden) + `LeaveReviewsView.swift` (Employer, bewertet Worker). Worker-Seite: alle 4 Skills (Communication, Teamwork, Reliability, **Working under Pressure** — verifiziert vorhanden über `avgUnderPressure`) ✓. Employer-Seite: Pending/Drafts/Past-Tabs ✓, Sort (Most Recent/Highest/Lowest) ✓, Filter nach Rating + Would-Rehire ✓.
@@ -169,7 +171,7 @@ Code: `SavedView.swift` (Worker) — Jobs/Companies-Tabs ✓, nach Datum gruppie
 | Chat | ~~Typing-Indicator, Online/Offline-Status, echte Read-Receipts~~ ✅ umgesetzt 2026-11-16 |
 | Job Detail | ~~Share-Icon fehlt~~ ✅ umgesetzt 2026-11-16 |
 | Company Profile | ~~"Employer response rate" fehlt~~ ✅ umgesetzt 2026-11-16 (gehörte zum Company-Profil, nicht zur Bewerber-Übersicht) |
-| Settings | 2FA fehlt komplett; Active-Sessions-*Liste* ist hardcodiert (nicht nur das Einzel-Abmelden) |
+| Settings | ~~2FA fehlt komplett; Active-Sessions-Liste hardcodiert~~ ✅ umgesetzt 2026-11-17 |
 | Rating (Employer) | ~~Filter nach Job Category + Date Range fehlen~~ ✅ umgesetzt 2026-11-16 (offen: Drafts-Tab ist Platzhalter) |
 | Company Profile | ~~Telefon + E-Mail fehlen~~ ✅ umgesetzt 2026-11-16 |
 | Financial (Worker) | ~~Custom-Range-Option fehlt~~ ✅ umgesetzt 2026-11-16 |

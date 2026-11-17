@@ -158,9 +158,9 @@ Backend
 5. Was noch NICHT implementiert ist
 Der ueberwiegende Teil der Wireframe-Anforderungen ist implementiert. Bekannte offene Detail-Punkte
 (siehe PROGRESS.md, TODO-Kommentare im Code):
-• Active-Sessions-Screen: einzelnes Geraet abmelden (POST /auth/sessions/:id/revoke) ist noch nicht
-  implementiert — nur "Von allen Geraeten abmelden" funktioniert (TODO-Kommentar in
-  AccountSettingsView.swift)
+• Active Sessions + 2FA (E-Mail-Code) sind umgesetzt (2026-11-17, siehe PROGRESS.md). Offen: Standort
+  pro Geraet (braucht IP-Geolocation), Authenticator-App (TOTP) als Alternative, eigenes
+  Employer-"Payments & Billing" (Employer nutzt aktuell die Worker-Account-Settings)
 • Kein XCTest-Target im Xcode-Projekt vorhanden — iOS-Unit-/UI-Tests muessen ueber Xcode
   (File > New > Target > Unit Testing Bundle) manuell angelegt werden, siehe Abschnitt 12
 • Backend-Testabdeckung ist bewusst minimal (Smoke-Tests fuer reine Utility-Funktionen), keine
