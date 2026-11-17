@@ -39,6 +39,9 @@ model User {
   // Presence fuer Chat: zuletzt aktiv (gedrosselt aktualisiert in requireAuth)
   lastSeenAt DateTime?
 
+  // 2FA per E-Mail-Code (beim Login wird zusaetzlich ein Code an die E-Mail geschickt)
+  twoFactorEnabled Boolean @default(false)
+
   worker   Worker?
   employer Employer?
 
@@ -46,6 +49,50 @@ model User {
   emailVerificationTokens EmailVerificationToken[]
   applies Apply[]
   savedCompanies SavedCompany[]
+  sessions UserSession[]
+  twoFactorCodes TwoFactorCode[]
+}
+
+// Eine Login-Sitzung pro Geraet. Jeder JWT traegt die Session-ID (sid);
+// requireAuth lehnt Tokens ab, deren Session widerrufen oder abgelaufen ist.
+model UserSession {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  deviceName  String?   // z.B. "iPhone", "iPad"
+  deviceModel String?   // Hardware-Kennung, z.B. "iPhone16,1"
+  osVersion   String?   // z.B. "iOS 18.1"
+  ipAddress   String?
+
+  createdAt    DateTime  @default(now())
+  lastActiveAt DateTime  @default(now())
+  expiresAt    DateTime
+  revokedAt    DateTime?
+
+  @@index([userId])
+}
+
+enum TwoFactorPurpose {
+  login
+  enable
+  disable
+}
+
+// Einmal-Code (6-stellig, gehasht) fuer Login-Challenge bzw. 2FA an-/ausschalten.
+model TwoFactorCode {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  purpose    TwoFactorPurpose
+  codeHash   String
+  attempts   Int       @default(0)
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId, purpose])
 }
 
 model Worker {

@@ -23,7 +23,7 @@ router.get("/me", requireAuth, async (req, res) => {
       select: {
         id: true, email: true, role: true, onboarding: true,
         firstName: true, lastName: true, location: true, lat: true, lng: true,
-        emailVerifiedAt: true, passwordHash: true, createdAt: true,
+        emailVerifiedAt: true, passwordHash: true, createdAt: true, twoFactorEnabled: true,
         worker: {
           select: {
             bio: true, dateOfBirth: true, jobInterests: true, availability: true, profilePhotoUrl: true,
@@ -58,6 +58,7 @@ router.get("/me", requireAuth, async (req, res) => {
       onboarding:       user.onboarding,
       isEmailVerified:  !!user.emailVerifiedAt,
       hasSocialLogin:   user.passwordHash === "SOCIAL_LOGIN",
+      twoFactorEnabled: user.twoFactorEnabled,
       createdAt:        user.createdAt,
       // Worker fields
       bio:                  user.worker?.bio                ?? null,

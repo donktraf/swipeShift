@@ -9,6 +9,7 @@ const uploadsRoutes = require("./routes.upload.js");
 
 
 const authRoutes      = require("./routes.auth.js");
+const securityRoutes  = require("./routes.security.js");
 const jobsRoutes      = require("./routes.jobs.js");
 const meRoutes        = require("./routes.me.js");
 const onboardingRoutes = require("./routes.onboarding");
@@ -33,6 +34,7 @@ app.get("/health", (req, res) => res.json({ ok: true }));
 // Use Routes
 app.use("/auth",      meRoutes);
 app.use("/auth",      authRoutes);
+app.use("/auth",      securityRoutes);
 app.use("/jobs",      jobsRoutes);
 app.use("/onboarding", onboardingRoutes);
 app.use("/employer",  employerRoutes);

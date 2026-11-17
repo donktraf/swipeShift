@@ -3,7 +3,7 @@ const express = require("express");
 const bcrypt = require("bcrypt");
 const { z } = require("zod");
 const { v4: uuid } = require("uuid");
-const { signToken } = require("./auth");
+const { completeLogin } = require("./sessions");
 const { prisma } = require("./prisma.js");
 const crypto = require("crypto");
 const { sendMail } = require("./mailer");
@@ -243,29 +243,12 @@ router.post("/register", registerLimiter, async (req, res) => {
 
 
 
-  const token = signToken({
-    id: user.id,
-    email: user.email,
-    role: user.role,
-  }); 
-
-  console.log("Token: ", token)
-
-  return res.json({
-    token,
-    user: {
-      id: user.id,
-      email: user.email,
-      role: user.role,
-      location: user.location,
-      lat: user.lat,
-      lng: user.lng,
-      onboarding: user.onboarding,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      isEmailVerified: !!user.emailVerifiedAt,
-    },
-  });
+  try {
+    return res.json(await completeLogin(user, req));
+  } catch (err) {
+    console.error("POST /auth/register session error:", err);
+    return res.status(500).json({ error: "Account created, but sign-in failed. Please log in." });
+  }
 });
 
 const loginSchema = z.object({
@@ -298,6 +281,7 @@ router.post("/login", loginLimiter, async (req, res) => {
       lastName: true,
       emailVerifiedAt: true,
       passwordHash: true,
+      twoFactorEnabled: true,
     },
   });
 
@@ -329,30 +313,14 @@ router.post("/login", loginLimiter, async (req, res) => {
     return res.status(401).json({ error: "Invalid email or password." });
   }
 
-  const token = signToken({
-    id: user.id,
-    email: user.email,
-    role: user.role,
-  });
-
-  console.log("Rolle Eingeloggter User: ", user.onboarding);
-
-  return res.json({
-    token,
-    user: {
-      id: user.id,
-      email: user.email,
-      role: user.role,
-      location: user.location,
-      lat: user.lat,
-      lng: user.lng,
-      onboarding: user.onboarding,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      isEmailVerified: !!user.emailVerifiedAt,
-      hasSocialLogin: user.passwordHash === "SOCIAL_LOGIN",
-    },
-  });
+  // Bei aktivierter 2FA: { twoFactorRequired, challengeId, ... } statt Token
+  try {
+    return res.json(await completeLogin(user, req));
+  } catch (err) {
+    // z.B. Mailversand fuer den 2FA-Code fehlgeschlagen — nicht den Prozess abstuerzen lassen
+    console.error("POST /auth/login completeLogin error:", err);
+    return res.status(500).json({ error: "Could not complete sign-in. Please try again." });
+  }
 });
 
 const forgotPasswordSchema = z.object({
@@ -482,6 +450,11 @@ router.post("/reset-password", mailLimiter, async (req, res) => {
       where: { id: record.id },
       data: { usedAt: new Date() },
     }),
+    // Passwort zurueckgesetzt → ueberall abmelden
+    prisma.userSession.updateMany({
+      where: { userId: user.id, revokedAt: null },
+      data: { revokedAt: new Date() },
+    }),
   ]);
 
   return res.json({
@@ -561,39 +534,12 @@ router.post("/google", async (req, res) => {
       }
     }
 
-    const token = signToken({ id: user.id, email: user.email, role: user.role });
-
-
-    console.log("User nach Google Login: ", {
-      id: user.id,
-      email: user.email,
-      role: user.role,
-      onboarding: user.onboarding,
-      location: user.location,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      isEmailVerified: payload.email_verified,
-      isNewUser
-    });
-
-    return res.json({
-      token,
-      isNewUser,
-      user: {
-        id: user.id,
-        email: user.email,
-        role: user.role,
-        onboarding: user.onboarding,
-        location: user.location,
-        lat: user.lat,
-        lng: user.lng,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        profilePhotoUrl: user.profilePhotoUrl,
-        isEmailVerified: googleSaysVerified,
-        hasSocialLogin: true,
-      },
-    });
+    return res.json(
+      await completeLogin(user, req, {
+        userOverrides: { profilePhotoUrl: user.profilePhotoUrl, isEmailVerified: googleSaysVerified, hasSocialLogin: true },
+        extra: { isNewUser },
+      })
+    );
   } catch (e) {
     console.error("Google auth error:", e);
     console.error(e);
@@ -644,25 +590,12 @@ router.post("/apple", async (req, res) => {
       });
     }
 
-    const token = signToken({ id: user.id, email: user.email, role: user.role });
-
-    return res.json({
-      token,
-      isNewUser,
-      user: {
-        id: user.id,
-        email: user.email,
-        role: user.role,
-        onboarding: user.onboarding,
-        location: user.location,
-        lat: user.lat,
-        lng: user.lng,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        isEmailVerified: payload.email_verified ?? true,
-        hasSocialLogin: true,
-      },
-    });
+    return res.json(
+      await completeLogin(user, req, {
+        userOverrides: { isEmailVerified: payload.email_verified ?? true, hasSocialLogin: true },
+        extra: { isNewUser },
+      })
+    );
   } catch (e) {
     console.error("Apple auth error:", e);
     return res.status(401).json({ error: "Invalid token" });
@@ -776,7 +709,14 @@ router.post("/change-password", requireAuth, async (req, res) => {
   if (!valid) return res.status(401).json({ error: "Current password is incorrect" });
 
   const hash = await bcrypt.hash(newPassword, 12);
-  await prisma.user.update({ where: { id: userId }, data: { passwordHash: hash } });
+  // Neues Passwort → alle anderen Geraete abmelden (aktuelles bleibt eingeloggt)
+  await prisma.$transaction([
+    prisma.user.update({ where: { id: userId }, data: { passwordHash: hash } }),
+    prisma.userSession.updateMany({
+      where: { userId, revokedAt: null, id: { not: req.auth.sid } },
+      data: { revokedAt: new Date() },
+    }),
+  ]);
   return res.json({ ok: true });
 });
 

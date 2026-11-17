@@ -18,6 +18,9 @@ const messagesRoutes = require("./routes.messages.js");
 
 prisma.user.findUnique = async () => ({ role: "employer", firstName: "E", lastName: "M" });
 prisma.user.update = async () => ({});
+// requireAuth prueft die Session (sid) in der DB
+prisma.userSession.findUnique = async () => ({ userId: "employer-1", revokedAt: null, expiresAt: new Date(Date.now() + 60_000) });
+prisma.userSession.update = async () => ({});
 
 let findManyError = null;
 const originalFindMany = prisma.conversation.findMany.bind(prisma.conversation);
@@ -37,7 +40,7 @@ const server = app.listen(0);
 after(() => server.close());
 
 test("GET /messages (Employer): gueltige Prisma-Abfrage + 500 statt Absturz ohne DB", async () => {
-  const token = signToken({ id: "employer-1", role: "employer", email: "e@example.com" });
+  const token = signToken({ id: "employer-1", role: "employer", email: "e@example.com" }, "session-1");
   const res = await fetch(`http://127.0.0.1:${server.address().port}/messages`, {
     headers: { Authorization: `Bearer ${token}` },
     signal: AbortSignal.timeout(15000),
