@@ -6,6 +6,7 @@
 // Deletes ALL existing jobs first (clean slate) unless --append flag is set.
 
 const { prisma } = require("./prisma");
+const { formatAmount, formatPayText } = require("./utils/jobData");
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -346,7 +347,7 @@ function generateJob(index) {
       date:      formatShiftDate(sd),
       timeRange: `${shiftTemplate.start}–${formatHHMM(se)}`,
       duration,
-      totalPay:  `€${payAmt * shiftTemplate.duration} total`,
+      totalPay:  `${formatAmount(payAmt * shiftTemplate.duration)} total`,
     });
   }
 
@@ -360,7 +361,7 @@ function generateJob(index) {
     lat:           loc.lat + latJitter,
     lng:           loc.lng + lngJitter,
     payAmount:     payAmt,
-    payText:       `€${payAmt} / hr`,
+    payText:       formatPayText(payAmt),
     startTime:     shiftStart,
     endTime:       shiftEnd,
     shiftText,
@@ -432,7 +433,7 @@ async function main() {
     return diff >= 0 && diff <= 48;
   }).length;
 
-  console.log(`\n⚡  Quick Money (≤4h, ≥€15/hr): ${quickMoney} jobs`);
+  console.log(`\n⚡  Quick Money (≤4h, ≥$15/hr): ${quickMoney} jobs`);
   console.log(`🕐  Starting Soon (≤48h):        ${startingSoon} jobs\n`);
 }
 

@@ -1,6 +1,6 @@
 // src/utils/jobCost.js
 // Einheitliche Kostenrechnung fuer Employer-Finanzen, Dashboard und Job-Payment-Screen.
-// payAmount ist der STUNDENLOHN (PostJobView: "Hourly Rate (€)", payText "€X / hour").
+// payAmount ist der STUNDENLOHN (PostJobView: "Hourly Rate ($)", payText "$X / hr").
 //
 //   Lohn pro Worker   = payAmount × Schichtstunden
 //   Abgeschlossen     = Lohn pro Worker × angenommene Worker   (tatsaechlich geschuldet)

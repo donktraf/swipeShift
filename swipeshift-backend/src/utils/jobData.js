@@ -2,6 +2,19 @@
 // Gemeinsames, DB-freies Feld-Mapping fuer POST /jobs und PUT /jobs/:id.
 // lat/lng werden hier nur aus dem Body uebernommen; Geocoding-Fallback passiert in der Route.
 
+// Waehrung: US-Dollar (US-Launch). Einziger Ort fuer das Symbol im Backend.
+const CURRENCY_SYMBOL = "$";
+// Regel (identisch zu Money.swift in der App): ganze Betraege ohne Nachkommastellen,
+// sonst immer 2 ("$18", "$15.50"); Rundung auf Cent. Format: "$X / hr".
+function formatAmount(amount) {
+  const cents = Math.round(Number(amount) * 100);
+  const text = cents % 100 === 0 ? String(cents / 100) : (cents / 100).toFixed(2);
+  return `${CURRENCY_SYMBOL}${text}`;
+}
+function formatPayText(amount) {
+  return `${formatAmount(amount)} / hr`;
+}
+
 function buildJobData(body = {}) {
   const {
     title, company, location, lat: bodyLat, lng: bodyLng, category, tags,
@@ -18,7 +31,7 @@ function buildJobData(body = {}) {
     lng:         bodyLng != null && bodyLng !== "" ? parseFloat(bodyLng) : null,
     category:    category || null,
     tags:        tags || [],
-    payText:     payText || (payAmount ? `€${payAmount} / hour` : "On request"),
+    payText:     payText || (payAmount ? formatPayText(payAmount) : "On request"),
     payAmount:   payAmount ? parseFloat(payAmount) : null,
     shiftText:   shifts?.[0] ? `${shifts[0].date}, ${shifts[0].timeRange}` : "",
     startTime:   shifts?.[0]?.startTimeISO ? new Date(shifts[0].startTimeISO) : null,
@@ -69,4 +82,4 @@ function checkDraftAccess(job, userId) {
   return null;
 }
 
-module.exports = { buildJobData, validateJobBody, checkDraftAccess };
+module.exports = { CURRENCY_SYMBOL, formatAmount, formatPayText, buildJobData, validateJobBody, checkDraftAccess };

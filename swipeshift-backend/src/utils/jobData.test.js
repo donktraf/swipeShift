@@ -1,7 +1,7 @@
 // src/utils/jobData.test.js
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { buildJobData, validateJobBody, checkDraftAccess } = require("./jobData");
+const { formatAmount, formatPayText, buildJobData, validateJobBody, checkDraftAccess } = require("./jobData");
 
 test("buildJobData: Defaults bei minimalem Body", () => {
   const d = buildJobData({ title: "A", category: "Events" });
@@ -21,7 +21,7 @@ test("buildJobData: Ableitungen aus shifts[0], Lohn und Beschreibung", () => {
     shifts: [{ date: "Mon", timeRange: "9-17", startTimeISO: "2026-12-01T09:00:00Z", endTimeISO: "2026-12-01T17:00:00Z", duration: "8h" }],
   });
   assert.equal(d.payAmount, 15.5);
-  assert.equal(d.payText, "€15.5 / hour");
+  assert.equal(d.payText, "$15.50 / hr");
   assert.equal(d.lat, 52.5);
   assert.equal(d.lng, 13.4);
   assert.equal(d.minAge, 18);
@@ -55,9 +55,9 @@ test("buildJobData: shift ohne ISO-Zeiten/Dauer, nur shifts[0] zaehlt", () => {
 
 test("buildJobData: payAmount als Zahl, String, leer, 0", () => {
   assert.equal(buildJobData({ payAmount: 20 }).payAmount, 20);
-  assert.equal(buildJobData({ payAmount: 20 }).payText, "€20 / hour");
+  assert.equal(buildJobData({ payAmount: 20 }).payText, "$20 / hr");
   assert.equal(buildJobData({ payAmount: "12.75" }).payAmount, 12.75);
-  assert.equal(buildJobData({ payAmount: "12.75" }).payText, "€12.75 / hour");
+  assert.equal(buildJobData({ payAmount: "12.75" }).payText, "$12.75 / hr");
   for (const p of ["", null, undefined, 0]) {
     const d = buildJobData({ payAmount: p });
     assert.equal(d.payAmount, null);
@@ -162,4 +162,17 @@ test("buildJobData: empty-string lat/lng become null instead of NaN", () => {
   const d = buildJobData({ title: "t", lat: "", lng: "" });
   assert.equal(d.lat, null);
   assert.equal(d.lng, null);
+});
+
+test("formatPayText: Dollar-Format", () => {
+  assert.equal(formatPayText(18), "$18 / hr");
+  assert.equal(formatPayText("12.75"), "$12.75 / hr");
+});
+
+test("formatAmount: ganz ohne, sonst 2 Nachkommastellen, Cent-Rundung", () => {
+  assert.equal(formatAmount(18), "$18");
+  assert.equal(formatAmount(15.5), "$15.50");
+  assert.equal(formatAmount(1250.75), "$1250.75");
+  assert.equal(formatAmount("12.999"), "$13");
+  assert.equal(formatAmount(0.005), "$0.01");
 });
