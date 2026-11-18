@@ -881,3 +881,13 @@ Gefunden beim Profile-Screen-Abgleich: Legal-Schalter (Worker + Arbeitgeber) und
 - Sicherheit (bestehende Lücken mitbehoben): Apple-Login verknüpft per Apple-ID (`User.appleSub`), unbestätigte E-Mail aus dem Request loggt nie in ein bestehendes Konto ein; Google nur mit bestätigter E-Mail; Pre-Hijacking: Übernahme eines unbestätigten Kontos per Social Login entfernt fremdes Passwort, 2FA, Auszahlungsdaten und alte Sitzungen; Register normalisiert E-Mail (trim + lowercase) vor der Prüfung
 - Migrationen `20261118230000_moderation`, `20261118233000_apple_sub` (lokal angewendet)
 - Offen: Ban-Umgehung über Plus-/Gmail-Punkt-Aliasse; Meldungen gegen später gelöschte Konten; Admin-Screens noch nicht in der App ausprobiert
+
+### Zuverlässigkeit / No-Shows + Schicht absagen (2026-11-19)
+- Arbeitgeber erfasst nach Schichtende je gebuchtem Worker „Showed up“ / „Late“ (> 15 min) / „No-show“; ohne Eintrag nach 48 h automatisch „Showed up“; Erinnerung an den Arbeitgeber ~24 h nach Schichtende (einmal pro Job)
+- Worker sieht den Eintrag und kann innerhalb von 14 Tagen einmal widersprechen (Notiz sieht Arbeitgeber + Team); Admin entscheidet im neuen Tab „Reliability“ im Admin-Bereich, der auch auffällige Worker zeigt (≥ 2 No-Shows oder ≥ 3 kurzfristige Absagen in 90 Tagen)
+- Neu: Worker können angenommene Schichten absagen (Platz wird frei, Arbeitgeber informiert, Chat schreibgeschützt); < 24 h vor Beginn = kurzfristige Absage (serverseitig berechnet)
+- Zuverlässigkeitswert (12 Monate): z. B. „96 % showed up · 1 late · 0 late cancellations“, unter 3 Schichten „New“; sichtbar für Arbeitgeber (Bewerberkarte, Worker-Profil) und den Worker selbst
+- Folgen (Entscheidung): freundliche Erinnerung per Mail/App nach No-Show oder kurzfristiger Absage (je einmal), Hinweis im Admin-Bereich; keine automatischen Sperren, kein Einfluss auf Instant Match
+- No-Show wird nicht bezahlt und nicht als Kosten/Verdienst gezählt; während eines Widerspruchs „Under review“ (nicht zahlbar); nach erfolgreichem Widerspruch wieder zahlbar
+- Migrationen `20261119000000_reliability_tracking`, `20261119010000_reliability_followups` (lokal angewendet)
+- Offen: „Popular“-Sortierung zählt abgesagte Bewerbungen mit (Prisma-Einschränkung)
