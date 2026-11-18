@@ -21,4 +21,16 @@ function countEmployerApplies(applies, now = new Date()) {
   };
 }
 
-module.exports = { countEmployerApplies };
+// Zaehler pro Job fuer GET /jobs/mine (Jobkarte). applies: [{ status, autoAccepted }]
+//   applicantCount          = unbeantwortete manuelle Bewerbungen (pending, nicht auto-angenommen)
+//   instantMatchCount       = automatisch angenommene (Instant Match)
+//   totalApplicationCount   = alle Bewerbungen (steuert, ob "View Applicants" sichtbar ist)
+function summarizeJobApplies(applies) {
+  return {
+    applicantCount:        applies.filter((a) => !a.autoAccepted && a.status === "pending").length,
+    instantMatchCount:     applies.filter((a) => a.autoAccepted).length,
+    totalApplicationCount: applies.length,
+  };
+}
+
+module.exports = { countEmployerApplies, summarizeJobApplies };

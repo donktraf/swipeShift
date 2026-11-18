@@ -1,7 +1,7 @@
 // src/utils/jobData.test.js
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { formatAmount, formatPayText, buildJobData, validateJobBody, checkDraftAccess, hasAcceptedTerms, TERMS_REQUIRED_ERROR, resolveCreateStatus, evaluateStatusChange, shouldAutoAccept } = require("./jobData");
+const { formatAmount, formatPayText, buildJobData, validateJobBody, checkDraftAccess, hasAcceptedTerms, TERMS_REQUIRED_ERROR, resolveCreateStatus, evaluateStatusChange, shouldAutoAccept, missingPublishFields, publishGate } = require("./jobData");
 const { computeResponseStats } = require("./responseStats");
 
 test("buildJobData: Defaults bei minimalem Body", () => {
@@ -252,26 +252,105 @@ test("resolveCreateStatus: nur draft/published", () => {
   for (const bad of ["completed", "inProgress", "cancelled", "", 5]) assert.ok(resolveCreateStatus(bad).error);
 });
 
-test("evaluateStatusChange: Publish braucht Terms bei jedem Wechsel nach published", () => {
-  for (const from of ["draft", "cancelled", "completed", "inProgress"]) {
-    const denied = evaluateStatusChange(from, "published", {});
-    if (from === "draft" || from === "cancelled" || from === "completed" || from === "inProgress") {
-      assert.equal(denied.ok, false, from);
-      assert.equal(denied.status, 400);
-      assert.equal(denied.body.code, "TERMS_REQUIRED");
+const COMPLETE_JOB = {
+  title: "A", category: "Events", location: "Berlin", payAmount: 15, openSpots: 2,
+  shifts: [{ date: "Mon", startTimeISO: "2026-12-01T09:00:00Z", endTimeISO: "2026-12-01T17:00:00Z" }], startTime: new Date("2026-12-01T09:00:00Z"), endTime: new Date("2026-12-01T17:00:00Z"),
+};
+const ALL = ["draft", "published", "inProgress", "completed", "cancelled"];
+const ALLOWED_MAP = {
+  draft: ["published", "cancelled"],
+  published: ["inProgress", "completed", "cancelled", "draft"],
+  inProgress: ["completed", "cancelled"],
+  completed: [],
+  cancelled: [],
+};
+
+test("evaluateStatusChange: komplette Transition-Map", () => {
+  for (const from of ALL) {
+    for (const to of ALL) {
+      const r = evaluateStatusChange(from, to, { termsAccepted: true }, { applicationCount: 0, job: COMPLETE_JOB });
+      if (from === to) {
+        assert.deepEqual(r, { ok: true, noop: true, publishing: false }, `${from}→${to}`);
+      } else if (ALLOWED_MAP[from].includes(to)) {
+        assert.equal(r.ok, true, `${from}→${to}`);
+        assert.equal(r.publishing, to === "published", `${from}→${to}`);
+      } else {
+        assert.equal(r.ok, false, `${from}→${to}`);
+        assert.equal(r.status, 409);
+        assert.equal(r.body.code, "INVALID_TRANSITION");
+      }
     }
-    assert.deepEqual(evaluateStatusChange(from, "published", { termsAccepted: true }), { ok: true, publishing: true });
   }
-  // published → published ist kein Publish-Wechsel
-  assert.deepEqual(evaluateStatusChange("published", "published", {}), { ok: true, publishing: false });
+  assert.equal(evaluateStatusChange("draft", "bogus").status, 400);
 });
 
-test("evaluateStatusChange: Draft nur zu published/cancelled, ungueltiger Status", () => {
-  assert.equal(evaluateStatusChange("draft", "completed").status, 409);
-  assert.equal(evaluateStatusChange("draft", "inProgress").body.code, "INVALID_TRANSITION");
-  assert.deepEqual(evaluateStatusChange("draft", "cancelled"), { ok: true, publishing: false });
-  assert.equal(evaluateStatusChange("published", "bogus").status, 400);
-  assert.deepEqual(evaluateStatusChange("published", "cancelled"), { ok: true, publishing: false });
+test("evaluateStatusChange: completed/cancelled sind final, auch nach published", () => {
+  for (const from of ["completed", "cancelled"]) {
+    const r = evaluateStatusChange(from, "published", { termsAccepted: true }, { job: COMPLETE_JOB });
+    assert.equal(r.body.code, "INVALID_TRANSITION");
+  }
+});
+
+test("evaluateStatusChange: published → draft nur ohne Bewerbungen", () => {
+  assert.equal(evaluateStatusChange("published", "draft", {}, { applicationCount: 0 }).ok, true);
+  const r = evaluateStatusChange("published", "draft", {}, { applicationCount: 1 });
+  assert.equal(r.status, 409);
+  assert.equal(r.body.code, "HAS_APPLICANTS");
+});
+
+test("evaluateStatusChange: Publish braucht Terms, dann Vollstaendigkeit", () => {
+  const noTerms = evaluateStatusChange("draft", "published", {}, { job: COMPLETE_JOB });
+  assert.equal(noTerms.status, 400);
+  assert.equal(noTerms.body.code, "TERMS_REQUIRED");
+  // Terms zuerst: auch ein unvollstaendiger Job ohne Terms meldet TERMS_REQUIRED
+  assert.equal(evaluateStatusChange("draft", "published", {}, { job: {} }).body.code, "TERMS_REQUIRED");
+  const incomplete = evaluateStatusChange("draft", "published", { termsAccepted: true }, { job: { ...COMPLETE_JOB, location: "" } });
+  assert.equal(incomplete.status, 400);
+  assert.equal(incomplete.body.code, "INCOMPLETE_JOB");
+  assert.deepEqual(incomplete.body.missing, ["location"]);
+  assert.deepEqual(
+    evaluateStatusChange("draft", "published", { termsAccepted: true }, { job: COMPLETE_JOB }),
+    { ok: true, noop: false, publishing: true }
+  );
+});
+
+test("missingPublishFields: Mindestfelder", () => {
+  assert.deepEqual(missingPublishFields(COMPLETE_JOB), []);
+  assert.deepEqual(missingPublishFields({}), ["title", "category", "location", "shift", "payAmount", "openSpots"]);
+  assert.deepEqual(missingPublishFields({ ...COMPLETE_JOB, title: "  " }), ["title"]);
+  assert.deepEqual(missingPublishFields({ ...COMPLETE_JOB, payAmount: 0 }), ["payAmount"]);
+  assert.deepEqual(missingPublishFields({ ...COMPLETE_JOB, payAmount: null }), ["payAmount"]);
+  assert.deepEqual(missingPublishFields({ ...COMPLETE_JOB, openSpots: 0 }), ["openSpots"]);
+  assert.deepEqual(missingPublishFields({ ...COMPLETE_JOB, shifts: [], startTime: null }), ["shift"]);
+  // shifts-JSON hat Vorrang vor den abgeleiteten Spalten
+  assert.deepEqual(missingPublishFields({ ...COMPLETE_JOB, endTime: null }), []);
+});
+
+test("missingPublishFields: jede Schicht braucht Start+Ende, Ende > Start", () => {
+  const ok = { startTimeISO: "2026-12-01T09:00:00Z", endTimeISO: "2026-12-01T17:00:00Z" };
+  assert.deepEqual(missingPublishFields({ ...COMPLETE_JOB, shifts: [ok, ok] }), []);
+  assert.deepEqual(missingPublishFields({ ...COMPLETE_JOB, shifts: [ok, { date: "Tue" }] }), ["shift"]);
+  assert.deepEqual(missingPublishFields({ ...COMPLETE_JOB, shifts: [ok, { startTimeISO: "2026-12-02T09:00:00Z" }] }), ["shift"]);
+  assert.deepEqual(missingPublishFields({ ...COMPLETE_JOB, shifts: [{ startTimeISO: "2026-12-01T17:00:00Z", endTimeISO: "2026-12-01T09:00:00Z" }] }), ["shift"]);
+  assert.deepEqual(missingPublishFields({ ...COMPLETE_JOB, shifts: [{ startTimeISO: "x", endTimeISO: "y" }] }), ["shift"]);
+  // Fallback fuer aeltere Drafts ohne shifts-JSON
+  assert.deepEqual(missingPublishFields({ ...COMPLETE_JOB, shifts: [] }), []);
+  assert.deepEqual(missingPublishFields({ ...COMPLETE_JOB, shifts: undefined, endTime: COMPLETE_JOB.startTime }), ["shift"]);
+});
+
+test("missingPublishFields: funktioniert mit buildJobData-Ergebnis", () => {
+  const data = buildJobData({
+    title: "A", category: "Events", location: "Berlin", payAmount: 15, openSpots: 1,
+    shifts: [{ date: "Mon", timeRange: "9-17", startTimeISO: "2026-12-01T09:00:00Z", endTimeISO: "2026-12-01T17:00:00Z", duration: "8h" }],
+  });
+  assert.deepEqual(missingPublishFields(data), []);
+  assert.deepEqual(missingPublishFields(buildJobData({ title: "A", category: "Events" })), ["location", "shift", "payAmount"]);
+});
+
+test("publishGate: null bei Terms + vollstaendig", () => {
+  assert.equal(publishGate({ termsAccepted: true }, COMPLETE_JOB), null);
+  assert.equal(publishGate({}, COMPLETE_JOB).body.code, "TERMS_REQUIRED");
+  assert.equal(publishGate({ termsAccepted: true }, {}).body.code, "INCOMPLETE_JOB");
 });
 
 test("shouldAutoAccept: Instant Match, Plaetze und harte Anforderungen", () => {

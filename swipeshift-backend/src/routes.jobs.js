@@ -7,7 +7,8 @@ const { requireAuth } = require("./auth");
 const { requireVerifiedEmail } = require("./middlewares/requireVerifiedEmail");
 const { haversineDistance, kmToMiles, milesToKm } = require("./utils/haversine");
 const { geocodeLocation }  = require("./utils/geocode");
-const { buildJobData, validateJobBody, checkDraftAccess, hasAcceptedTerms, TERMS_REQUIRED_ERROR, resolveCreateStatus, evaluateStatusChange, shouldAutoAccept } = require("./utils/jobData");
+const { summarizeJobApplies } = require("./utils/applyCounts");
+const { buildJobData, validateJobBody, checkDraftAccess, publishGate, resolveCreateStatus, evaluateStatusChange, shouldAutoAccept } = require("./utils/jobData");
 const { isBlockedBetween } = require("./utils/safety");
 const { normalizeCancellationReason } = require("./utils/applicationStatus");
 const { companyJobsWhere, countCompletedJobs } = require("./utils/companyStats");
@@ -290,13 +291,14 @@ router.post("/", requireAuth, requireVerifiedEmail, async (req, res) => {
     const invalid = validateJobBody(req.body);
     if (invalid) return res.status(400).json({ error: invalid });
 
-    // Veroeffentlichen nur mit Zustimmung zu den Employer-AGB (Drafts nicht)
-    if (status === "published" && !hasAcceptedTerms(req.body)) {
-      return res.status(400).json(TERMS_REQUIRED_ERROR);
-    }
-
     const data = buildJobData(req.body);
-    if (status === "published") data.termsAcceptedAt = new Date();
+
+    // Veroeffentlichen: Employer-AGB + Vollstaendigkeit (Drafts duerfen unvollstaendig sein)
+    if (status === "published") {
+      const denied = publishGate(req.body, data);
+      if (denied) return res.status(denied.status).json(denied.body);
+      data.termsAcceptedAt = new Date();
+    }
 
     // Koordinaten: direkt aus dem Request nutzen (vom iOS Location-Picker),
     // sonst Geocoding als Fallback (z.B. bei API-Calls ohne Picker)
@@ -541,17 +543,14 @@ router.get("/mine", requireAuth, requireVerifiedEmail, async (req, res) => {
       where: { employerId },
       orderBy: { createdAt: "desc" },
       include: {
-        // Instant-Match-Bewerbungen separat: sie warten nicht auf eine Antwort des Employers
-        _count: { select: { applies: true } },
-        applies: { where: { autoAccepted: true }, select: { id: true } },
+        applies: { select: { status: true, autoAccepted: true } },
       },
     });
 
-    // applicantCount = manuelle Bewerbungen, instantMatchCount = automatisch angenommene
-    const result = jobs.map(({ _count, applies, ...job }) => ({
+    // Zaehler siehe utils/applyCounts.js (applicantCount = nur unbeantwortete manuelle Bewerbungen)
+    const result = jobs.map(({ applies, ...job }) => ({
       ...job,
-      applicantCount: _count.applies - applies.length,
-      instantMatchCount: applies.length,
+      ...summarizeJobApplies(applies),
     }));
 
     return res.json({ jobs: result });
@@ -574,20 +573,40 @@ router.patch("/:id/status", requireAuth, requireVerifiedEmail, async (req, res) 
     if (!job)                        return res.status(404).json({ error: "Job not found" });
     if (job.employerId !== employerId) return res.status(403).json({ error: "Forbidden" });
 
-    // Statuswechsel + Terms-Pflicht (jeder Wechsel nach "published", z.B. auch cancelled → published)
-    const decision = evaluateStatusChange(job.status, status, req.body);
+    // Statuswechsel-Map, Terms und Vollstaendigkeit (gespeicherter Draft) — siehe utils/jobData.js
+    const applicationCount = job.status === "published" && status === "draft"
+      ? await prisma.apply.count({ where: { jobId } })
+      : 0;
+    const decision = evaluateStatusChange(job.status, status, req.body, { applicationCount, job });
     if (!decision.ok) return res.status(decision.status).json(decision.body);
-    const publishing = decision.publishing;
+    if (decision.noop) return res.json({ job }); // idempotent: gleicher Status, nichts zu tun
 
-    const updated = await prisma.job.update({
-      where: { id: jobId },
+    // Bedingtes Update gegen Races: Status und updatedAt wie gelesen (ein paralleles PUT/Status-Update
+    // macht den Vollstaendigkeits-Check hinfaellig); zurueck zu draft zusaetzlich nur ohne Bewerbungen.
+    const toDraft = status === "draft";
+    const result = await prisma.job.updateMany({
+      where: { id: jobId, status: job.status, // Postgres speichert evtl. Mikrosekunden (Altzeilen), JS nur Millisekunden → 1-ms-Fenster
+        updatedAt: { gte: job.updatedAt, lt: new Date(job.updatedAt.getTime() + 1) }, ...(toDraft ? { applies: { none: {} } } : {}) },
       // Grund nur beim Stornieren speichern; bei jedem anderen Status zuruecksetzen
       data:  {
         status,
         cancellationReason: status === "cancelled" ? normalizeCancellationReason(reason) : null,
-        ...(publishing ? { termsAcceptedAt: new Date() } : {}),
+        ...(decision.publishing ? { termsAcceptedAt: new Date() } : {}),
       },
     });
+    if (result.count === 0) {
+      // Neu lesen und den Grund anhand des aktuellen Zustands melden
+      const current = await prisma.job.findUnique({ where: { id: jobId }, select: { status: true } });
+      if (!current) return res.status(404).json({ error: "Job not found" });
+      if (toDraft && current.status === "published") {
+        const applyCount = await prisma.apply.count({ where: { jobId } });
+        if (applyCount > 0) {
+          return res.status(409).json({ error: "This job already has applications and can't be moved back to draft.", code: "HAS_APPLICANTS" });
+        }
+      }
+      return res.status(409).json({ error: "The job was changed in the meantime. Please reload and try again.", code: "INVALID_TRANSITION" });
+    }
+    const updated = await prisma.job.findUnique({ where: { id: jobId } });
 
     console.log(`PATCH /jobs/${jobId}/status → ${status}`);
     return res.json({ job: updated });
@@ -626,9 +645,6 @@ router.put("/:id", requireAuth, requireVerifiedEmail, async (req, res) => {
     }
     const invalid = validateJobBody(req.body);
     if (invalid) return res.status(400).json({ error: invalid });
-    if (status === "published" && !hasAcceptedTerms(req.body)) {
-      return res.status(400).json(TERMS_REQUIRED_ERROR);
-    }
 
     const existing = await prisma.job.findUnique({ where: { id: req.params.id } });
     const denied = checkDraftAccess(existing, req.auth.sub);
@@ -640,7 +656,11 @@ router.put("/:id", requireAuth, requireVerifiedEmail, async (req, res) => {
     const data = buildJobData(req.body);
     // company nur uebernehmen, wenn mitgeschickt
     if (!req.body.company) delete data.company;
-    if (status === "published") data.termsAcceptedAt = new Date();
+    if (status === "published") {
+      const gate = publishGate(req.body, data);
+      if (gate) return res.status(gate.status).json(gate.body);
+      data.termsAcceptedAt = new Date();
+    }
 
     // Geocoding nur, wenn der Ort geaendert wurde und der Client keine Koordinaten schickt
     if (data.lat == null) {

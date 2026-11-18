@@ -150,22 +150,94 @@ function resolveCreateStatus(raw) {
 }
 
 const ALL_STATUSES = ["published", "draft", "cancelled", "completed", "inProgress"];
-// Von "draft" aus sind nur Veroeffentlichen oder Verwerfen sinnvoll
-const DRAFT_TARGETS = ["draft", "published", "cancelled"];
+
+// Erlaubte Statuswechsel (PATCH /jobs/:id/status). completed/cancelled sind final → neu ausschreiben statt oeffnen.
+// published → draft zusaetzlich nur ohne jegliche Bewerbung (siehe HAS_APPLICANTS).
+const STATUS_TRANSITIONS = {
+  draft:      ["published", "cancelled"],
+  published:  ["inProgress", "completed", "cancelled", "draft"],
+  inProgress: ["completed", "cancelled"],
+  completed:  [],
+  cancelled:  [],
+};
+
+// Pflichtfelder zum Veroeffentlichen. Funktioniert fuer ein gespeichertes Job-Objekt UND fuer das
+// Ergebnis von buildJobData (gleiche Feldnamen). Liefert die Liste fehlender Felder (leer = vollstaendig).
+// Jede Schicht braucht gueltige Start-/Endzeit (ISO) mit Ende > Start. Aeltere Drafts ohne shifts-JSON:
+// Fallback auf die Spalten startTime/endTime.
+function shiftsComplete(job) {
+  const ms = (v) => (v ? new Date(v).getTime() : NaN);
+  const valid = (start, end) => Number.isFinite(ms(start)) && Number.isFinite(ms(end)) && ms(end) > ms(start);
+  if (Array.isArray(job.shifts) && job.shifts.length > 0) {
+    return job.shifts.every((sh) => valid(sh?.startTimeISO, sh?.endTimeISO));
+  }
+  return valid(job.startTime, job.endTime);
+}
+
+function missingPublishFields(job = {}) {
+  const missing = [];
+  const blank = (v) => typeof v !== "string" || v.trim() === "";
+  if (blank(job.title)) missing.push("title");
+  if (blank(job.category)) missing.push("category");
+  if (blank(job.location)) missing.push("location");
+  if (!shiftsComplete(job)) missing.push("shift");
+  if (!(Number(job.payAmount) > 0)) missing.push("payAmount");
+  if (!(Number(job.openSpots) >= 1)) missing.push("openSpots");
+  return missing;
+}
+
+const INCOMPLETE_LABELS = {
+  title: "title", category: "category", location: "location",
+  shift: "a shift with start and end time", payAmount: "hourly rate", openSpots: "number of workers",
+};
+
+// Gate fuer jeden Weg nach "published": 1) Terms, 2) Vollstaendigkeit. null = frei, sonst { status, body }.
+function publishGate(body, job) {
+  if (!hasAcceptedTerms(body)) return { status: 400, body: TERMS_REQUIRED_ERROR };
+  const missing = missingPublishFields(job);
+  if (missing.length) {
+    return {
+      status: 400,
+      body: {
+        error: `This job is missing: ${missing.map((m) => INCOMPLETE_LABELS[m] ?? m).join(", ")}.`,
+        code: "INCOMPLETE_JOB",
+        missing,
+      },
+    };
+  }
+  return null;
+}
 
 // Entscheidung fuer PATCH /jobs/:id/status (rein, testbar).
-// Ergebnis: { ok: true, publishing } oder { ok: false, status, body }.
-// publishing = jeder Wechsel nach "published" aus einem anderen Status → braucht Terms, setzt termsAcceptedAt.
-function evaluateStatusChange(currentStatus, nextStatus, body = {}) {
+// ctx: { applicationCount (alle Apply-Zeilen des Jobs), job (gespeicherter Job fuer die Vollstaendigkeit) }
+// Ergebnis: { ok: true, noop } | { ok: true, publishing } | { ok: false, status, body }.
+// publishing = jeder Wechsel nach "published" → Terms + Vollstaendigkeit, setzt termsAcceptedAt.
+function evaluateStatusChange(currentStatus, nextStatus, body = {}, ctx = {}) {
   if (!ALL_STATUSES.includes(nextStatus)) {
     return { ok: false, status: 400, body: { error: `Invalid status. Allowed: ${ALL_STATUSES.join(", ")}` } };
   }
-  if (currentStatus === "draft" && !DRAFT_TARGETS.includes(nextStatus)) {
-    return { ok: false, status: 409, body: { error: "A draft can only be published or cancelled.", code: "INVALID_TRANSITION" } };
+  // Gleicher Status: idempotent, keine Aenderung
+  if (currentStatus === nextStatus) return { ok: true, noop: true, publishing: false };
+
+  const allowed = STATUS_TRANSITIONS[currentStatus] ?? [];
+  if (!allowed.includes(nextStatus)) {
+    return {
+      ok: false, status: 409,
+      body: { error: `A job that is ${currentStatus} can't be changed to ${nextStatus}.`, code: "INVALID_TRANSITION" },
+    };
   }
-  const publishing = nextStatus === "published" && currentStatus !== "published";
-  if (publishing && !hasAcceptedTerms(body)) return { ok: false, status: 400, body: TERMS_REQUIRED_ERROR };
-  return { ok: true, publishing };
+  if (currentStatus === "published" && nextStatus === "draft" && (ctx.applicationCount ?? 0) > 0) {
+    return {
+      ok: false, status: 409,
+      body: { error: "This job already has applications and can't be moved back to draft.", code: "HAS_APPLICANTS" },
+    };
+  }
+  const publishing = nextStatus === "published";
+  if (publishing) {
+    const denied = publishGate(body, ctx.job);
+    if (denied) return { ok: false, ...denied };
+  }
+  return { ok: true, noop: false, publishing };
 }
 
 // Instant Match: automatische Annahme nur, wenn noch Plaetze frei sind UND der Worker die harten
@@ -213,4 +285,4 @@ function checkDraftAccess(job, userId) {
   return null;
 }
 
-module.exports = { resolveCreateStatus, evaluateStatusChange, shouldAutoAccept, TERMS_REQUIRED_ERROR, hasAcceptedTerms, CURRENCY_SYMBOL, formatAmount, formatPayText, buildJobData, validateJobBody, checkDraftAccess };
+module.exports = { STATUS_TRANSITIONS, missingPublishFields, publishGate, resolveCreateStatus, evaluateStatusChange, shouldAutoAccept, TERMS_REQUIRED_ERROR, hasAcceptedTerms, CURRENCY_SYMBOL, formatAmount, formatPayText, buildJobData, validateJobBody, checkDraftAccess };
