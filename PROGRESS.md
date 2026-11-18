@@ -865,3 +865,9 @@ Gefunden beim Profile-Screen-Abgleich: Legal-Schalter (Worker + Arbeitgeber) und
 - Eigene Fehlversuchssperre (getrennt vom 2FA-Login), E-Mail-Code mit eigenem Zweck, einmalig, max. 5 Versuche (`CODE_ATTEMPTS_EXCEEDED`); Bestätigung verfällt bei Passwort-/2FA-/Backup-Code-Änderung
 - App: „Confirm it's you“-Sheet beim Speichern, danach automatisch erneut gespeichert
 - Backend: `src/utils/reauth.js` (+ Tests), Endpunkte `/auth/me/reauth*`; Migration `20261118210000_session_reauth` (lokal angewendet)
+
+### 2FA-Methode direkt wechseln (2026-11-18)
+- E-Mail-Code → Authenticator-App: über den bestehenden Einrichtungsweg (erst E-Mail-Code, dann QR + Bestätigung), 2FA bleibt durchgehend an; neue Sicherheits-Mail „Two-factor method changed to authenticator app“
+- Authenticator-App → E-Mail-Code: `POST /auth/2fa/switch-to-email/start` (TOTP- oder Backup-Code, Replay-Schutz, Sperre) → Mail-Code mit eigenem Zweck `switch_email`, an die Sitzung gebunden → `/confirm` stellt atomar um, löscht TOTP-Secret + Backup-Codes, beendet laufende Bestätigungen (`reauthAt`), Sicherheits-Mail
+- App: „Switch to authenticator app“ / „Switch to email codes“ in Account & Security (`SwitchToEmailView`)
+- Migration `20261118220000_switch_email_2fa` (Enum-Wert + `TwoFactorCode.sessionId`, lokal angewendet)
