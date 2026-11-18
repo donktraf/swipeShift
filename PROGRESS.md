@@ -850,3 +850,11 @@ Gefunden beim Profile-Screen-Abgleich: Legal-Schalter (Worker + Arbeitgeber) und
 - iOS: Berechtigung einmal nach dem Onboarding, Hinweis + „Open Settings“ in den Benachrichtigungs-Einstellungen, Tap öffnet Chat/Job (Arbeitgeber: nur Tab)
 - Migration `20261118190000_push_notifications` (lokal angewendet)
 - Offen: Push-Capability/`aps-environment` in Xcode + APNs-Schlüssel (braucht bezahltes Apple Developer Program); Arbeitgeber-Deep-Links aus Push
+
+### US-Bankdaten für Auszahlungen statt IBAN (2026-11-18)
+- Auszahlung per Bankkonto: Kontoinhaber, Routing Number (9 Ziffern, ABA-Prüfsumme, nicht nur Nullen), Kontonummer (4–17 Ziffern, mit Bestätigungsfeld), Checking/Savings; PayPal bleibt
+- Kontonummer AES-256-GCM verschlüsselt (gemeinsamer Helper `src/utils/secretBox.js`, gleicher Schlüssel wie TOTP, eigene AAD `bank:<userId>`), nach außen nur „•••• 1234“; Routing Number im Klartext
+- Sicherheits-Mail bei jeder echten Änderung von Bankdaten, PayPal oder Auszahlungsmethode (was geändert wurde, Zeitpunkt UTC, Support-Hinweis; nie volle Kontonummer/Routing Number)
+- Schlüsselrotation (`scripts/rotate-totp-key.js`) erfasst jetzt auch die Bankdaten — live getestet inkl. TOTP
+- IBAN komplett entfernt; Migration `20261118200000_remove_stored_iban` löscht gespeicherte IBANs (nur Daten, lokal angewendet)
+- Offen: erneute Anmeldung (Passwort/2FA) vor Änderung der Auszahlungsdaten; echte Auszahlungen (Zahlungsanbieter)
