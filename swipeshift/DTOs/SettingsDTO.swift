@@ -31,8 +31,15 @@ struct PayoutSettingsDTO: Decodable, Equatable {
     var method: String          // "bank" | "paypal"
     var paypalEmail: String?
     var frequency: String       // "instant" | "weekly" | "monthly"
-    var hasIban: Bool
-    var ibanMasked: String?
+    var bank: BankDetailsDTO?
+}
+
+/// US-Bankdaten (Antwort): die Kontonummer kommt nie zurueck, nur die letzten 4 Ziffern.
+struct BankDetailsDTO: Decodable, Equatable {
+    var accountHolderName: String
+    var routingNumber: String
+    var accountType: String     // "checking" | "savings"
+    var accountLast4: String
 }
 
 struct AccountSettingsDTO: Decodable, Equatable {
@@ -54,10 +61,18 @@ struct AccountSettingsPatch: Encodable {
 
     struct PayoutPatch: Encodable {
         var method: String?
-        /// nil = unveraendert lassen; leerer String = IBAN loeschen
-        var iban: String?
+        /// nil = unveraendert lassen
+        var bank: BankPatch?
         var paypalEmail: String?
         var frequency: String?
+    }
+
+    /// Teil-Aenderung der Bankdaten — accountNumber nur senden, wenn neu eingegeben (sonst bleibt die gespeicherte).
+    struct BankPatch: Encodable {
+        var accountHolderName: String?
+        var routingNumber: String?
+        var accountNumber: String?
+        var accountType: String?
     }
 }
 

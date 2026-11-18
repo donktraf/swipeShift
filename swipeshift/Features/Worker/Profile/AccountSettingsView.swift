@@ -749,6 +749,10 @@ struct PaymentsPayoutsView: View {
         case bank, paypal
         var label: String { self == .bank ? "Bank Account" : "PayPal" }
     }
+    enum BankAccountType: String, CaseIterable {
+        case checking, savings
+        var label: String { self == .checking ? "Checking" : "Savings" }
+    }
     enum PayoutFrequency: String, CaseIterable {
         case instant, weekly, monthly
         var label: String {
@@ -761,10 +765,15 @@ struct PaymentsPayoutsView: View {
     }
 
     @State private var selectedMethod:    PayoutMethod    = .bank
-    @State private var iban:              String          = ""
+    @State private var holderName:        String          = ""
+    @State private var routingNumber:     String          = ""
+    @State private var accountNumber:     String          = ""
+    @State private var confirmAccount:    String          = ""
+    @State private var accountType:       BankAccountType = .checking
+    @State private var isChangingAccount  = false
     @State private var paypalEmail:       String          = ""
     @State private var selectedFrequency: PayoutFrequency = .weekly
-    @State private var savedIbanMasked:   String?
+    @State private var savedBank:         BankDetailsDTO?
     @State private var isLoading          = true
     @State private var isSaving           = false
     @State private var errorMessage:      String?
@@ -782,6 +791,10 @@ struct PaymentsPayoutsView: View {
             .padding(.horizontal, 16)
         }
         .task { await load() }
+        .onDisappear {
+            accountNumber = ""
+            confirmAccount = ""
+        }
     }
 
     @ViewBuilder
@@ -813,12 +826,7 @@ struct PaymentsPayoutsView: View {
             Divider().padding(.horizontal, 14)
 
             if selectedMethod == .bank {
-                // Gespeicherte IBAN kommt nur maskiert zurueck — leer lassen = unveraendert
-                inputRow(icon: "building.columns.fill",
-                         placeholder: savedIbanMasked.map { "Saved: \($0)" } ?? "IBAN (e.g. DE89 3704 0044 ...)",
-                         text: $iban)
-                    .textInputAutocapitalization(.characters)
-                    .autocorrectionDisabled()
+                bankForm
             } else {
                 inputRow(icon: "p.circle.fill", placeholder: "PayPal E-Mail", text: $paypalEmail)
                     .keyboardType(.emailAddress)
@@ -876,13 +884,157 @@ struct PaymentsPayoutsView: View {
             }
         }
         .buttonStyle(SSPrimaryButtonStyle())
-        .disabled(isSaving)
+        .disabled(isSaving || !canSave)
+        .opacity(canSave ? 1 : 0.5)
 
         // TODO: Echte Auszahlungen (Zahlungsdienstleister) gibt es noch nicht — Daten werden nur hinterlegt
-        Text("Your payout details are stored securely and shown only masked. Automatic payouts will use them once in-app payments launch.")
+        // TODO: Re-Auth (Passwort/2FA) vor dem Aendern von Auszahlungsdaten
+        Text("Payouts aren't active yet. Your details are stored encrypted and will be used once payouts launch.")
             .font(.system(size: 12))
             .foregroundColor(.secondary)
             .padding(.horizontal, 4)
+    }
+
+    // MARK: Bank form (US)
+
+    private var routingDigits: String {
+        routingNumber.filter { !$0.isWhitespace && $0 != "-" }
+    }
+    private var routingError: String? {
+        if routingDigits.isEmpty { return nil }
+        guard routingDigits.allSatisfy { $0.isASCII && $0.isNumber }, routingDigits.count == 9 else {
+            return "Routing number must be 9 digits"
+        }
+        return Self.isValidRouting(routingDigits) && !routingDigits.allSatisfy({ $0 == "0" }) ? nil : "Check the routing number"
+    }
+    private var accountDigits: String {
+        accountNumber.filter { !$0.isWhitespace && $0 != "-" }
+    }
+    private var needsAccountEntry: Bool { savedBank == nil || isChangingAccount }
+    private var accountError: String? {
+        if accountDigits.isEmpty { return nil }
+        if !accountDigits.allSatisfy { $0.isASCII && $0.isNumber } || accountDigits.count < 4 || accountDigits.count > 17 {
+            return "Account number must be 4 to 17 digits"
+        }
+        return nil
+    }
+    private var confirmError: String? {
+        if confirmAccount.isEmpty || accountError != nil { return nil }
+        let c = confirmAccount.filter { !$0.isWhitespace && $0 != "-" }
+        return c == accountDigits ? nil : "Account numbers don't match"
+    }
+
+    private var isBankValid: Bool {
+        let name = holderName.trimmingCharacters(in: .whitespaces)
+        guard name.count >= 2, name.count <= 100 else { return false }
+        guard routingDigits.count == 9, routingError == nil else { return false }
+        if needsAccountEntry {
+            let c = confirmAccount.filter { !$0.isWhitespace && $0 != "-" }
+            guard (4...17).contains(accountDigits.count), accountError == nil, c == accountDigits else { return false }
+        }
+        return true
+    }
+    private var canSave: Bool {
+        switch selectedMethod {
+        case .bank:   return isBankValid
+        case .paypal:
+            let e = paypalEmail.trimmingCharacters(in: .whitespaces)
+            return e.contains("@") && e.contains(".")
+        }
+    }
+
+    /// ABA-Pruefsumme: 3(d1+d4+d7) + 7(d2+d5+d8) + (d3+d6+d9) teilbar durch 10
+    private static func isValidRouting(_ digits: String) -> Bool {
+        let d = digits.compactMap { $0.wholeNumberValue }
+        guard d.count == 9 else { return false }
+        let sum = 3 * (d[0] + d[3] + d[6]) + 7 * (d[1] + d[4] + d[7]) + (d[2] + d[5] + d[8])
+        return sum % 10 == 0
+    }
+
+    @ViewBuilder
+    private var bankForm: some View {
+        inputRow(icon: "person.fill", placeholder: "Account holder name", text: $holderName)
+            .textContentType(.name)
+            .autocorrectionDisabled()
+        Divider().padding(.horizontal, 14)
+
+        inputRow(icon: "building.columns.fill", placeholder: "Routing number (9 digits)", text: $routingNumber)
+            .keyboardType(.numberPad)
+            .autocorrectionDisabled()
+        fieldError(routingError)
+        Divider().padding(.horizontal, 14)
+
+        if let savedBank, !isChangingAccount {
+            HStack(spacing: 12) {
+                Image(systemName: "number")
+                    .font(.system(size: 16))
+                    .foregroundColor(SS.primary)
+                    .frame(width: 28)
+                    .padding(.leading, 14)
+                Text("•••• \(savedBank.accountLast4) saved")
+                    .font(.system(size: 15))
+                Spacer()
+                Button("Change") { isChangingAccount = true }
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(SS.primary)
+                    .padding(.trailing, 14)
+            }
+            .padding(.vertical, 14)
+        } else {
+            secureInputRow(icon: "number", placeholder: "Account number", text: $accountNumber)
+            fieldError(accountError)
+            Divider().padding(.horizontal, 14)
+            secureInputRow(icon: "number", placeholder: "Confirm account number", text: $confirmAccount)
+            fieldError(confirmError)
+            if savedBank != nil {
+                Button("Keep saved account number") {
+                    isChangingAccount = false
+                    accountNumber = ""
+                    confirmAccount = ""
+                }
+                .font(.system(size: 13))
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 8)
+            }
+        }
+        Divider().padding(.horizontal, 14)
+
+        Picker("Account type", selection: $accountType) {
+            ForEach(BankAccountType.allCases, id: \.self) { Text($0.label).tag($0) }
+        }
+        .pickerStyle(.segmented)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+    }
+
+    @ViewBuilder
+    private func fieldError(_ message: String?) -> some View {
+        if let message {
+            Text(message)
+                .font(.system(size: 12))
+                .foregroundColor(.red)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 8)
+        }
+    }
+
+    private func secureInputRow(icon: String, placeholder: String, text: Binding<String>) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 16))
+                .foregroundColor(SS.primary)
+                .frame(width: 28)
+                .padding(.leading, 14)
+            SecureField(placeholder, text: text)
+                .font(.system(size: 15))
+                .keyboardType(.numberPad)
+                .textContentType(.none)
+                .autocorrectionDisabled()
+                .padding(.trailing, 14)
+        }
+        .padding(.vertical, 14)
     }
 
     private func inputRow(icon: String, placeholder: String, text: Binding<String>) -> some View {
@@ -903,8 +1055,14 @@ struct PaymentsPayoutsView: View {
         selectedMethod    = PayoutMethod(rawValue: payout.method) ?? .bank
         selectedFrequency = PayoutFrequency(rawValue: payout.frequency) ?? .weekly
         paypalEmail       = payout.paypalEmail ?? ""
-        savedIbanMasked   = payout.ibanMasked
-        iban              = ""
+        savedBank         = payout.bank
+        holderName        = payout.bank?.accountHolderName ?? holderName
+        routingNumber     = payout.bank?.routingNumber ?? routingNumber
+        accountType       = BankAccountType(rawValue: payout.bank?.accountType ?? "") ?? accountType
+        // Eingegebene Kontonummer wird nie zurueck angezeigt
+        accountNumber     = ""
+        confirmAccount    = ""
+        isChangingAccount = false
     }
 
     private func load() async {
@@ -922,10 +1080,16 @@ struct PaymentsPayoutsView: View {
         isSaving = true
         errorMessage = nil
         showSavedToast = false
-        let trimmedIban = iban.trimmingCharacters(in: .whitespaces)
+        // Bankdaten nur senden, wenn die Bank-Methode aktiv ist; Kontonummer nur wenn neu eingegeben
+        let bankPatch: AccountSettingsPatch.BankPatch? = selectedMethod == .bank
+            ? .init(accountHolderName: holderName.trimmingCharacters(in: .whitespaces),
+                    routingNumber: routingDigits,
+                    accountNumber: needsAccountEntry ? accountDigits : nil,
+                    accountType: accountType.rawValue)
+            : nil
         let patch = AccountSettingsPatch(payout: .init(
             method: selectedMethod.rawValue,
-            iban: trimmedIban.isEmpty ? nil : trimmedIban,      // leer = gespeicherte IBAN behalten
+            bank: bankPatch,
             paypalEmail: selectedMethod == .paypal ? paypalEmail.trimmingCharacters(in: .whitespaces) : nil,
             frequency: selectedFrequency.rawValue
         ))
@@ -933,11 +1097,18 @@ struct PaymentsPayoutsView: View {
             apply(try await APIClient.shared.updateAccountSettings(patch).payout)
             withAnimation { showSavedToast = true }
         } catch {
-            errorMessage = (error as? APIError)?.message.contains("iban") == true
-                ? "That IBAN doesn't look right. Please check it."
-                : ((error as? APIError)?.message.contains("paypalEmail") == true
-                    ? "Please enter a valid PayPal email."
-                    : "Couldn't save. Please try again.")
+            let message = (error as? APIError)?.message ?? ""
+            if message.contains("routingNumber") {
+                errorMessage = "Check the routing number"
+            } else if message.contains("accountNumber") {
+                errorMessage = "That account number doesn't look right. Please check it."
+            } else if message.contains("payout.bank") {
+                errorMessage = "Please check your bank details."
+            } else if message.contains("paypalEmail") {
+                errorMessage = "Please enter a valid PayPal email."
+            } else {
+                errorMessage = "Couldn't save. Please try again."
+            }
         }
         isSaving = false
     }
