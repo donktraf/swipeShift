@@ -871,3 +871,13 @@ Gefunden beim Profile-Screen-Abgleich: Legal-Schalter (Worker + Arbeitgeber) und
 - Authenticator-App → E-Mail-Code: `POST /auth/2fa/switch-to-email/start` (TOTP- oder Backup-Code, Replay-Schutz, Sperre) → Mail-Code mit eigenem Zweck `switch_email`, an die Sitzung gebunden → `/confirm` stellt atomar um, löscht TOTP-Secret + Backup-Codes, beendet laufende Bestätigungen (`reauthAt`), Sicherheits-Mail
 - App: „Switch to authenticator app“ / „Switch to email codes“ in Account & Security (`SwitchToEmailView`)
 - Migration `20261118220000_switch_email_2fa` (Enum-Wert + `TwoFactorCode.sessionId`, lokal angewendet)
+
+### Bearbeitung von Meldungen + Admin-Bereich (2026-11-18)
+- Admin-Konten nur per `npm run make-admin -- <email>` (`--remove`), `User.isAdmin` wird bei jedem Admin-Request neu aus der DB gelesen; Eintrag „Admin: Reports“ in den Account Settings nur für Admins
+- Admin-Bereich in der App: offene/geschlossene Meldungen (eine Karte pro gemeldeter Person), Detail mit Melder-Notizen, Chatverlauf (letzte 100, nur gemeldeter Chat), Moderationsverlauf; Aktionen Verwarnen / 7 bzw. 30 Tage sperren / dauerhaft sperren / abweisen / Sperre aufheben, jeweils mit Bestätigung; keine Aktion gegen sich selbst oder andere Admins; keine E-Mail-Adressen im Admin-API
+- Sperre: Login (Passwort, Google, Apple, 2FA) und bestehende Tokens abgewiesen (`ACCOUNT_SUSPENDED`/`ACCOUNT_BANNED`), Sitzungen + Push-Geräte widerrufen; Jobs gesperrter Arbeitgeber aus Feeds, Firmenprofil, Gemerkt und Jobdetail (außer mit Bewerbung) entfernt; offene Bewerbungen gesperrter Worker für Arbeitgeber unsichtbar, bereits angenommene bleiben mit Kennzeichnung (Bezahlung); dauerhaft gesperrte E-Mail kann sich nicht neu registrieren
+- Automatisch: 3 verschiedene Melder mit offenen Meldungen → Sperre bis zur Prüfung + Mail an Admins/Support (nie Admins, nebenläufig sicher)
+- Mails: Betroffene (Grund, Dauer, Kontakt), Melder nur kurze Info ohne Details; immer gesendet, Admin-Notizen nie in Mails
+- Sicherheit (bestehende Lücken mitbehoben): Apple-Login verknüpft per Apple-ID (`User.appleSub`), unbestätigte E-Mail aus dem Request loggt nie in ein bestehendes Konto ein; Google nur mit bestätigter E-Mail; Pre-Hijacking: Übernahme eines unbestätigten Kontos per Social Login entfernt fremdes Passwort, 2FA, Auszahlungsdaten und alte Sitzungen; Register normalisiert E-Mail (trim + lowercase) vor der Prüfung
+- Migrationen `20261118230000_moderation`, `20261118233000_apple_sub` (lokal angewendet)
+- Offen: Ban-Umgehung über Plus-/Gmail-Punkt-Aliasse; Meldungen gegen später gelöschte Konten; Admin-Screens noch nicht in der App ausprobiert
