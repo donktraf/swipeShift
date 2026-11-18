@@ -53,9 +53,10 @@ final class UserStore: ObservableObject {
         // Backend meldet SESSION_REVOKED → lokal ausloggen
         sessionRevokedObserver = NotificationCenter.default.addObserver(
             forName: .sessionRevoked, object: nil, queue: .main
-        ) { [weak self] _ in
+        ) { [weak self] note in
             // queue: .main → wir sind bereits auf dem Main Thread
-            MainActor.assumeIsolated { self?.handleSessionRevoked() }
+            let message = note.userInfo?["message"] as? String
+            MainActor.assumeIsolated { self?.handleSessionRevoked(message: message) }
         }
     }
 
@@ -64,11 +65,11 @@ final class UserStore: ObservableObject {
     }
 
     @MainActor
-    private func handleSessionRevoked() {
+    private func handleSessionRevoked(message: String? = nil) {
         guard currentUser != nil || APIClient.shared.token != nil else { return }
         APIClient.shared.token = nil
         currentUser = nil
-        signedOutNotice = "You were signed out. Please sign in again."
+        signedOutNotice = (message?.isEmpty == false) ? message : "You were signed out. Please sign in again."
     }
 
     /// Login-Weg, dessen 2FA-Code gerade noch aussteht

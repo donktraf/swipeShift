@@ -8,6 +8,8 @@ import SwiftUI
 // MARK: - AccountSettingsView (Hauptmenü)
 
 struct AccountSettingsView: View {
+    @EnvironmentObject var userStore: UserStore
+
     var body: some View {
         SubScreenShell(title: "Account Settings") {
             VStack(spacing: 16) {
@@ -18,6 +20,13 @@ struct AccountSettingsView: View {
                     AnyView(NavigationLink { PrivacyDataView()           } label: { SettingsNavRow(icon: "hand.raised.fill",                   label: "Privacy & Data") }),
                     AnyView(NavigationLink { AppPreferencesView()        } label: { SettingsNavRow(icon: "slider.horizontal.3",                label: "App Preferences") }),
                 ])
+
+                // Nur fuer Admin-Konten (Flag kommt aus GET /auth/me; das Backend prueft jeden Request erneut)
+                if userStore.currentUser?.isAdmin == true {
+                    settingsGroup([
+                        AnyView(NavigationLink { AdminReportsView() } label: { SettingsNavRow(icon: "shield.lefthalf.filled", label: "Admin: Reports") }),
+                    ])
+                }
             }
             .padding(.horizontal, 16)
         }

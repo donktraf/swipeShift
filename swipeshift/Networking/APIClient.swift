@@ -1271,6 +1271,43 @@ extension APIClient {
         try validate(response: resp, data: data)
     }
 
+    // MARK: - Admin (Moderation)
+
+    func fetchAdminReports(closed: Bool) async throws -> [AdminReport] {
+        let req = try makeRequest(path: "/admin/reports?status=\(closed ? "closed" : "open")", method: "GET")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+        struct W: Decodable { let reports: [AdminReport] }
+        let dec = JSONDecoder(); dec.dateDecodingStrategy = .flexibleISO8601
+        return try dec.decode(W.self, from: data).reports
+    }
+
+    func fetchAdminReport(id: String) async throws -> AdminReportDetail {
+        let encoded = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
+        let req = try makeRequest(path: "/admin/reports/\(encoded)", method: "GET")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+        let dec = JSONDecoder(); dec.dateDecodingStrategy = .flexibleISO8601
+        return try dec.decode(AdminReportDetail.self, from: data)
+    }
+
+    func applyAdminAction(reportId: String, action: AdminModerationAction, note: String?) async throws {
+        let encoded = reportId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? reportId
+        var req = try makeRequest(path: "/admin/reports/\(encoded)/actions", method: "POST")
+        var body = action.body
+        if let note, !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { body["note"] = note }
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+    }
+
+    func liftAdminRestriction(userId: String) async throws {
+        let encoded = userId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? userId
+        let req = try makeRequest(path: "/admin/users/\(encoded)/lift", method: "POST")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+    }
+
     // POST /auth/me/pause
     func setAccountPaused(_ paused: Bool) async throws -> Bool {
         var req = try makeRequest(path: "/auth/me/pause", method: "POST")
@@ -1299,8 +1336,11 @@ func validate(response: URLResponse, data: Data) throws {
         let body = try? JSONDecoder().decode(APIErrorBody.self, from: data)
 
         // Sitzung serverseitig beendet → App loggt sich lokal aus (UserStore hoert darauf)
-        if http.statusCode == 401, body?.code == "SESSION_REVOKED" {
-            NotificationCenter.default.post(name: .sessionRevoked, object: nil)
+        if http.statusCode == 401, ["SESSION_REVOKED", "ACCOUNT_SUSPENDED", "ACCOUNT_BANNED"].contains(body?.code ?? "") {
+            // Bei Sperre/Bann liefert das Backend die lesbare Meldung mit
+            let isRestriction = body?.code != "SESSION_REVOKED"
+            NotificationCenter.default.post(name: .sessionRevoked, object: nil,
+                                            userInfo: isRestriction ? ["message": body?.error ?? ""] : nil)
         }
 
         // Lesbare Backend-Meldung ({ error }, optional mit code) durchreichen statt rohem JSON

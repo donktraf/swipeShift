@@ -81,6 +81,8 @@ struct UserDTO: Decodable {
     let twoFactorMethod: String?
     /// Konto pausiert (nur in GET /auth/me enthalten)
     let isPaused: Bool?
+    /// Admin-Konto (Moderation); nur in GET /auth/me
+    let isAdmin: Bool?
     /// Rechtliche Zustimmungen: Key -> zugestimmt (terms, ratingSystem, paymentResponsibility, accurateJobInfo, legalHiring); nur in GET /auth/me
     let legalConsents: [String: Bool]?
 }
