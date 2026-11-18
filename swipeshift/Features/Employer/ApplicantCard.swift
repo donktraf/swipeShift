@@ -19,6 +19,17 @@ struct ApplicantCard: View {
     private var isDecided: Bool { localState != nil }
     private var summary: ApplicantSummary? { applicant.summary }
 
+    /// Nur fuer noch offene Bewerbungen sinnvoll
+    private var shiftFit: ApplicantShiftFit? {
+        guard !isDecided else { return nil }
+        return ApplicantShiftFit.evaluate(
+            hasConflict: applicant.hasScheduleConflict == true,
+            availableDays: summary?.availableDays ?? [],
+            availableTimes: summary?.availableTimes ?? [],
+            start: applicant.job?.startTime
+        )
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             workerInfo
@@ -91,6 +102,7 @@ struct ApplicantCard: View {
                 }
             }
             ApplicantTagRow(tags: summary.tags)
+            if let fit = shiftFit { ApplicantShiftFitLabel(fit: fit) }
             if let availability = summary.availabilityText {
                 Label(availability, systemImage: "clock")
                     .font(.system(size: 12))

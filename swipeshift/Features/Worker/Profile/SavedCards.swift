@@ -59,6 +59,11 @@ struct SavedCompanyCard: View {
                         Text("\(company.openJobs) open job\(company.openJobs == 1 ? "" : "s")")
                             .font(.system(size: 12)).foregroundColor(.secondary)
                     }
+
+                    if let activity = company.lastActivity {
+                        Label(activity.label, systemImage: activity.kind == "worked" ? "checkmark.circle" : "clock")
+                            .font(.system(size: 11)).foregroundColor(.secondary)
+                    }
                 }
 
                 Spacer()
@@ -113,6 +118,8 @@ struct SavedJobCard: View {
     let job:      WorkerSavedJob
     let onUnsave: () -> Void
     let onApply:  () -> Void
+    /// "Not interested": entfernt Save + blendet den Job aus den Feeds aus (SavedView zeigt Undo)
+    let onNotInterested: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -148,16 +155,28 @@ struct SavedJobCard: View {
 
                 Spacer()
 
-                Button {
-                    Task {
-                        try? await APIClient.shared.unsaveJob(jobId: job.jobId)
-                        onUnsave()
+                VStack(spacing: 14) {
+                    Button {
+                        Task {
+                            try? await APIClient.shared.unsaveJob(jobId: job.jobId)
+                            onUnsave()
+                        }
+                    } label: {
+                        Image(systemName: "bookmark.fill")
+                            .font(.system(size: 18)).foregroundColor(SS.primary)
                     }
-                } label: {
-                    Image(systemName: "bookmark.fill")
-                        .font(.system(size: 18)).foregroundColor(SS.primary)
+                    .buttonStyle(.plain)
+
+                    Menu {
+                        Button(role: .destructive, action: onNotInterested) {
+                            Label("Not interested", systemImage: "hand.thumbsdown")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 16, weight: .semibold)).foregroundColor(.secondary)
+                            .frame(width: 24, height: 20)
+                    }
                 }
-                .buttonStyle(.plain)
             }
             .padding(12)
 

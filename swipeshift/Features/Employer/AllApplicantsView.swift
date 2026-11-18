@@ -28,6 +28,8 @@ struct ApplicantJob: Decodable {
     let shiftText: String
     let location: String
     let logoEmoji: String
+    /// Schichtbeginn (fuer "Available for this shift"); fehlt z.B. bei aus dem Kalender gebauten Jobs
+    var startTime: Date? = nil
 }
 
 struct Applicant: Identifiable, Decodable {
@@ -43,6 +45,8 @@ struct Applicant: Identifiable, Decodable {
     var conversationId: String? = nil
     /// Instant Match: automatisch angenommen (fehlt in aelteren Payloads)
     var autoAccepted: Bool? = nil
+    /// Worker hat zur selben Zeit einen anderen angenommenen Job (Backend)
+    var hasScheduleConflict: Bool? = nil
 
     var id: String { applyId }
 }
@@ -119,6 +123,7 @@ struct AllApplicantsView: View {
                                     applicant: applicant,
                                     onAccept: { Task { await accept(applicant) } },
                                     onDecline: { Task { await decline(applicant) } },
+                                    jobId: applicant.job?.id,
                                     chatConversationId: chatId(for: applicant)
                                 )
                             } label: {
@@ -227,7 +232,9 @@ struct AllApplicantsView: View {
         isLoading = true
         errorMessage = nil
         do {
-            let all = try await APIClient.shared.fetchApplicants()
+            let all = try await APIClient.shared.fetchApplicants(jobId: jobId)
+            // "New Matches" zuruecksetzen (nur mit Job-Kontext; Fehler hier sind unkritisch)
+            if let jobId { try? await APIClient.shared.markApplicantsSeen(jobId: jobId) }
             applicants = jobId.map { id in all.filter { $0.job?.id == id } } ?? all
             localStates = Dictionary(uniqueKeysWithValues: applicants.compactMap { a in
                 switch a.status {

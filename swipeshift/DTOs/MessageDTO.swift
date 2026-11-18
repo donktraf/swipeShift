@@ -197,6 +197,18 @@ struct SavedCompanyItem: Identifiable, Decodable {
     let location:    String?
     let industry:    String?
     let about:       String?
+    /// "Last worked" bzw. Fallback "Last posted" (nil = nichts anzeigen)
+    var lastActivity: SavedCompanyActivity? = nil
+}
+
+struct SavedCompanyActivity: Decodable {
+    let kind: String   // "worked" | "posted"
+    let date: Date
+
+    var label: String {
+        let formatted = date.formatted(date: .abbreviated, time: .omitted)
+        return kind == "worked" ? "Last worked: \(formatted)" : "Last posted: \(formatted)"
+    }
 }
 
 // MARK: - Employer Financials

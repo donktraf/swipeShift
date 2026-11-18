@@ -29,6 +29,7 @@ struct CalendarEntry: Identifiable, Equatable {
     let conversationId: String?
     let category: String?
     let distanceMiles: Double?
+    let jobNotes: String?
     var hasConflict = false
 
     init?(item: WorkerApplicationItem) {
@@ -56,6 +57,7 @@ struct CalendarEntry: Identifiable, Equatable {
         // Backend liefert "—" wenn der Job keine Kategorie hat
         category = item.category == "—" ? nil : item.category
         distanceMiles = item.distanceMiles
+        jobNotes = item.jobNotes
     }
 
     /// Vergangen = abgeschlossen, storniert oder Schicht vorbei → ausgegraut, eigene Liste

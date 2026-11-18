@@ -187,6 +187,7 @@ extension ChatView {
                     )
                 ),
                 onAccept: {}, onDecline: {},
+                jobId: conversation.jobId,
                 showActions: false
             )
         }

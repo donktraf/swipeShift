@@ -19,6 +19,10 @@ struct SavedView: View {
     @State private var errorMessage:    String? = nil
     @State private var applyJob:        Job? = nil
     @State private var actionError:     String? = nil
+    /// Zuletzt per "Not interested" entfernter Job → kurzes Undo
+    @State private var undoJob:         WorkerSavedJob? = nil
+    @State private var undoHadSkip      = false
+    @State private var undoDismissTask: Task<Void, Never>? = nil
 
     var body: some View {
         SubScreenShell(title: "Saved") {
@@ -41,6 +45,7 @@ struct SavedView: View {
                 }
             }
         }
+        .overlay(alignment: .bottom) { undoBanner }
         .task { await load() }
         .onChange(of: selectedTab) { _, _ in Task { await load() } }
         // Bestehender Apply Flow; danach neu laden, damit "Apply" verschwindet
@@ -58,6 +63,64 @@ struct SavedView: View {
             Button("OK", role: .cancel) { actionError = nil }
         } message: {
             Text(actionError ?? "")
+        }
+    }
+
+    // MARK: - Not interested + Undo
+
+    private func notInterested(_ job: WorkerSavedJob) {
+        Task {
+            do {
+                let hadSkip = try await APIClient.shared.markNotInterested(jobId: job.jobId)
+                withAnimation { savedJobs.removeAll { $0.id == job.id } }
+                undoHadSkip = hadSkip
+                showUndo(for: job)
+            } catch {
+                actionError = "Couldn't update this job. Please try again."
+            }
+        }
+    }
+
+    private func showUndo(for job: WorkerSavedJob) {
+        undoDismissTask?.cancel()
+        withAnimation { undoJob = job }
+        undoDismissTask = Task {
+            try? await Task.sleep(for: .seconds(6))
+            guard !Task.isCancelled else { return }
+            await MainActor.run { withAnimation { undoJob = nil } }
+        }
+    }
+
+    /// Undo = Skip entfernen + erneut speichern
+    private func undoNotInterested(_ job: WorkerSavedJob) {
+        undoDismissTask?.cancel()
+        withAnimation { undoJob = nil }
+        Task {
+            do {
+                try await APIClient.shared.unskip(jobId: job.jobId, restoreSkip: undoHadSkip)
+                try await APIClient.shared.saveJob(jobId: job.jobId)
+                await load()
+            } catch {
+                actionError = "Couldn't restore this job. Please try again."
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var undoBanner: some View {
+        if let job = undoJob {
+            HStack(spacing: 12) {
+                Text("Removed from saved")
+                    .font(.system(size: 14)).foregroundColor(.white)
+                Spacer()
+                Button("Undo") { undoNotInterested(job) }
+                    .font(.system(size: 14, weight: .bold)).foregroundColor(.white)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            .background(Color.black.opacity(0.85))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .padding(.horizontal, 16).padding(.bottom, 16)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
         }
     }
 
@@ -110,7 +173,8 @@ struct SavedView: View {
                         SavedJobCard(
                             job: job,
                             onUnsave: { withAnimation { savedJobs.removeAll { $0.id == job.id } } },
-                            onApply: { startApply(job) }
+                            onApply: { startApply(job) },
+                            onNotInterested: { notInterested(job) }
                         )
                         .padding(.horizontal, 16)
                     }

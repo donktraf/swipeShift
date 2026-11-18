@@ -73,6 +73,7 @@ struct SavedApplicantCard: View {
                 DetailedWorkerView(
                     applicant: item.asApplicant,
                     onAccept: {}, onDecline: {},
+                    jobId: item.jobId,
                     showActions: false,
                     chatConversationId: item.applyStatus == "accepted" ? item.conversationId : nil
                 )

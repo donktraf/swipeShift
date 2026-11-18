@@ -11,6 +11,25 @@ struct WorkerProfileDTO: Decodable {
     let worker: WorkerProfileInfo
     let stats: WorkerProfileStats
     let recentReviews: [WorkerProfileReview]
+    /// Die folgenden Felder fehlen in aelteren Backend-Antworten
+    let pastJobs: [WorkerPastJob]?
+    let account: WorkerAccountStatus?
+    /// Nur mit Job-Kontext: "Category matches · 2 of 3 required skills · ..."
+    let matchHint: String?
+}
+
+struct WorkerPastJob: Decodable, Identifiable {
+    let companyName: String
+    let jobTitle: String
+    let date: Date?
+    /// Bewertung, die der Employer dieses Jobs vergeben hat (nil = noch keine)
+    let rating: Double?
+    var id: String { "\(companyName)-\(jobTitle)-\(date?.timeIntervalSince1970 ?? 0)" }
+}
+
+struct WorkerAccountStatus: Decodable {
+    let emailVerified: Bool
+    let memberSince: Date?
 }
 
 struct WorkerProfileInfo: Decodable {

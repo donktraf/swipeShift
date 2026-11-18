@@ -14,6 +14,8 @@ struct DetailedWorkerView: View {
     let applicant: Applicant
     let onAccept:  () -> Void
     let onDecline: () -> Void
+    /// Job, in dessen Kontext das Profil geoeffnet wird (steuert den Match-Hinweis); nil = ohne Job-Kontext
+    var jobId: String? = nil
     /// false → ohne Accept/Decline-Footer (z.B. wenn aus dem Chat geoeffnet)
     var showActions: Bool = true
     /// gesetzt, wenn angenommen und Conversation vorhanden → "Chat"-Button im Header
@@ -44,7 +46,9 @@ struct DetailedWorkerView: View {
                     if let job = applicant.job { jobSection(job) }
 
                     if let profile {
+                        accountSection(profile)
                         ratingsSection(profile)
+                        pastJobsSection(profile)
                         if let bio = profile.worker.bio?.trimmingCharacters(in: .whitespacesAndNewlines), !bio.isEmpty {
                             aboutSection(bio)
                         }
@@ -99,7 +103,7 @@ struct DetailedWorkerView: View {
         isLoading = true
         loadError = nil
         do {
-            profile = try await APIClient.shared.fetchWorkerProfile(userId: applicant.userId)
+            profile = try await APIClient.shared.fetchWorkerProfile(userId: applicant.userId, jobId: jobId)
         } catch {
             loadError = "Couldn't load this worker's profile. Check your connection and try again."
         }
@@ -252,6 +256,82 @@ struct DetailedWorkerView: View {
                 Spacer()
             }
             .padding(14)
+
+            if let hint = profile?.matchHint {
+                Divider().padding(.horizontal, 14)
+                Label(hint, systemImage: "sparkles")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(SS.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+            }
+        }
+    }
+
+    // MARK: - Account-Status
+
+    @ViewBuilder
+    private func accountSection(_ profile: WorkerProfileDTO) -> some View {
+        if let account = profile.account {
+            sectionCard("Account") {
+                VStack(spacing: 0) {
+                    infoRow(icon: "envelope", label: "Email",
+                            value: account.emailVerified ? "Verified" : "Not verified")
+                    if let since = account.memberSince {
+                        Divider().padding(.leading, 52)
+                        infoRow(icon: "calendar", label: "Member since",
+                                value: since.formatted(.dateTime.month(.wide).year()))
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Past Jobs
+
+    @ViewBuilder
+    private func pastJobsSection(_ profile: WorkerProfileDTO) -> some View {
+        if let jobs = profile.pastJobs {
+            sectionCard("Past Jobs") {
+                if jobs.isEmpty {
+                    Text("No completed jobs on SwipeShift yet.")
+                        .font(.system(size: 14))
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(16)
+                } else {
+                    ForEach(Array(jobs.enumerated()), id: \.element.id) { index, job in
+                        if index > 0 { Divider().padding(.leading, 16) }
+                        HStack(alignment: .top, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(job.jobTitle)
+                                    .font(.system(size: 14, weight: .semibold))
+                                Text(job.companyName)
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.secondary)
+                                if let date = job.date {
+                                    Text(date.formatted(date: .abbreviated, time: .omitted))
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            Spacer()
+                            if let rating = job.rating {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "star.fill").foregroundColor(.yellow)
+                                    Text(String(format: "%.1f", rating)).fontWeight(.semibold)
+                                }
+                                .font(.system(size: 13))
+                            } else {
+                                Text("Not rated")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        .padding(.horizontal, 16).padding(.vertical, 12)
+                    }
+                }
+            }
         }
     }
 

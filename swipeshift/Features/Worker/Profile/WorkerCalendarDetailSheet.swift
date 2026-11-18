@@ -25,6 +25,7 @@ struct CalendarEntryDetailSheet: View {
                     if entry.hasConflict { conflictWarning }
                     if entry.status == .cancelled { cancellationBox }
                     detailsCard
+                    if let notes = entry.jobNotes { notesCard(notes) }
                     actions
                 }
                 .padding(20)
@@ -102,6 +103,21 @@ struct CalendarEntryDetailSheet: View {
                           label: "Payment", value: payment == "paid" ? "Paid" : "Pending payout")
             }
         }
+        .background(Color(uiColor: .secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    /// Hinweise des Employers (Treffpunkt, mitbringen, ...)
+    private func notesCard(_ notes: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("Notes from the employer", systemImage: "note.text")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(SS.primary)
+            Text(notes)
+                .font(.system(size: 14))
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(12)
         .background(Color(uiColor: .secondarySystemGroupedBackground))
         .clipShape(RoundedRectangle(cornerRadius: 14))
     }

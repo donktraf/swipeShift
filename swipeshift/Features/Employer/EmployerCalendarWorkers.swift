@@ -50,6 +50,7 @@ struct CalendarShiftWorkersSection: View {
                     DetailedWorkerView(
                         applicant: applicant(for: worker),
                         onAccept: {}, onDecline: {},
+                        jobId: jobId,
                         showActions: false
                     )
                 } label: {

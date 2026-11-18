@@ -21,6 +21,9 @@ struct ApplicantSummary: Decodable, Equatable {
     /// Nur das Badge, das Alter selbst wird nicht ausgeliefert
     let isAdult: Bool
     let availabilityText: String?
+    /// Rohwerte fuer "Available for this shift" (fehlen in aelteren Payloads)
+    var availableDays: [String]? = nil
+    var availableTimes: [String]? = nil
 }
 
 // MARK: - Formatierung
@@ -103,6 +106,8 @@ struct ApplicantTagRow: View {
 struct ApplicantAvatar: View {
     let photoUrl: String?
     var size: CGFloat = 48
+    /// Ohne Foto: Initialen statt Platzhalter-Icon (optional)
+    var initials: String? = nil
 
     var body: some View {
         ZStack {
@@ -115,6 +120,10 @@ struct ApplicantAvatar: View {
                 }
                 .frame(width: size, height: size)
                 .clipShape(Circle())
+            } else if let initials, !initials.isEmpty {
+                Text(initials)
+                    .font(.system(size: size * 0.38, weight: .semibold))
+                    .foregroundColor(.secondary)
             } else {
                 Image(systemName: "person.fill")
                     .font(.system(size: size * 0.45))

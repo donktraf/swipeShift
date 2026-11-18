@@ -5,6 +5,68 @@
 
 import SwiftUI
 
+// MARK: - Inline-Bewerber (Jobkarte)
+
+/// Unbeantwortete manuelle Bewerbung, direkt auf der Jobkarte (GET /jobs/mine, max. 2 pro Job)
+struct InlineApplicant: Identifiable, Decodable, Hashable {
+    let applyId: String
+    let userId: String
+    let name: String
+    let profilePhotoUrl: String?
+    let ratingAverage: Double?
+    let reviewCount: Int
+    /// Chat erst nach Annahme nutzbar
+    let conversationId: String?
+
+    var id: String { applyId }
+
+    var initials: String {
+        name.split(separator: " ").prefix(2).compactMap { $0.first }.map { String($0).uppercased() }.joined()
+    }
+}
+
+private enum InlineDecision: Identifiable {
+    case accept(InlineApplicant), decline(InlineApplicant)
+    var id: String {
+        switch self {
+        case .accept(let a):  return "accept-\(a.applyId)"
+        case .decline(let a): return "decline-\(a.applyId)"
+        }
+    }
+}
+
+/// Bestaetigungs-Alert fuer Accept/Decline direkt auf der Jobkarte (gleiche Texte wie im Worker-Profil)
+private struct InlineDecisionAlert: ViewModifier {
+    @Binding var decision: InlineDecision?
+    let onDecide: (InlineApplicant, Bool) -> Void
+
+    private var title: String {
+        if case .accept = decision { return "Accept applicant?" }
+        return "Decline applicant?"
+    }
+
+    func body(content: Content) -> some View {
+        content.alert(title, isPresented: Binding(get: { decision != nil }, set: { if !$0 { decision = nil } })) {
+            switch decision {
+            case .accept(let a)?:
+                Button("Accept") { onDecide(a, true) }
+                Button("Cancel", role: .cancel) {}
+            case .decline(let a)?:
+                Button("Decline", role: .destructive) { onDecide(a, false) }
+                Button("Cancel", role: .cancel) {}
+            case nil:
+                EmptyView()
+            }
+        } message: {
+            switch decision {
+            case .accept(let a)?:  Text("\(a.name) will be confirmed for the shift.")
+            case .decline(let a)?: Text("The application from \(a.name) will be declined.")
+            case nil:              Text("")
+            }
+        }
+    }
+}
+
 // MARK: - EmployerJob Model
 
 struct EmployerJob: Identifiable, Decodable, Hashable {
@@ -23,6 +85,9 @@ struct EmployerJob: Identifiable, Decodable, Hashable {
     var instantMatchCount: Int? = nil
     /// Alle Bewerbungen (steuert "View Applicants"); applicantCount zaehlt nur unbeantwortete
     var totalApplicationCount: Int? = nil
+    /// Bewerbungen seit dem letzten Oeffnen der Bewerberliste ("N new matches")
+    var newMatchCount: Int? = nil
+    var inlineApplicants: [InlineApplicant]? = nil
     let createdAt: String
     let updatedAt: String?
 
@@ -96,6 +161,12 @@ struct AllPostedJobsView: View {
     @State private var jobForApplicants: EmployerJob? = nil
     @State private var actionError: String? = nil
 
+    // Inline Accept/Decline auf der Jobkarte (gleiche Bestaetigung wie im Worker-Profil)
+    @State private var inlineDecision: InlineDecision? = nil
+    @State private var inlineStates: [String: Bool] = [:]   // applyId → true = accepted, false = declined
+    @StateObject private var chatNavigation = ApplicantChatNavigation()
+    @EnvironmentObject private var messageStore: MessageStore
+
     // Payment Navigation
     @State private var jobForPayment: EmployerJob? = nil
     @State private var showPayments = false
@@ -152,6 +223,12 @@ struct AllPostedJobsView: View {
                                 onViewPayments: {
                                     jobForPayment = job
                                     showPayments  = true
+                                },
+                                inlineStates: inlineStates,
+                                onInlineAccept:  { inlineDecision = .accept($0) },
+                                onInlineDecline: { inlineDecision = .decline($0) },
+                                onInlineMessage: { id in
+                                    chatNavigation.openChat(conversationId: id, messageStore: messageStore)
                                 }
                             )
                         }
@@ -175,6 +252,14 @@ struct AllPostedJobsView: View {
         .navigationDestination(item: $jobForApplicants) { job in
             AllApplicantsView(jobId: job.id, jobTitle: job.title)
         }
+        // Beim Zurueckkehren aus der Bewerberliste: "New Matches" ist dort zurueckgesetzt worden
+        .onChange(of: jobForApplicants) { _, new in
+            if new == nil { Task { await load() } }
+        }
+        .applicantChatNavigation(chatNavigation)
+        .modifier(InlineDecisionAlert(decision: $inlineDecision) { applicant, accept in
+            Task { await decideInline(applicant, accept: accept) }
+        })
         .sheet(item: $jobToEdit, onDismiss: { Task { await load() } }) { job in
             PostJobView(editingJobId: job.id)
         }
@@ -330,6 +415,17 @@ struct AllPostedJobsView: View {
     }
 
     @MainActor
+    private func decideInline(_ applicant: InlineApplicant, accept: Bool) async {
+        do {
+            if accept { try await APIClient.shared.acceptApplicant(applyId: applicant.applyId) }
+            else      { try await APIClient.shared.declineApplicant(applyId: applicant.applyId) }
+            withAnimation { inlineStates[applicant.applyId] = accept }
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    @MainActor
     private func updateStatus(_ job: EmployerJob, to status: String, reason: String? = nil, termsAccepted: Bool = false) async {
         do {
             try await APIClient.shared.updateJobStatus(jobId: job.id, status: status, reason: reason, termsAccepted: termsAccepted)
@@ -360,6 +456,10 @@ private struct PostedJobCard: View {
     let onDelete:       () -> Void
     let onViewApplicants: () -> Void
     let onViewPayments: () -> Void
+    let inlineStates: [String: Bool]
+    let onInlineAccept:  (InlineApplicant) -> Void
+    let onInlineDecline: (InlineApplicant) -> Void
+    let onInlineMessage: (String) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -378,6 +478,14 @@ private struct PostedJobCard: View {
                             .foregroundColor(.primary)
                             .lineLimit(1)
                         Spacer()
+                        if job.status == "published", let n = job.newMatchCount, n > 0 {
+                            Text("\(n) new match\(n == 1 ? "" : "es")")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(SS.primary)
+                                .padding(.horizontal, 8).padding(.vertical, 3)
+                                .background(SS.primary.opacity(0.12))
+                                .clipShape(Capsule())
+                        }
                         // Status Badge
                         Text(job.statusEnum.label)
                             .font(.system(size: 11, weight: .semibold))
@@ -418,6 +526,24 @@ private struct PostedJobCard: View {
             }
             .padding(.vertical, 10)
 
+            // Inline-Bewerber (nur veroeffentlichte Jobs)
+            if job.status == "published", let inline = job.inlineApplicants, !inline.isEmpty {
+                Divider().padding(.horizontal, 14)
+                VStack(spacing: 10) {
+                    ForEach(inline) { applicant in inlineRow(applicant) }
+                    if job.applicantCount > inline.count {
+                        Button(action: onViewApplicants) {
+                            Text("View all \(job.applicantCount) applicants")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(SS.primary)
+                        }
+                        .buttonStyle(.plain)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
+                }
+                .padding(.horizontal, 14).padding(.vertical, 10)
+            }
+
             // Action Buttons (nur bei relevanten Status)
             let showPayBtn = job.status == "inProgress" || job.status == "completed"
             let showActionRow = job.status == "draft" || job.status == "published" || job.status == "inProgress" || showPayBtn
@@ -446,6 +572,53 @@ private struct PostedJobCard: View {
         .background(Color(uiColor: .systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .shadow(color: .black.opacity(0.05), radius: 6, x: 0, y: 2)
+    }
+
+    private func inlineRow(_ applicant: InlineApplicant) -> some View {
+        let decision = inlineStates[applicant.applyId]
+        return HStack(spacing: 10) {
+            ApplicantAvatar(photoUrl: applicant.profilePhotoUrl, size: 36, initials: applicant.initials)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(applicant.name)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+                ApplicantRatingLabel(average: applicant.ratingAverage, count: applicant.reviewCount)
+            }
+            Spacer(minLength: 6)
+            switch decision {
+            case nil:
+                inlineButton("Decline", systemImage: "xmark", filled: false) { onInlineDecline(applicant) }
+                inlineButton("Accept", systemImage: "checkmark", filled: true) { onInlineAccept(applicant) }
+            case true?:
+                // Chat erst nach Annahme
+                if let conversationId = applicant.conversationId {
+                    inlineButton("Message", systemImage: "bubble.left.and.bubble.right", filled: false) {
+                        onInlineMessage(conversationId)
+                    }
+                } else {
+                    Text("Accepted").font(.system(size: 12, weight: .semibold)).foregroundColor(.green)
+                }
+            case false?:
+                Text("Declined").font(.system(size: 12, weight: .semibold)).foregroundColor(.red)
+            }
+        }
+    }
+
+    private func inlineButton(_ title: String, systemImage: String, filled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(filled ? .white : (title == "Decline" ? .red : SS.primary))
+                .padding(.horizontal, 10).padding(.vertical, 7)
+                .background(filled ? SS.primary : Color.clear)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 9)
+                        .stroke(filled ? Color.clear : (title == "Decline" ? Color.red.opacity(0.35) : SS.primary.opacity(0.4)), lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 9))
+        }
+        .buttonStyle(.plain)
     }
 
     /// Veroeffentlicht: unbeantwortete Bewerbungen ("3 new"); sonst Gesamtzahl ohne "new" ("–" bei 0)

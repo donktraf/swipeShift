@@ -28,6 +28,7 @@ struct WorkerApplicationItem: Identifiable, Decodable {
     let earnings:           Double?
     let conversationId:     String?
     let distanceMiles:      Double?   // Worker → Job, nil ohne Koordinaten
+    let jobNotes:           String?   // Hinweise des Employers (nur bei offener/angenommener Bewerbung)
 }
 
 // MARK: - Saved Jobs

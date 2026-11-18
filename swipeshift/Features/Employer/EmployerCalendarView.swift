@@ -19,6 +19,8 @@ struct EmployerCalendarJobDTO: Identifiable, Decodable {
     let category: String?
     let payText: String
     let shiftText: String
+    /// Eigene Hinweise fuer die Worker (Job.jobNotes)
+    var jobNotes: String? = nil
     /// Schichtkosten, gleiche Berechnung wie Finanzen (abgeschlossen = geschuldet, sonst geplant)
     let shiftCost: Double
     let workers: [EmployerCalendarWorkerDTO]
@@ -48,6 +50,7 @@ private struct EmployerCalJob: Identifiable {
     let category: String?
     let payText: String
     let shiftText: String
+    let jobNotes: String?
     let shiftCost: Double
     let workers: [EmployerCalendarWorkerDTO]
     let averageWorkerRating: Double?
@@ -72,6 +75,7 @@ private struct EmployerCalJob: Identifiable {
         self.category      = dto.category
         self.payText       = dto.payText
         self.shiftText     = dto.shiftText
+        self.jobNotes      = dto.jobNotes
         self.shiftCost     = dto.shiftCost
         self.workers       = dto.workers
         self.averageWorkerRating = dto.averageWorkerRating
@@ -491,6 +495,17 @@ private struct EmployerCalJobCard: View {
         VStack(alignment: .leading, spacing: 10) {
             header
             details
+            if let notes = job.jobNotes {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("Your notes for workers", systemImage: "note.text")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(SS.primary)
+                    Text(notes)
+                        .font(.system(size: 13))
+                        .foregroundColor(.primary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
             if !job.workers.isEmpty {
                 Divider()
                 CalendarShiftWorkersSection(

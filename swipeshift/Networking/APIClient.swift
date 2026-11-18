@@ -95,6 +95,33 @@ final class APIClient {
         _ = try await URLSession.shared.data(for: req)
     }
 
+    /// "Not interested" (Gespeichert): entfernt den Save und blendet den Job in allen Feeds aus
+    /// Rueckgabe: true, wenn es vorher schon einen normalen Swipe-Skip gab (Undo soll ihn behalten)
+    @discardableResult
+    func markNotInterested(jobId: String) async throws -> Bool {
+        var req = try makeRequest(path: "/jobs/\(jobId)/skip", method: "POST")
+        req.httpBody = try JSONSerialization.data(withJSONObject: ["notInterested": true])
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+        struct R: Decodable { let hadSkip: Bool? }
+        return (try? JSONDecoder().decode(R.self, from: data))?.hadSkip ?? false
+    }
+
+    /// Markiert die Bewerberliste eines Jobs als gesehen ("New Matches" zuruecksetzen); nur Owner
+    func markApplicantsSeen(jobId: String) async throws {
+        let req = try makeRequest(path: "/jobs/\(jobId)/applicants/seen", method: "POST")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+    }
+
+    /// Skip zuruecknehmen (Undo von "Not interested")
+    /// `restoreSkip`: vorheriger normaler Skip bleibt bestehen (nur "Not interested" wird zurueckgenommen)
+    func unskip(jobId: String, restoreSkip: Bool = false) async throws {
+        let req = try makeRequest(path: "/jobs/\(jobId)/skip\(restoreSkip ? "?restoreSkip=1" : "")", method: "DELETE")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+    }
+
     func fetchJobs(location: String? = nil, type: String? = nil, category: String? = nil) async throws -> [Job] {
 
         // 1) URL: /jobs
@@ -634,8 +661,10 @@ final class APIClient {
     }
 
     // GET /employer/applicants
-    func fetchApplicants() async throws -> [Applicant] {
-        let req = try makeRequest(path: "/employer/applicants", method: "GET")
+    /// Mit `jobId`: nur dieser Job; das Backend setzt dann "New Matches" fuer den Job zurueck
+    func fetchApplicants(jobId: String? = nil) async throws -> [Applicant] {
+        let path = jobId.map { "/employer/applicants?jobId=\($0.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? $0)" } ?? "/employer/applicants"
+        let req = try makeRequest(path: path, method: "GET")
         let (data, response) = try await URLSession.shared.data(for: req)
         try validate(response: response, data: data)
         struct Resp: Decodable { let applicants: [Applicant] }
@@ -645,8 +674,10 @@ final class APIClient {
     }
 
     // GET /employer/workers/:userId — echtes Worker-Profil fuer DetailedWorkerView
-    func fetchWorkerProfile(userId: String) async throws -> WorkerProfileDTO {
-        let req = try makeRequest(path: "/employer/workers/\(userId)", method: "GET")
+    /// `jobId` (optional): Job-Kontext fuer den Match-Hinweis (Backend prueft, dass der Job dem Employer gehoert)
+    func fetchWorkerProfile(userId: String, jobId: String? = nil) async throws -> WorkerProfileDTO {
+        let query = jobId.map { "?jobId=\($0.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? $0)" } ?? ""
+        let req = try makeRequest(path: "/employer/workers/\(userId)\(query)", method: "GET")
         let (data, response) = try await URLSession.shared.data(for: req)
         try validate(response: response, data: data)
         let dec = JSONDecoder()
