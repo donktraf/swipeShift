@@ -35,4 +35,26 @@ struct PostJobRequest: Encodable {
     let paymentMethod: String?
     let contractType: String?
     let status: String          // "published" | "draft"
+
+    // Optionale Zusatzfelder (alle mit Default, damit bestehende Aufrufer unveraendert bleiben)
+    var requiredSkills: [String] = []
+    var physicalRequirements: [String] = []
+    var certifications: [String] = []
+    var educationLevel: String? = nil
+    var workAuthorizationRequired: Bool = false
+    var urgency: String = "normal"
+    var locationType: String = "single"
+    var breakIncluded: Bool = false
+    var breakMinutes: Int? = nil
+    var sameDayPay: Bool = false
+    var tipsIncluded: Bool = false
+    var repeatWork: Bool = false
+    var bonusAvailable: Bool = false
+    var bonusDescription: String? = nil
+    var cancellationPolicy: String? = nil
+    var cancellationNotes: String? = nil
+    var jobNotes: String? = nil
+    var instantMatch: Bool = false
+    /// Pflicht beim Veroeffentlichen (Backend: TERMS_REQUIRED), bei Drafts false
+    var termsAccepted: Bool = false
 }

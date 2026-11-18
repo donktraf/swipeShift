@@ -15,6 +15,7 @@ struct JobDetailView: View {
     private var job: Job { detailedJob ?? initialJob }
 
     @EnvironmentObject var jobStore: JobStore
+    @EnvironmentObject var userStore: UserStore
     @Environment(\.dismiss) private var dismiss
 
     @State private var showApplySheet = false
@@ -36,6 +37,8 @@ struct JobDetailView: View {
                     tasksSection
                     requirementsSection
                     payDetailsSection
+                    cancellationSection
+                    employerNotesSection
                     locationSection
                     companySection
                     whatHappensNextSection
@@ -159,6 +162,14 @@ struct JobDetailView: View {
                         .font(.system(size: 15))
                         .foregroundColor(.secondary)
 
+                    if job.isUrgent || job.instantMatch {
+                        HStack(spacing: 6) {
+                            if job.isUrgent { DetailBadge(text: "Urgent", icon: "flame.fill", color: .red) }
+                            if job.instantMatch { DetailBadge(text: "Instant Match", icon: "bolt.fill", color: SS.primary) }
+                        }
+                        .padding(.vertical, 2)
+                    }
+
                     if let rating = job.companyRating {
                         HStack(spacing: 3) {
                             Image(systemName: "star.fill")
@@ -208,6 +219,26 @@ struct JobDetailView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
             Divider()
+
+            // Pause + Standorttyp (nur wenn angegeben)
+            if job.breakIncluded || job.locationType == "multiple" {
+                HStack(spacing: 16) {
+                    if job.breakIncluded {
+                        Label(job.breakMinutes.map { "\($0) min break" } ?? "Break included", systemImage: "cup.and.saucer")
+                            .font(.system(size: 13))
+                            .foregroundColor(.secondary)
+                    }
+                    if job.locationType == "multiple" {
+                        Label("Multiple locations", systemImage: "mappin.and.ellipse")
+                            .font(.system(size: 13))
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                Divider()
+            }
         }
         .background(Color(uiColor: .systemBackground))
     }
@@ -278,25 +309,29 @@ struct JobDetailView: View {
     private var requirementsSection: some View {
         DetailSection(title: "Requirements") {
             VStack(spacing: 0) {
-                if let dressCode = job.dressCode {
-                    RequirementRow(label: "Dress Code", value: dressCode)
-                    Divider().padding(.leading, 16)
-                }
-                if let langs = job.languages, !langs.isEmpty {
-                    RequirementRow(label: "Languages", value: langs.joined(separator: ", "))
-                    Divider().padding(.leading, 16)
-                }
-                if let exp = job.experienceLevel {
-                    RequirementRow(label: "Experience", value: exp)
-                    Divider().padding(.leading, 16)
-                }
-                if let age = job.minAge {
-                    RequirementRow(label: "Min. Age", value: "\(age)+")
+                ForEach(Array(requirementRows.enumerated()), id: \.offset) { idx, row in
+                    if idx > 0 { Divider().padding(.leading, 16) }
+                    RequirementRow(label: row.label, value: row.value)
                 }
             }
             .background(Color(uiColor: .secondarySystemGroupedBackground))
             .clipShape(RoundedRectangle(cornerRadius: SS.cardRadius))
         }
+    }
+
+    /// Nur Zeilen mit Wert (Divider nur zwischen Zeilen)
+    private var requirementRows: [(label: String, value: String)] {
+        var rows: [(String, String)] = []
+        if let dressCode = job.dressCode { rows.append(("Dress Code", dressCode)) }
+        if let langs = job.languages, !langs.isEmpty { rows.append(("Languages", langs.joined(separator: ", "))) }
+        if let exp = job.experienceLevel { rows.append(("Experience", exp)) }
+        if let age = job.minAge { rows.append(("Min. Age", "\(age)+")) }
+        if !job.requiredSkills.isEmpty { rows.append(("Skills", job.requiredSkills.joined(separator: ", "))) }
+        if !job.physicalRequirements.isEmpty { rows.append(("Physical", job.physicalRequirements.joined(separator: ", "))) }
+        if !job.certifications.isEmpty { rows.append(("Certifications", job.certifications.joined(separator: ", "))) }
+        if let edu = job.educationLevel { rows.append(("Education", edu)) }
+        if job.workAuthorizationRequired { rows.append(("Work authorization", workAuthorizationStatusText)) }
+        return rows
     }
 
     // MARK: - Vergütung & Vertrag
@@ -312,9 +347,69 @@ struct JobDetailView: View {
                 if let type_ = job.contractType {
                     RequirementRow(label: "Contract Type", value: type_)
                 }
+                ForEach(extraPayRows, id: \.label) { row in
+                    Divider().padding(.leading, 16)
+                    RequirementRow(label: row.label, value: row.value)
+                }
             }
             .background(Color(uiColor: .secondarySystemGroupedBackground))
             .clipShape(RoundedRectangle(cornerRadius: SS.cardRadius))
+        }
+    }
+
+    /// Optionale Zahlungs-Extras; nur Zeilen mit Wert
+    private var extraPayRows: [(label: String, value: String)] {
+        var rows: [(String, String)] = []
+        if job.sameDayPay { rows.append(("Same-day pay", "Yes")) }
+        if job.tipsIncluded { rows.append(("Tips", "Included")) }
+        if job.bonusAvailable {
+            let desc = job.bonusDescription?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            rows.append(("Bonus", desc.isEmpty ? "Available" : desc))
+        }
+        if job.repeatWork { rows.append(("Repeat work", "Possible")) }
+        return rows
+    }
+
+    /// Zeigt, ob das Profil des Workers die geforderte Arbeitserlaubnis angibt
+    private var workAuthorizationStatusText: String {
+        userStore.currentUser?.workAuthorization == true ? "Required (on your profile)" : "Required (not on your profile)"
+    }
+
+    // MARK: - Stornierung
+    private var cancellationSection: some View {
+        Group {
+            let notes = job.cancellationNotes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if job.cancellationPolicyLabel != nil || !notes.isEmpty {
+                DetailSection(title: "Cancellation") {
+                    VStack(spacing: 0) {
+                        if let label = job.cancellationPolicyLabel {
+                            RequirementRow(label: "Policy", value: label)
+                        }
+                        if job.cancellationPolicyLabel != nil && !notes.isEmpty {
+                            Divider().padding(.leading, 16)
+                        }
+                        if !notes.isEmpty {
+                            RequirementRow(label: "Notes", value: notes)
+                        }
+                    }
+                    .background(Color(uiColor: .secondarySystemGroupedBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: SS.cardRadius))
+                }
+            }
+        }
+    }
+
+    // MARK: - Hinweise vom Arbeitgeber
+    private var employerNotesSection: some View {
+        Group {
+            if let notes = job.jobNotes?.trimmingCharacters(in: .whitespacesAndNewlines), !notes.isEmpty {
+                DetailSection(title: "Notes from the employer") {
+                    Text(notes)
+                        .font(.system(size: 15))
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         }
     }
 
@@ -496,6 +591,24 @@ private struct QuickInfoCell: View {
                 .foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+private struct DetailBadge: View {
+    let text: String
+    let icon: String
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: icon).font(.system(size: 9, weight: .bold))
+            Text(text).font(.system(size: 11, weight: .semibold))
+        }
+        .foregroundColor(color)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(color.opacity(0.12))
+        .clipShape(Capsule())
     }
 }
 

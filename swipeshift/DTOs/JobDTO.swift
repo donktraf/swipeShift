@@ -57,6 +57,25 @@ struct JobDTO: Decodable, Identifiable {
     let companyIndustry: String?
     let companyBusinessAreas: [String]?
     let companyCompletedJobs: Int?
+    // Optionale Zusatzfelder (aeltere Payloads ohne diese Keys decodieren zu nil)
+    let requiredSkills: [String]?
+    let physicalRequirements: [String]?
+    let certifications: [String]?
+    let educationLevel: String?
+    let workAuthorizationRequired: Bool?
+    let urgency: String?
+    let locationType: String?
+    let breakIncluded: Bool?
+    let breakMinutes: Int?
+    let sameDayPay: Bool?
+    let tipsIncluded: Bool?
+    let repeatWork: Bool?
+    let bonusAvailable: Bool?
+    let bonusDescription: String?
+    let cancellationPolicy: String?
+    let cancellationNotes: String?
+    let jobNotes: String?
+    let instantMatch: Bool?
 }
 
 struct JobReviewBreakdownDTO: Decodable {
@@ -101,6 +120,24 @@ extension JobDTO {
         job.companyIndustry = companyIndustry
         job.companyBusinessAreas = companyBusinessAreas ?? []
         job.companyCompletedJobs = companyCompletedJobs
+        job.requiredSkills = requiredSkills ?? []
+        job.physicalRequirements = physicalRequirements ?? []
+        job.certifications = certifications ?? []
+        job.educationLevel = educationLevel
+        job.workAuthorizationRequired = workAuthorizationRequired ?? false
+        job.urgency = urgency ?? "normal"
+        job.locationType = locationType ?? "single"
+        job.breakIncluded = breakIncluded ?? false
+        job.breakMinutes = breakMinutes
+        job.sameDayPay = sameDayPay ?? false
+        job.tipsIncluded = tipsIncluded ?? false
+        job.repeatWork = repeatWork ?? false
+        job.bonusAvailable = bonusAvailable ?? false
+        job.bonusDescription = bonusDescription
+        job.cancellationPolicy = cancellationPolicy
+        job.cancellationNotes = cancellationNotes
+        job.jobNotes = jobNotes
+        job.instantMatch = instantMatch ?? false
         return job
     }
 }
@@ -110,6 +147,7 @@ struct EmployerStatsDTO: Decodable {
     let newApplicants: Int
     let monthlySpend: Double
     let applicationsThisWeek: Int
+    let instantMatchesThisWeek: Int?
     let jobsFilledThisWeek: Int
     let topCategory: String
 }

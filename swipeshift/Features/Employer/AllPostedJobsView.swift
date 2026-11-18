@@ -19,6 +19,8 @@ struct EmployerJob: Identifiable, Decodable, Hashable {
     let shiftText: String
     let logoEmoji: String
     let applicantCount: Int
+    /// Automatisch angenommene Bewerbungen (Instant Match), nicht in applicantCount enthalten
+    var instantMatchCount: Int? = nil
     let createdAt: String
     let updatedAt: String?
 
@@ -212,17 +214,16 @@ struct AllPostedJobsView: View {
         } message: {
             Text("The job will be cancelled. Applicants and assigned workers will see the cancellation and your reason (optional) in their calendar.")
         }
-        // Publish confirmation
-        .alert("Publish job?", isPresented: Binding(
-            get: { jobToPublish != nil },
-            set: { if !$0 { jobToPublish = nil } }
-        )) {
-            Button("Publish") {
-                if let job = jobToPublish { Task { await updateStatus(job, to: "published") } }
-            }
-            Button("Cancel", role: .cancel) { jobToPublish = nil }
-        } message: {
-            Text("The job will be published immediately and visible to workers.")
+        // Publish confirmation (inkl. Pflicht-Zustimmung zu den Employer-AGB)
+        .sheet(item: $jobToPublish) { job in
+            PublishDraftSheet(
+                jobTitle: job.title,
+                onPublish: {
+                    jobToPublish = nil
+                    Task { await updateStatus(job, to: "published", termsAccepted: true) }
+                },
+                onCancel: { jobToPublish = nil }
+            )
         }
     }
 
@@ -316,9 +317,9 @@ struct AllPostedJobsView: View {
     }
 
     @MainActor
-    private func updateStatus(_ job: EmployerJob, to status: String, reason: String? = nil) async {
+    private func updateStatus(_ job: EmployerJob, to status: String, reason: String? = nil, termsAccepted: Bool = false) async {
         do {
-            try await APIClient.shared.updateJobStatus(jobId: job.id, status: status, reason: reason)
+            try await APIClient.shared.updateJobStatus(jobId: job.id, status: status, reason: reason, termsAccepted: termsAccepted)
             await load()
         } catch {
             actionError = error.localizedDescription
@@ -393,6 +394,10 @@ private struct PostedJobCard: View {
             // Stats-Zeile
             HStack(spacing: 0) {
                 statCell(label: "Applicants", value: "\(job.applicantCount)", icon: "person.2.fill")
+                if let instant = job.instantMatchCount, instant > 0 {
+                    Divider().frame(height: 30)
+                    statCell(label: "Instant", value: "\(instant)", icon: "bolt.fill")
+                }
                 Divider().frame(height: 30)
                 statCell(label: "Spots", value: "\(job.openSpots)", icon: "person.badge.plus")
                 Divider().frame(height: 30)
@@ -411,7 +416,7 @@ private struct PostedJobCard: View {
                         actionButton(label: "Publish", color: SS.primary, action: onPublish)
                         actionButton(label: "Delete", color: .red, action: onDelete)
                     }
-                    if job.status == "published" && job.applicantCount > 0 {
+                    if job.status == "published" && (job.applicantCount + (job.instantMatchCount ?? 0)) > 0 {
                         actionButton(label: "View Applicants", color: SS.primary, action: onViewApplicants)
                     }
                     if job.status != "cancelled" && job.status != "completed" && job.status != "draft" {
@@ -459,5 +464,56 @@ private struct PostedJobCard: View {
                 )
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - PublishDraftSheet
+
+/// Bestaetigung zum Veroeffentlichen eines Entwurfs; "Publish" erst nach Zustimmung zu den Employer-AGB.
+private struct PublishDraftSheet: View {
+    let jobTitle: String
+    let onPublish: () -> Void
+    let onCancel: () -> Void
+
+    @State private var termsAccepted = false
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Capsule()
+                .fill(Color.gray.opacity(0.3))
+                .frame(width: 36, height: 4)
+                .padding(.top, 12)
+
+            VStack(spacing: 6) {
+                Text("Publish job?")
+                    .font(.system(size: 20, weight: .bold))
+                Text("\"\(jobTitle)\" will be published immediately and visible to workers.")
+                    .font(.system(size: 14))
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+            }
+
+            TermsConsentRow(isAccepted: $termsAccepted)
+                .padding(.horizontal, 16)
+
+            VStack(spacing: 10) {
+                Button("Publish") { onPublish() }
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(termsAccepted ? SS.primary : Color.gray.opacity(0.35))
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .disabled(!termsAccepted)
+                Button("Cancel") { onCancel() }
+                    .font(.system(size: 15))
+                    .foregroundColor(.secondary)
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 24)
+        }
+        .background(Color(uiColor: .systemGroupedBackground))
+        .presentationDetents([.fraction(0.5), .large])
     }
 }

@@ -61,6 +61,57 @@ struct Job: Identifiable, Equatable {
     var companyIndustry: String? = nil
     var companyBusinessAreas: [String] = []
     var companyCompletedJobs: Int? = nil
+
+    // Optionale Zusatzfelder (Add Job) — alle mit Default, damit aeltere Payloads weiter funktionieren
+    var requiredSkills: [String] = []
+    var physicalRequirements: [String] = []
+    var certifications: [String] = []
+    var educationLevel: String? = nil
+    var workAuthorizationRequired: Bool = false
+    var urgency: String = "normal"          // "normal" | "urgent"
+    var locationType: String = "single"     // "single" | "multiple"
+    var breakIncluded: Bool = false
+    var breakMinutes: Int? = nil
+    var sameDayPay: Bool = false
+    var tipsIncluded: Bool = false
+    var repeatWork: Bool = false
+    var bonusAvailable: Bool = false
+    var bonusDescription: String? = nil
+    var cancellationPolicy: String? = nil   // "flexible" | "24h" | "48h" | "strict"
+    var cancellationNotes: String? = nil
+    var jobNotes: String? = nil
+    var instantMatch: Bool = false
+
+    var isUrgent: Bool { urgency == "urgent" }
+
+    /// Anzeigetext der Stornierungsbedingung
+    var cancellationPolicyLabel: String? {
+        guard let cancellationPolicy else { return nil }
+        return JobCancellationPolicy(rawValue: cancellationPolicy)?.label
+    }
+}
+
+/// Stornierungsbedingungen (Raw Value = Backend-Wert)
+enum JobCancellationPolicy: String, CaseIterable, Identifiable {
+    case flexible, h24 = "24h", h48 = "48h", strict
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .flexible: return "Flexible"
+        case .h24:      return "24 hours notice"
+        case .h48:      return "48 hours notice"
+        case .strict:   return "No cancellation after confirmation"
+        }
+    }
+}
+
+/// Auswahllisten der optionalen Job-Felder (identisch zu den erlaubten Werten im Backend)
+enum JobOptions {
+    static let skills = ["Communication", "Teamwork", "Reliability", "Working under Pressure"]
+    static let physical = ["Standing for long periods", "Lifting up to 25 lbs", "Lifting up to 50 lbs", "Walking / on feet", "Bending / kneeling", "Working outdoors"]
+    static let certifications = ["Food Handler Card", "Alcohol Server Certification", "Forklift License", "First Aid / CPR", "Security Guard License", "Driver's License"]
+    static let education = ["None required", "High School Diploma / GED", "Vocational Training", "College Degree"]
+    static let breakMinutes = [15, 30, 45, 60]
 }
 
 struct JobReviewSummary: Equatable {

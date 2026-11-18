@@ -100,6 +100,16 @@ struct DashboardJobCard: View {
                         .font(.system(size: 15, weight: .bold))
                         .foregroundColor(.primary)
 
+                    if job.isUrgent {
+                        Text("Urgent")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(.red)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
+                            .background(Color.red.opacity(0.12))
+                            .clipShape(Capsule())
+                    }
+
                     Text(job.company)
                         .font(.system(size: 13))
                         .foregroundColor(.secondary)

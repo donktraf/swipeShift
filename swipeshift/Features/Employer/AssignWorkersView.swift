@@ -15,6 +15,7 @@ struct JobApplicantDTO: Identifiable, Decodable {
     let profilePhotoUrl: String?
     let rating:          Double
     let location:        String?
+    var autoAccepted:    Bool? = nil
     var id: String { applyId }
 }
 
@@ -49,6 +50,7 @@ struct AssignedWorkerDTO: Identifiable, Decodable {
     let name: String
     let photoEmoji: String
     let rating: Double
+    var autoAccepted: Bool? = nil
     var id: String { applyId }
 }
 
@@ -371,9 +373,12 @@ private struct JobAssignCard: View {
             .padding(.leading, 14)
 
             VStack(alignment: .leading, spacing: 1) {
-                Text(worker.name)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.primary)
+                HStack(spacing: 6) {
+                    Text(worker.name)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.primary)
+                    if worker.autoAccepted == true { InstantMatchPill() }
+                }
                 if worker.rating > 0 {
                     HStack(spacing: 2) {
                         Image(systemName: "star.fill")

@@ -41,6 +41,8 @@ struct Applicant: Identifiable, Decodable {
     var summary:   ApplicantSummary? = nil
     /// Conversation der Bewerbung (Chat-Button erst nach Annahme)
     var conversationId: String? = nil
+    /// Instant Match: automatisch angenommen (fehlt in aelteren Payloads)
+    var autoAccepted: Bool? = nil
 
     var id: String { applyId }
 }

@@ -16,6 +16,7 @@ private enum ApplyStep {
 
 enum ApplyResult {
     case submitted
+    case booked          // Instant Match: sofort angenommen
     case connectionLost
     case shiftAlreadyTaken
     case shiftUnavailable
@@ -93,7 +94,10 @@ struct ApplyFlowView: View {
                     result: result,
                     job: job,
                     onDone: {
-                        if case .submitted = result { onSuccess?() }
+                        switch result {
+                        case .submitted, .booked: onSuccess?()
+                        default: break
+                        }
                         dismiss()
                     },
                     onRetry: {
@@ -133,8 +137,8 @@ struct ApplyFlowView: View {
 
         do {
             try await Task.sleep(nanoseconds: 900_000_000) // 0.9s UX-Feedback
-            try await jobStore.apply(to: job)
-            withAnimation { step = .result(.submitted) }
+            let autoAccepted = try await jobStore.apply(to: job)
+            withAnimation { step = .result(autoAccepted ? .booked : .submitted) }
         } catch let applyError as ApplyError {
             switch applyError {
             case .shiftTaken:         withAnimation { step = .result(.shiftAlreadyTaken) }
@@ -142,6 +146,7 @@ struct ApplyFlowView: View {
             case .schedulingConflict: withAnimation { step = .result(.schedulingConflict) }
             case .accountPaused:      withAnimation { step = .result(.accountPaused) }
             case .blocked:            withAnimation { step = .result(.blocked) }
+            case .tryAgain:           withAnimation { step = .result(.connectionLost) }
             }
         } catch {
             withAnimation { step = .result(.connectionLost) }
@@ -413,13 +418,31 @@ private struct ConfirmationView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 14))
                     }
 
+                    // Instant Match: Hinweis auf sofortige Buchung
+                    if job.instantMatch {
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: "bolt.fill")
+                                .foregroundColor(SS.primary)
+                                .font(.system(size: 15))
+                                .padding(.top, 1)
+                            Text("You'll be booked immediately — no waiting for approval.")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(.primary)
+                        }
+                        .padding(12)
+                        .background(SS.primary.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+
                     // Rechtlicher Hinweis
                     HStack(alignment: .top, spacing: 10) {
                         Image(systemName: "info.circle.fill")
                             .foregroundColor(.orange)
                             .font(.system(size: 15))
                             .padding(.top, 1)
-                        Text("Applying does not commit you to anything until confirmed. The employer will review your profile and get back to you via chat.")
+                        Text(job.instantMatch
+                             ? "Spots are limited. If all spots are filled by the time you apply, your application stays pending and the employer will review it."
+                             : "Applying does not commit you to anything until confirmed. The employer will review your profile and get back to you via chat.")
                             .font(.system(size: 12))
                             .foregroundColor(.secondary)
                     }
@@ -531,7 +554,7 @@ struct ApplyResultView: View {
     /// statt immer nur das Sheet zu schließen (dismiss)
     private func primaryAction() {
         switch result {
-        case .submitted:
+        case .submitted, .booked:
             onDone()
         case .connectionLost:
             onRetry()
@@ -625,6 +648,16 @@ private struct ResultConfig {
             iconBackground  = SS.primary
             title           = "Application Submitted!"
             message         = "Your application to \(job.company) was successfully submitted. You'll receive a reply in chat."
+            primaryActionLabel   = "Done"
+            primaryActionColor   = SS.primary
+            secondaryActionLabel = nil
+
+        case .booked:
+            iconName        = "bolt.circle.fill"
+            iconColor       = .white
+            iconBackground  = SS.primary
+            title           = "You're booked!"
+            message         = "\(job.company) uses Instant Match, so your spot is confirmed. Find the details in your chat and calendar."
             primaryActionLabel   = "Done"
             primaryActionColor   = SS.primary
             secondaryActionLabel = nil

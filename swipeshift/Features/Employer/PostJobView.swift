@@ -124,6 +124,26 @@ struct PostJobView: View {
     @State private var selectedPayFreq = ""
     @State private var selectedContractType = ""
 
+    // Optionale Zusatzfelder
+    @State private var requiredSkills: Set<String> = []
+    @State private var physicalRequirements: Set<String> = []
+    @State private var certifications: Set<String> = []
+    @State private var educationLevel = ""
+    @State private var workAuthorizationRequired = false
+    @State private var isUrgent = false
+    @State private var multipleLocations = false
+    @State private var breakIncluded = false
+    @State private var breakMinutes = 30
+    @State private var sameDayPay = false
+    @State private var tipsIncluded = false
+    @State private var repeatWork = false
+    @State private var bonusAvailable = false
+    @State private var bonusDescription = ""
+    @State private var cancellationPolicy = ""      // JobCancellationPolicy.rawValue oder ""
+    @State private var cancellationNotes = ""
+    @State private var jobNotes = ""
+    @State private var instantMatch = false
+
     // Sheets & Alerts
     @State private var showConfirmSheet = false
     @State private var pendingStatus: String = "published"
@@ -158,6 +178,8 @@ struct PostJobView: View {
                         tasksSection
                         requirementsSection
                         paymentSection
+                        applicationsSection
+                        cancellationSection
                         Spacer().frame(height: 110)
                     }
                 }
@@ -396,8 +418,33 @@ struct PostJobView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
                 .buttonStyle(.plain)
+
+                shiftOptionsCard
             }
         }
+    }
+
+    // Dringlichkeit, Standorttyp, Pause (alles optional)
+    private var shiftOptionsCard: some View {
+        VStack(spacing: 0) {
+            ToggleRow(label: "Urgent (needs workers fast)", isOn: $isUrgent)
+            Divider().padding(.leading, 16)
+            ToggleRow(label: "Work at multiple locations", isOn: $multipleLocations)
+            Divider().padding(.leading, 16)
+            ToggleRow(label: "Break included", isOn: $breakIncluded)
+            if breakIncluded {
+                Divider().padding(.leading, 16)
+                FormRow(label: "Break length") {
+                    Picker("", selection: $breakMinutes) {
+                        ForEach(JobOptions.breakMinutes, id: \.self) { Text("\($0) min").tag($0) }
+                    }
+                    .pickerStyle(.menu)
+                    .tint(SS.primary)
+                }
+            }
+        }
+        .background(Color(uiColor: .systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
     // MARK: - Mitarbeiter & Lohn
@@ -516,6 +563,18 @@ struct PostJobView: View {
                 }
                 Divider().padding(.leading, 16)
 
+                // Optionale Anforderungen
+                MultiPickerRow(label: "Required Skills", options: JobOptions.skills, selected: $requiredSkills)
+                Divider().padding(.leading, 16)
+                MultiPickerRow(label: "Physical Requirements", options: JobOptions.physical, selected: $physicalRequirements)
+                Divider().padding(.leading, 16)
+                MultiPickerRow(label: "Certifications", options: JobOptions.certifications, selected: $certifications)
+                Divider().padding(.leading, 16)
+                PickerRow(label: "Education", options: JobOptions.education, selection: $educationLevel)
+                Divider().padding(.leading, 16)
+                ToggleRow(label: "Work authorization required", isOn: $workAuthorizationRequired)
+                Divider().padding(.leading, 16)
+
                 // Experience Level (Radio Buttons)
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Experience Level")
@@ -561,6 +620,63 @@ struct PostJobView: View {
                 PickerRow(label: "Payment Frequency", options: payFreqOptions, selection: $selectedPayFreq)
                 Divider().padding(.leading, 16)
                 PickerRow(label: "Contract Type", options: contractTypeOptions, selection: $selectedContractType)
+                Divider().padding(.leading, 16)
+                ToggleRow(label: "Same-day pay", isOn: $sameDayPay)
+                Divider().padding(.leading, 16)
+                ToggleRow(label: "Tips included", isOn: $tipsIncluded)
+                Divider().padding(.leading, 16)
+                ToggleRow(label: "Bonus available", isOn: $bonusAvailable)
+                if bonusAvailable {
+                    Divider().padding(.leading, 16)
+                    LimitedTextField(placeholder: "Describe the bonus (optional)", text: $bonusDescription, limit: 200, lines: 1...3)
+                }
+                Divider().padding(.leading, 16)
+                ToggleRow(label: "Repeat work possible", isOn: $repeatWork)
+            }
+            .background(Color(uiColor: .systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
+    }
+
+    // MARK: - Instant Match
+    private var applicationsSection: some View {
+        FormSection(title: "Applications") {
+            VStack(alignment: .leading, spacing: 0) {
+                ToggleRow(label: "Instant Match", isOn: $instantMatch)
+                Text("Qualified applicants are accepted automatically until all spots are filled.")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
+            }
+            .background(Color(uiColor: .systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
+    }
+
+    // MARK: - Cancellation & Notes
+    private var cancellationSection: some View {
+        FormSection(title: "Cancellation & Notes") {
+            VStack(spacing: 0) {
+                HStack {
+                    Text("Cancellation policy")
+                        .font(.system(size: 14))
+                        .foregroundColor(.secondary)
+                        .padding(.leading, 16)
+                    Spacer()
+                    Picker("", selection: $cancellationPolicy) {
+                        Text("Please select").tag("")
+                        ForEach(JobCancellationPolicy.allCases) { Text($0.label).tag($0.rawValue) }
+                    }
+                    .pickerStyle(.menu)
+                    .tint(SS.primary)
+                    .padding(.trailing, 8)
+                }
+                .padding(.vertical, 6)
+                Divider().padding(.leading, 16)
+                LimitedTextField(placeholder: "Cancellation notes (optional)", text: $cancellationNotes, limit: 300, lines: 2...5)
+                Divider().padding(.leading, 16)
+                LimitedTextField(placeholder: "Notes for workers, e.g. meeting point or parking (optional)", text: $jobNotes, limit: 500, lines: 2...6)
             }
             .background(Color(uiColor: .systemBackground))
             .clipShape(RoundedRectangle(cornerRadius: 14))
@@ -652,9 +768,32 @@ struct PostJobView: View {
             selectedExpLevel = job.experienceLevel ?? ""
             selectedPayFreq = job.paymentMethod ?? ""
             selectedContractType = job.contractType ?? ""
+            requiredSkills = Set(job.requiredSkills ?? [])
+            physicalRequirements = Set(job.physicalRequirements ?? [])
+            certifications = Set(job.certifications ?? [])
+            educationLevel = job.educationLevel ?? ""
+            workAuthorizationRequired = job.workAuthorizationRequired ?? false
+            isUrgent = job.urgency == "urgent"
+            multipleLocations = job.locationType == "multiple"
+            breakIncluded = job.breakIncluded ?? false
+            breakMinutes = job.breakMinutes ?? 30
+            sameDayPay = job.sameDayPay ?? false
+            tipsIncluded = job.tipsIncluded ?? false
+            repeatWork = job.repeatWork ?? false
+            bonusAvailable = job.bonusAvailable ?? false
+            bonusDescription = job.bonusDescription ?? ""
+            cancellationPolicy = job.cancellationPolicy ?? ""
+            cancellationNotes = job.cancellationNotes ?? ""
+            jobNotes = job.jobNotes ?? ""
+            instantMatch = job.instantMatch ?? false
         } catch {
             draftLoadError = error.localizedDescription
         }
+    }
+
+    private func trimmedOrNil(_ text: String) -> String? {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? nil : t
     }
 
     // MARK: - Submit
@@ -687,7 +826,26 @@ struct PostJobView: View {
             minAge: Int(minAgeText),
             paymentMethod: selectedPayFreq.isEmpty ? nil : selectedPayFreq,
             contractType: selectedContractType.isEmpty ? nil : selectedContractType,
-            status: pendingStatus
+            status: pendingStatus,
+            requiredSkills: Array(requiredSkills),
+            physicalRequirements: Array(physicalRequirements),
+            certifications: Array(certifications),
+            educationLevel: educationLevel.isEmpty ? nil : educationLevel,
+            workAuthorizationRequired: workAuthorizationRequired,
+            urgency: isUrgent ? "urgent" : "normal",
+            locationType: multipleLocations ? "multiple" : "single",
+            breakIncluded: breakIncluded,
+            breakMinutes: breakIncluded ? breakMinutes : nil,
+            sameDayPay: sameDayPay,
+            tipsIncluded: tipsIncluded,
+            repeatWork: repeatWork,
+            bonusAvailable: bonusAvailable,
+            bonusDescription: bonusAvailable ? trimmedOrNil(bonusDescription) : nil,
+            cancellationPolicy: cancellationPolicy.isEmpty ? nil : cancellationPolicy,
+            cancellationNotes: trimmedOrNil(cancellationNotes),
+            jobNotes: trimmedOrNil(jobNotes),
+            instantMatch: instantMatch,
+            termsAccepted: pendingStatus == "published"   // Checkbox im Confirm-Sheet ist Pflicht fuer "Post Job"
         )
 
         do {
@@ -714,6 +872,9 @@ struct PostJobConfirmSheet: View {
     let onSaveAsDraft: () -> Void
     let onPost: () -> Void
     let onCancel: () -> Void
+
+    // Pflicht-Zustimmung beim Veroeffentlichen (Drafts brauchen sie nicht)
+    @State private var termsAccepted = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -761,9 +922,16 @@ struct PostJobConfirmSheet: View {
             }
             .padding(.bottom, 24)
 
+            if !isDraft {
+                TermsConsentRow(isAccepted: $termsAccepted)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 16)
+            }
+
             Divider()
 
             VStack(spacing: 10) {
+                let publishBlocked = !isDraft && !termsAccepted
                 Button(isDraft ? "Save as Draft" : "Publish Now") {
                     isDraft ? onSaveAsDraft() : onPost()
                 }
@@ -771,8 +939,9 @@ struct PostJobConfirmSheet: View {
                 .foregroundColor(.white)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)
-                .background(isDraft ? Color.orange : SS.primary)
+                .background(publishBlocked ? Color.gray.opacity(0.35) : (isDraft ? Color.orange : SS.primary))
                 .clipShape(RoundedRectangle(cornerRadius: 14))
+                .disabled(publishBlocked)
 
                 if !isDraft {
                     Button("Save as Draft") { onSaveAsDraft() }
@@ -791,8 +960,76 @@ struct PostJobConfirmSheet: View {
             .padding(.bottom, 32)
         }
         .background(Color(uiColor: .systemGroupedBackground))
-        .presentationDetents([.medium])
+        .presentationDetents(isDraft ? [.medium] : [.fraction(0.8), .large])
         .presentationDragIndicator(.hidden)
+    }
+}
+
+// MARK: - TermsConsentRow (Pflicht-Checkbox beim Veroeffentlichen, auch in AllPostedJobsView)
+struct TermsConsentRow: View {
+    @Binding var isAccepted: Bool
+
+    var body: some View {
+        Button { isAccepted.toggle() } label: {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: isAccepted ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 20))
+                    .foregroundColor(isAccepted ? SS.primary : .gray.opacity(0.5))
+                Text("I agree to the SwipeShift Terms for Employers and confirm this job information is accurate.")
+                    .font(.system(size: 13))
+                    .foregroundColor(.primary)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(14)
+            .background(Color(uiColor: .secondarySystemGroupedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isAccepted ? .isSelected : [])
+    }
+}
+
+// MARK: - ToggleRow
+private struct ToggleRow: View {
+    let label: String
+    @Binding var isOn: Bool
+
+    var body: some View {
+        Toggle(isOn: $isOn) {
+            Text(label)
+                .font(.system(size: 14))
+                .foregroundColor(.primary)
+        }
+        .tint(SS.primary)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(Color(uiColor: .systemBackground))
+    }
+}
+
+// MARK: - LimitedTextField (mehrzeilig mit Zeichenlimit + Zaehler)
+private struct LimitedTextField: View {
+    let placeholder: String
+    @Binding var text: String
+    let limit: Int
+    let lines: ClosedRange<Int>
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 4) {
+            TextField(placeholder, text: $text, axis: .vertical)
+                .lineLimit(lines)
+                .font(.system(size: 15))
+                .onChange(of: text) { _, newValue in
+                    if newValue.count > limit { text = String(newValue.prefix(limit)) }
+                }
+            Text("\(text.count)/\(limit)")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(Color(uiColor: .systemBackground))
     }
 }
 
@@ -1076,4 +1313,23 @@ struct EditableJob: Decodable {
     let experienceLevel: String?
     let paymentMethod: String?
     let contractType: String?
+    // Optionale Zusatzfelder (fehlende Keys → nil)
+    let requiredSkills: [String]?
+    let physicalRequirements: [String]?
+    let certifications: [String]?
+    let educationLevel: String?
+    let workAuthorizationRequired: Bool?
+    let urgency: String?
+    let locationType: String?
+    let breakIncluded: Bool?
+    let breakMinutes: Int?
+    let sameDayPay: Bool?
+    let tipsIncluded: Bool?
+    let repeatWork: Bool?
+    let bonusAvailable: Bool?
+    let bonusDescription: String?
+    let cancellationPolicy: String?
+    let cancellationNotes: String?
+    let jobNotes: String?
+    let instantMatch: Bool?
 }

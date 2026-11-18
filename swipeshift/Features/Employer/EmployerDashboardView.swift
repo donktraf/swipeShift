@@ -70,7 +70,17 @@ struct EmployerDashboardView: View {
         return items
     }
 
-    private var trends: [TrendItem] {[
+    private var trends: [TrendItem] {
+        var items = baseTrends
+        // Instant Matches (automatisch angenommen) separat von "New Applications"; nur wenn vorhanden
+        if let instant = stats?.instantMatchesThisWeek, instant > 0 {
+            items.insert(TrendItem(value: "\(instant)", label: "Instant Matches",
+                                   delta: "this week", deltaPositive: true, icon: "bolt.fill"), at: 2)
+        }
+        return items
+    }
+
+    private var baseTrends: [TrendItem] {[
         TrendItem(value: "\(stats?.jobsFilledThisWeek ?? 0)", label: "Jobs Filled",
                   delta: "this week", deltaPositive: true, icon: "checkmark.circle"),
         TrendItem(value: "\(stats?.applicationsThisWeek ?? 0)", label: "New Applications",

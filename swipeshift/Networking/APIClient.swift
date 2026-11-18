@@ -15,6 +15,7 @@ enum ApplyError: Error {
     case schedulingConflict
     case accountPaused
     case blocked
+    case tryAgain   // Backend: TRY_AGAIN (viele parallele Bewerbungen) → wie Verbindungsfehler behandeln
 }
 
 // Einfacher API-Client fürs MVP (später: Error-Typen, Refresh-Token, etc.)
@@ -65,13 +66,16 @@ final class APIClient {
         return try JSONDecoder().decode(R.self, from: data).job.toDomain()
     }
 
-    func apply(jobId: String) async throws {
+    /// Liefert `true`, wenn die Bewerbung per Instant Match sofort angenommen wurde.
+    @discardableResult
+    func apply(jobId: String) async throws -> Bool {
         let req = try makeRequest(path: "/jobs/\(jobId)/apply", method: "POST")
         let (data, response) = try await URLSession.shared.data(for: req)
         if let http = response as? HTTPURLResponse, http.statusCode != 200 {
             if let body = try? JSONDecoder().decode([String: String].self, from: data),
                let code = body["error"] {
                 if body["code"] == "BLOCKED" { throw ApplyError.blocked }
+                if body["code"] == "TRY_AGAIN" { throw ApplyError.tryAgain }
                 switch code {
                 case "SHIFT_TAKEN":          throw ApplyError.shiftTaken
                 case "JOB_UNAVAILABLE":      throw ApplyError.jobUnavailable
@@ -82,6 +86,8 @@ final class APIClient {
             }
             throw URLError(.badServerResponse)
         }
+        struct ApplyResponse: Decodable { let autoAccepted: Bool? }
+        return (try? JSONDecoder().decode(ApplyResponse.self, from: data))?.autoAccepted ?? false
     }
 
     func skip(jobId: String) async throws {
@@ -616,9 +622,11 @@ final class APIClient {
 
     // PATCH /jobs/:id/status
     /// `reason` nur beim Stornieren relevant (optional, wird Workern im Kalender angezeigt)
-    func updateJobStatus(jobId: String, status: String, reason: String? = nil) async throws {
+    /// `termsAccepted` ist beim Veroeffentlichen eines Entwurfs Pflicht (Backend: TERMS_REQUIRED)
+    func updateJobStatus(jobId: String, status: String, reason: String? = nil, termsAccepted: Bool = false) async throws {
         var req = try makeRequest(path: "/jobs/\(jobId)/status", method: "PATCH")
-        var body: [String: String] = ["status": status]
+        var body: [String: Any] = ["status": status]
+        if termsAccepted { body["termsAccepted"] = true }
         if let reason, !reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { body["reason"] = reason }
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, response) = try await URLSession.shared.data(for: req)

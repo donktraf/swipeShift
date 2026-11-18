@@ -55,6 +55,7 @@ struct ApplicantCard: View {
                         .foregroundColor(.primary)
                     if summary?.isAdult == true { AdultBadge() }
                     Spacer()
+                    if applicant.autoAccepted == true { InstantMatchPill() }
                     stateBadge
                     if let onSave {
                         Button(action: onSave) {
@@ -174,5 +175,19 @@ struct ApplicantCard: View {
             .padding(.horizontal, 8).padding(.vertical, 3)
             .background(bg)
             .clipShape(Capsule())
+    }
+}
+
+/// Kleine Markierung fuer automatisch angenommene Bewerber/Worker (Instant Match)
+struct InstantMatchPill: View {
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "bolt.fill").font(.system(size: 9, weight: .bold))
+            Text("Instant Match").font(.system(size: 11, weight: .semibold))
+        }
+        .foregroundColor(SS.primary)
+        .padding(.horizontal, 8).padding(.vertical, 3)
+        .background(SS.primary.opacity(0.12))
+        .clipShape(Capsule())
     }
 }

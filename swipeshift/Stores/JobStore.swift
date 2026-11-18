@@ -196,11 +196,14 @@ final class JobStore: ObservableObject {
 
     /// Bewirbt sich auf einen Job.
     /// Entfernt nur aus swipeJobs — Radar, Dashboard und andere Bereiche bleiben unberührt.
+    /// Rueckgabe: `true` bei sofortiger Annahme (Instant Match).
     @MainActor
-    func apply(to job: Job) async throws {
+    @discardableResult
+    func apply(to job: Job) async throws -> Bool {
         errorMessage = nil
-        try await APIClient.shared.apply(jobId: job.id)
+        let autoAccepted = try await APIClient.shared.apply(jobId: job.id)
         swipeJobs.removeAll { $0.id == job.id }
+        return autoAccepted
     }
 
     // MARK: - Helper
