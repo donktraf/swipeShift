@@ -858,3 +858,10 @@ Gefunden beim Profile-Screen-Abgleich: Legal-Schalter (Worker + Arbeitgeber) und
 - Schlüsselrotation (`scripts/rotate-totp-key.js`) erfasst jetzt auch die Bankdaten — live getestet inkl. TOTP
 - IBAN komplett entfernt; Migration `20261118200000_remove_stored_iban` löscht gespeicherte IBANs (nur Daten, lokal angewendet)
 - Offen: erneute Anmeldung (Passwort/2FA) vor Änderung der Auszahlungsdaten; echte Auszahlungen (Zahlungsanbieter)
+
+### Erneute Anmeldung vor Änderung der Auszahlungsdaten (2026-11-18)
+- Änderungen an Bankdaten, PayPal oder Auszahlungsmethode brauchen eine Bestätigung auf dem aktuellen Gerät (10 Minuten gültig, `UserSession.reauthAt`), sonst 403 `REAUTH_REQUIRED` und nichts wird gespeichert; Frequenz und Benachrichtigungen ohne Bestätigung
+- Methoden: Authenticator-/Backup-Code (falls 2FA per App), Passwort (falls vorhanden), E-Mail-Code nur für Konten ohne beides (Google/Apple); serverseitig erzwungen
+- Eigene Fehlversuchssperre (getrennt vom 2FA-Login), E-Mail-Code mit eigenem Zweck, einmalig, max. 5 Versuche (`CODE_ATTEMPTS_EXCEEDED`); Bestätigung verfällt bei Passwort-/2FA-/Backup-Code-Änderung
+- App: „Confirm it's you“-Sheet beim Speichern, danach automatisch erneut gespeichert
+- Backend: `src/utils/reauth.js` (+ Tests), Endpunkte `/auth/me/reauth*`; Migration `20261118210000_session_reauth` (lokal angewendet)
