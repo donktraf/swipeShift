@@ -56,6 +56,8 @@ model User {
   settings Json?
   // Konto pausiert: Worker kann sich nicht bewerben, Jobs eines Employers sind ausgeblendet
   pausedAt DateTime?
+  // IANA-Zeitzone des Geraets (Header X-Time-Zone) → Ruhezeiten fuer Push, siehe src/utils/notifyPolicy.js
+  timeZone String?
 
   // Rechtliche Zustimmungen: Map Consent-Key -> ISO-Zeitstempel (Widerruf = Key entfernt), siehe src/utils/consents.js
   legalConsents Json?
@@ -68,6 +70,7 @@ model User {
   applies Apply[]
   savedCompanies SavedCompany[]
   sessions UserSession[]
+  pushDevices PushDevice[]
   twoFactorCodes TwoFactorCode[]
   blocksGiven    UserBlock[]  @relation("BlocksGiven")
   blocksReceived UserBlock[]  @relation("BlocksReceived")
@@ -92,6 +95,21 @@ model UserSession {
   revokedAt    DateTime?
 
   @@index([userId])
+}
+
+// APNs-Geraetetoken pro Login-Sitzung (Push-Benachrichtigungen). Wird mit der Session geloescht.
+model PushDevice {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token       String   @unique
+  environment String   // "sandbox" | "production"
+  sessionId   String?
+  createdAt   DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+
+  @@index([userId])
+  @@index([sessionId])
 }
 
 enum TwoFactorPurpose {
@@ -297,6 +315,8 @@ model Job {
   termsAcceptedAt       DateTime?
   // Zeitpunkt, zu dem der Employer die Bewerberliste dieses Jobs zuletzt geoeffnet hat ("New Matches")
   applicantsSeenAt      DateTime?
+  // "Payment open"-Hinweis an den Employer (Job vorbei, unbezahlte Worker) bereits verschickt
+  paymentReminderSentAt DateTime?
 
   // Categorisation
   tags      String[]
@@ -329,6 +349,8 @@ model Apply {
   createdAt DateTime @default(now())
   // Erste Antwort des Employers (accept/decline) → Response Rate + Response Time im Company-Profil
   respondedAt DateTime?
+  // Schicht-Erinnerung (Push/Mail, ~24h vorher) bereits verschickt → genau einmal (bedingtes updateMany als Claim)
+  reminderSentAt DateTime?
 
   user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   job            Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)
@@ -419,6 +441,10 @@ model Conversation {
   employerLastReadAt DateTime?
   workerTypingAt     DateTime?
   employerTypingAt   DateTime?
+
+  // Zeitpunkt der letzten Ungelesen-Mail pro Empfaenger (max. 1 Mail pro Konversation und Stunde)
+  workerEmailNotifiedAt   DateTime?
+  employerEmailNotifiedAt DateTime?
 
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt

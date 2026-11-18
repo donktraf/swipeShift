@@ -1,6 +1,7 @@
 // src/routes.worker.js
 
 const express = require("express");
+const events = require("./notifyEvents");
 const { prisma } = require("./prisma");
 const { requireAuth } = require("./auth");
 const { requireVerifiedEmail } = require("./middlewares/requireVerifiedEmail");
@@ -280,6 +281,7 @@ router.post("/reviews", requireAuth, requireVerifiedEmail, async (req, res) => {
       return res.status(400).json({ error: "You can rate an employer once the job is completed." });
     }
 
+    const existingReview = await prisma.workerReview.findUnique({ where: { applyId }, select: { id: true } });
     const review = await prisma.workerReview.upsert({
       where:  { applyId },
       create: {
@@ -306,6 +308,8 @@ router.post("/reviews", requireAuth, requireVerifiedEmail, async (req, res) => {
       },
     });
 
+    // Nur bei neuer Bewertung (nicht beim Bearbeiten) benachrichtigen; fire-and-forget
+    if (!existingReview) events.reviewReceived({ fromUserId: workerId, toUserId: apply.job?.employerId, jobId: apply.jobId });
     return res.json({ ok: true, review });
   } catch (err) {
     if (err?.code === "P2002") return res.status(409).json({ error: "You have already rated this employer." });

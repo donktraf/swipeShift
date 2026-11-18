@@ -2,11 +2,14 @@
 const jwt = require("jsonwebtoken");
 const { shouldTouchLastSeen } = require("./utils/chatPresence");
 const { sanitizeCity } = require("./utils/deviceInfo");
+const { sanitizeTimeZone } = require("./utils/notifyPolicy");
+const { setBounded, shouldWriteTimeZone } = require("./utils/boundedCache");
 
 // In-Memory-Drosselung fuer lastSeenAt/lastActiveAt-Updates (pro Prozess), damit nicht jeder
 // Request einen DB-Write ausloest. Verlust bei Neustart ist unkritisch.
 const lastSeenTouches = new Map();
 const sessionTouches = new Map();
+const timeZoneCache = new Map(); // userId → { zone, at } (Write nur bei Aenderung, max. alle 10 min pro User)
 
 // Lazy require, um Ladezyklen zu vermeiden
 function db() {
@@ -16,7 +19,7 @@ function db() {
 function touchLastSeen(userId) {
   const now = Date.now();
   if (!shouldTouchLastSeen(lastSeenTouches.get(userId), now)) return;
-  lastSeenTouches.set(userId, now);
+  setBounded(lastSeenTouches, userId, now);
   // Fire-and-forget, Fehler blockieren nie den Request
   db()
     .user.update({ where: { id: userId }, data: { lastSeenAt: new Date(now) } })
@@ -26,10 +29,22 @@ function touchLastSeen(userId) {
 function touchSession(sessionId, city) {
   const now = Date.now();
   if (!shouldTouchLastSeen(sessionTouches.get(sessionId), now)) return;
-  sessionTouches.set(sessionId, now);
+  setBounded(sessionTouches, sessionId, now);
   db()
     .userSession.update({ where: { id: sessionId }, data: { lastActiveAt: new Date(now), ...(city ? { city } : {}) } })
     .catch(() => sessionTouches.delete(sessionId));
+}
+
+// X-Time-Zone (IANA) → User.timeZone fuer Ruhezeiten; ungueltige Werte werden ignoriert. Schreibt nur bei Aenderung.
+function touchTimeZone(userId, rawZone) {
+  const zone = sanitizeTimeZone(rawZone);
+  const now = Date.now();
+  const previous = timeZoneCache.get(userId);
+  if (!shouldWriteTimeZone(previous, zone, now)) return;
+  setBounded(timeZoneCache, userId, { zone, at: now });
+  db()
+    .user.update({ where: { id: userId }, data: { timeZone: zone } })
+    .catch(() => { if (previous) setBounded(timeZoneCache, userId, previous); else timeZoneCache.delete(userId); });
 }
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev_secret_change_me";
@@ -93,6 +108,7 @@ async function requireAuth(req, res, next) {
   req.auth = payload; // { sub, role, email, sid, iat, exp }
   touchLastSeen(payload.sub);
   touchSession(payload.sid, sanitizeCity(req.headers["x-device-city"]));
+  touchTimeZone(payload.sub, req.headers["x-time-zone"]);
   next();
 }
 

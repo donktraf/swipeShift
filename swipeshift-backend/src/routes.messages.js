@@ -3,6 +3,7 @@ const express = require("express");
 const router  = express.Router();
 const { prisma } = require("./prisma.js");
 const { requireAuth } = require("./auth");
+const events = require("./notifyEvents");
 const {
   isTyping, isOnline, isReadByOther, participantFields,
 } = require("./utils/chatPresence");
@@ -277,6 +278,8 @@ router.post("/:conversationId", requireAuth, handle("POST /messages/:conversatio
     where: { id: conversationId },
     data: { updatedAt: new Date(), [myTypingField]: null },
   });
+
+  events.newChatMessage({ conversationId, senderId: userId, recipientId: peerId, text: message.text }); // fire-and-forget (Push)
 
   return res.json(formatMessage(message, userId, null));
 }));

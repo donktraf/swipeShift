@@ -12,6 +12,7 @@ const { passwordResetEmail } = require("./emails/passwordResetEmail");
 const { OAuth2Client } = require("google-auth-library");
 const { createRemoteJWKSet, jwtVerify } = require("jose");
 const { requireAuth } = require("./auth");
+const { removeDevicesForSessions } = require("./pushDevices");
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID; // iOS ClientID
 const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID);
@@ -452,6 +453,7 @@ router.post("/reset-password", mailLimiter, async (req, res) => {
       data: { revokedAt: new Date() },
     }),
   ]);
+  await removeDevicesForSessions({ userId: user.id }); // alle Sessions widerrufen → keine Pushes mehr
 
   return res.json({
     ok: true
@@ -713,6 +715,7 @@ router.post("/change-password", requireAuth, async (req, res) => {
       data: { revokedAt: new Date() },
     }),
   ]);
+  await removeDevicesForSessions({ userId, sessionId: { not: req.auth.sid } }); // andere Geraete abgemeldet
   return res.json({ ok: true });
 });
 

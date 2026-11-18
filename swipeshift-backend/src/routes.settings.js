@@ -9,6 +9,7 @@ const express = require("express");
 const { z } = require("zod");
 const { prisma } = require("./prisma.js");
 const { requireAuth } = require("./auth");
+const events = require("./notifyEvents");
 const { applyPatch, publicSettings } = require("./utils/settings");
 
 const router = express.Router();
@@ -50,11 +51,14 @@ router.post("/me/pause", requireAuth, async (req, res) => {
   const parsed = z.object({ paused: z.boolean() }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid input" });
   try {
+    const before = await prisma.user.findUnique({ where: { id: req.auth.sub }, select: { pausedAt: true } });
     const updated = await prisma.user.update({
       where: { id: req.auth.sub },
       data: { pausedAt: parsed.data.paused ? new Date() : null },
       select: { pausedAt: true },
     });
+    // Nur bei echtem Wechsel benachrichtigen (account-Kategorie, geht auch im pausierten Zustand); fire-and-forget
+    if (!!before?.pausedAt !== !!updated.pausedAt) events.accountPauseChanged(req.auth.sub, !!updated.pausedAt);
     return res.json({ paused: !!updated.pausedAt });
   } catch (err) {
     console.error("POST /auth/me/pause error:", err);

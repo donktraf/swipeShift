@@ -2,6 +2,7 @@
 
 const { reviewOverall } = require("./utils/reviewLogic");
 const express = require("express");
+const events = require("./notifyEvents");
 const { prisma } = require("./prisma");
 const { requireAuth } = require("./auth");
 const { requireVerifiedEmail } = require("./middlewares/requireVerifiedEmail");
@@ -482,6 +483,13 @@ router.post("/:id/apply", requireAuth, requireVerifiedEmail, async (req, res) =>
       }
     }
 
+    // Employer benachrichtigen (nur bei neuer Bewerbung, nicht bei erneutem Apply); fire-and-forget
+    if (result.isNew) {
+      events.workerApplied({
+        employerId: job.employerId, workerId: userId, jobId, jobTitle: job.title,
+        autoAccepted: result.apply.autoAccepted === true && result.apply.status === "accepted",
+      });
+    }
     return res.json({ ok: true, conversationId: result.conversation.id, autoAccepted: result.apply.autoAccepted === true });
   } catch (err) {
     console.error("POST /jobs/:id/apply error:", err);
@@ -684,6 +692,8 @@ router.patch("/:id/status", requireAuth, requireVerifiedEmail, async (req, res) 
     }
     const updated = await prisma.job.findUnique({ where: { id: jobId } });
 
+    if (status === "cancelled") events.jobCancelled(jobId);      // fire-and-forget
+    if (status === "completed") events.paymentOpen(jobId);       // fire-and-forget (einmal pro Job)
     console.log(`PATCH /jobs/${jobId}/status → ${status}`);
     return res.json({ job: updated });
   } catch (err) {

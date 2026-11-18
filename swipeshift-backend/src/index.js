@@ -20,6 +20,8 @@ const messagesRoutes        = require("./routes.messages");
 const companiesRoutes       = require("./routes.companies");
 const notificationsRoutes   = require("./routes.notifications");
 const safetyRoutes          = require("./routes.safety");
+const pushDeviceRoutes      = require("./routes.pushDevices");
+const { startScheduler }    = require("./scheduler");
 
 // Produktion ohne TOTP_ENCRYPTION_KEY → Start abbrechen (Secrets nie unverschluesselt)
 require("./utils/totp").assertTotpConfig(); // Fehlender/ungueltiger Key → Startabbruch (Dev-Fallback nur NODE_ENV=development|test)
@@ -47,6 +49,7 @@ app.use("/auth",      meRoutes);
 app.use("/auth",      authRoutes);
 app.use("/auth",      securityRoutes);
 app.use("/auth",      settingsRoutes);
+app.use("/auth",      pushDeviceRoutes);
 app.use("/jobs",      jobsRoutes);
 app.use("/onboarding", onboardingRoutes);
 app.use("/employer",  employerRoutes);
@@ -60,6 +63,7 @@ const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
   console.log(`Backend running on http://localhost:` + PORT);
+  startScheduler(); // Schicht-Erinnerungen, Ungelesen-Mails, Payment open (aus bei NODE_ENV=test)
 });
 // app.listen(PORT, "0.0.0.0", () => {
 //   console.log(`Backend running on http://localhost:${PORT}`);

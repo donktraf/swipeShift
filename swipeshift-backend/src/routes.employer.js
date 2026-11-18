@@ -1,6 +1,7 @@
 // src/routes.employer.js
 
 const express = require("express");
+const events = require("./notifyEvents");
 const { prisma } = require("./prisma");
 const { requireAuth } = require("./auth");
 const { requireVerifiedEmail } = require("./middlewares/requireVerifiedEmail");
@@ -244,6 +245,7 @@ router.post("/applicants/:applyId/accept", requireAuth, requireVerifiedEmail, as
       // respondedAt nur bei der ERSTEN Antwort setzen (Response Time = Zeit bis zur ersten Reaktion)
       data:  { status: "accepted", autoAccepted: false, ...(apply.respondedAt ? {} : { respondedAt: new Date() }) },
     });
+    if (apply.status !== "accepted") events.applicationDecided(applyId, "accepted"); // fire-and-forget
     console.log(`ACCEPT apply ${applyId} by employer ${employerId}`);
     return res.json({ ok: true, applyId, action: "accepted" });
   } catch (err) {
@@ -272,6 +274,7 @@ router.post("/applicants/:applyId/decline", requireAuth, requireVerifiedEmail, a
       where: { id: applyId },
       data:  { status: "declined", autoAccepted: false, ...(apply.respondedAt ? {} : { respondedAt: new Date() }) },
     });
+    if (apply.status !== "declined") events.applicationDecided(applyId, "declined"); // fire-and-forget
     console.log(`DECLINE apply ${applyId} by employer ${employerId}`);
     return res.json({ ok: true, applyId, action: "declined" });
   } catch (err) {
@@ -600,6 +603,7 @@ router.post("/jobs/:jobId/workers/:applyId/pay", requireAuth, requireVerifiedEma
     if (apply.job.employerId !== employerId) return res.status(403).json({ error: "Forbidden" });
 
     await prisma.apply.update({ where: { id: applyId }, data: { isPaid: true } });
+    if (!apply.isPaid) events.paymentReceived([applyId]); // fire-and-forget
     return res.json({ ok: true, applyId });
   } catch (err) {
     console.error("POST /employer/jobs/:jobId/workers/:applyId/pay error:", err);
@@ -624,10 +628,13 @@ router.post("/jobs/:jobId/pay-all", requireAuth, requireVerifiedEmail, async (re
     if (!job)                          return res.status(404).json({ error: "Job not found" });
     if (job.employerId !== employerId) return res.status(403).json({ error: "Forbidden" });
 
+    // Nur frisch bezahlte Worker benachrichtigen
+    const unpaid = await prisma.apply.findMany({ where: { jobId, status: "accepted", isPaid: false }, select: { id: true } });
     const { count } = await prisma.apply.updateMany({
       where: { jobId, status: "accepted" },
       data:  { isPaid: true },
     });
+    events.paymentReceived(unpaid.map((a) => a.id)); // fire-and-forget
 
     return res.json({ ok: true, updatedCount: count });
   } catch (err) {
@@ -805,6 +812,7 @@ router.post("/reviews", requireAuth, requireVerifiedEmail, async (req, res) => {
       prisma.reviewDraft.deleteMany({ where: { applyId } }),
     ]);
 
+    events.reviewReceived({ fromUserId: employerId, toUserId: apply.userId, jobId: apply.jobId }); // fire-and-forget
     return res.json({ ok: true, review });
   } catch (err) {
     if (err?.code === "P2002") return res.status(409).json({ error: "This worker has already been reviewed." });

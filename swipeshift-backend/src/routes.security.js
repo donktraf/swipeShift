@@ -21,6 +21,7 @@ const express = require("express");
 const rateLimit = require("express-rate-limit");
 const { z } = require("zod");
 const { prisma } = require("./prisma.js");
+const { removeDevicesForSessions } = require("./pushDevices");
 const { requireAuth, JWT_SECRET } = require("./auth");
 const { createSession, authUserPayload, issueTwoFactorCode, issueTotpChallenge } = require("./sessions");
 const { sendMail } = require("./mailer");
@@ -88,6 +89,7 @@ router.post("/sessions/:id/revoke", requireAuth, async (req, res) => {
       data: { revokedAt: new Date() },
     });
     if (count === 0) return res.status(404).json({ error: "Session not found" });
+    await removeDevicesForSessions({ sessionId: req.params.id, userId: req.auth.sub });
     return res.json({ ok: true, revokedCurrent: req.params.id === req.auth.sid });
   } catch (err) {
     console.error("POST /auth/sessions/:id/revoke error:", err);
@@ -101,6 +103,7 @@ router.post("/sessions/revoke-others", requireAuth, async (req, res) => {
       where: { userId: req.auth.sub, revokedAt: null, id: { not: req.auth.sid } },
       data: { revokedAt: new Date() },
     });
+    await removeDevicesForSessions({ userId: req.auth.sub, sessionId: { not: req.auth.sid } });
     return res.json({ ok: true, revoked: count });
   } catch (err) {
     console.error("POST /auth/sessions/revoke-others error:", err);
@@ -114,6 +117,7 @@ router.post("/logout", requireAuth, async (req, res) => {
       where: { id: req.auth.sid, revokedAt: null },
       data: { revokedAt: new Date() },
     });
+    await removeDevicesForSessions({ sessionId: req.auth.sid, userId: req.auth.sub });
     return res.json({ ok: true });
   } catch (err) {
     console.error("POST /auth/logout error:", err);

@@ -7,6 +7,7 @@ const { prisma } = require("./prisma.js");
 const { signToken, JWT_SECRET, SESSION_TTL_MS } = require("./auth");
 const { sendMail } = require("./mailer");
 const { deviceInfoFromRequest } = require("./utils/deviceInfo");
+const { pushTokenFromHeaders } = require("./utils/pushPayload");
 const { generateCode, hashCode, maskEmail, CODE_TTL_MS, TOTP_CHALLENGE_MARKER } = require("./utils/twoFactor");
 
 async function createSession(user, req) {
@@ -17,6 +18,13 @@ async function createSession(user, req) {
       expiresAt: new Date(Date.now() + SESSION_TTL_MS),
     },
   });
+  // Sicherheitsnetz: ein Geraet, das sich jetzt anmeldet, gehoert diesem User. Sendet die App ihr aktuelles Push-Token
+  // mit (X-Push-Token), verlieren andere User ein evtl. noch haengendes Token (z.B. nach Offline-Logout).
+  const pushToken = pushTokenFromHeaders(req?.headers);
+  if (pushToken) {
+    await prisma.pushDevice.deleteMany({ where: { token: pushToken, userId: { not: user.id } } })
+      .catch((err) => console.error("push token takeover cleanup failed:", err));
+  }
   return signToken(user, session.id);
 }
 
