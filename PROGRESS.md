@@ -811,3 +811,12 @@ Gefunden beim Profile-Screen-Abgleich: Legal-Schalter (Worker + Arbeitgeber) und
 - Migration `20261118140000_session_city_totp`
 - Manuell zu prüfen: Einrichtung (falscher/abgelaufener Mailcode, Pending > 15 min), Login mit TOTP/Backup-Code, Sperre (10 Fehlversuche je IP, 50/h gesamt), Downgrade mit altem Mailcode, Abschalten, Backup-Codes neu erzeugen, Schlüsselrotation, Startprüfungen
 - Offen: direkter Wechsel E-Mail → Authenticator in der App (aktuell erst ausschalten)
+
+### Add Job: Zusatzfelder + Instant Match (2026-11-18)
+- Neue Job-Felder: Required Skills, Physical Requirements, Certifications, Education Level, Work Authorization required, Urgency (normal/urgent), Location Type (single/multiple), Break (+ Minuten), Same-Day Pay, Tips, Bonus (+ Text), Repeat Work, Cancellation Policy (+ Notes), Job Notes — im Post-Job-Formular, Draft-Round-Trip, Anzeige in der Jobdetailansicht (nur gesetzte Werte); „Urgent“-Pille auf Jobkarten, dringende Jobs zuerst in „Starting Soon“
+- Terms-Checkbox: Veröffentlichen erfordert `termsAccepted` (POST, PUT, PATCH /status in jedem Wechsel nach published) → sonst 400 `TERMS_REQUIRED`; `Job.termsAcceptedAt`; POST nur draft/published, Draft nur → published/cancelled (409 `INVALID_TRANSITION`)
+- Instant Match: Bewerbung wird automatisch angenommen, solange Plätze frei sind und Mindestalter/Arbeitserlaubnis erfüllt sind (`shouldAutoAccept`), sonst normal pending; Serializable-Transaktion mit Retry, final 409 `TRY_AGAIN`; `Apply.autoAccepted` (bei manueller Aktion zurückgesetzt); Worker sieht „You're booked!“
+- Statistik: auto-angenommene Bewerbungen zählen nicht als „New Applicants“/„needs response“, nicht in Antwortquote/-zeit; eigene Kennzahl „Instant Matches“ (Dashboard) und „Instant“ (Job-Karte); „Auto-accepted“-Pille bei Bewerbern/zugewiesenen Workern. Gebuchte Plätze, Finanzen, Reviews zählen sie als normale Worker
+- Backend-utils: `jobData.js` (Validierung, `evaluateStatusChange`, `shouldAutoAccept`), `applyCounts.js` (+ Tests); Migrationen `20261118160000_job_extra_fields`, `20261118170000_job_extra_fields_backfill` (lokal angewendet)
+- Bewusst nicht umgesetzt: Job-Type-Mehrfachauswahl, Plattformgebühr/Netto-Lohn (kein Gebührenmodell)
+- Offen: Zertifikate bei Instant Match nicht prüfbar (kein Worker-Feld); Statuswechsel außerhalb von Drafts nicht eingeschränkt (z. B. published→draft); PATCH-Veröffentlichen prüft Draft nicht auf Vollständigkeit; `applicantCount` zählt alle manuellen Bewerbungen (Wireframe: nur unbeantwortete)
