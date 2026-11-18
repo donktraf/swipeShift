@@ -933,6 +933,15 @@ struct PrivacyDataView: View {
                     }
                 }
 
+                // Blockierte Nutzer
+                sectionCard("Safety") {
+                    NavigationLink {
+                        BlockedUsersView()
+                    } label: {
+                        SettingsNavRow(icon: "hand.raised.slash.fill", label: "Blocked users")
+                    }
+                }
+
                 // Konto-Status
                 sectionCard("Account Status") {
                     HStack(spacing: 14) {

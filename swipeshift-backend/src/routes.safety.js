@@ -6,6 +6,7 @@ const { requireAuth } = require("./auth");
 const { sendMail } = require("./mailer");
 const rateLimit = require("express-rate-limit");
 const { validateReport } = require("./utils/safety");
+const { buildBlockedList } = require("./utils/blockedUsers");
 
 // Pro User (JWT ist per requireAuth gesetzt, Limiter laeuft danach); Fallback IP
 const keyByUser = (req) => req.auth?.sub || req.ip;
@@ -150,18 +151,13 @@ router.get("/blocks", requireAuth, handle("GET /safety/blocks", async (req, res)
     where: { blockerId: req.auth.sub },
     orderBy: { createdAt: "desc" },
   });
-  const users = await prisma.user.findMany({
-    where: { id: { in: blocks.map(b => b.blockedId) } },
-    select: { id: true, firstName: true, lastName: true },
-  });
-  const map = Object.fromEntries(users.map(u => [u.id, u]));
-  return res.json({
-    blocks: blocks.map(b => ({
-      userId: b.blockedId,
-      name: `${map[b.blockedId]?.firstName ?? ""} ${map[b.blockedId]?.lastName ?? ""}`.trim() || "User",
-      createdAt: b.createdAt,
-    })),
-  });
+  const ids = blocks.map(b => b.blockedId);
+  const [users, employers, workers] = await Promise.all([
+    prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, role: true, firstName: true, lastName: true } }),
+    prisma.employer.findMany({ where: { userId: { in: ids } }, select: { userId: true, companyName: true, companyLogoUrl: true } }),
+    prisma.worker.findMany({ where: { userId: { in: ids } }, select: { userId: true, profilePhotoUrl: true } }),
+  ]);
+  return res.json({ blocks: buildBlockedList(blocks, users, employers, workers) });
 }));
 
 module.exports = router;

@@ -837,3 +837,7 @@ Gefunden beim Profile-Screen-Abgleich: Legal-Schalter (Worker + Arbeitgeber) und
 - Behoben: Bewerberliste des Arbeitgebers lieferte Serverfehler, sobald Bewerber da waren (Profilfoto aus falschem Modell abgefragt, seit März)
 - Backend-utils: `scheduleConflict.js`, `employerJobCard.js`, `workerDetail.js`, `savedCompanyDates.js`, `jobNotes.js` (+ Tests); Migration `20261118180000_applicants_seen_and_not_interested` (lokal angewendet)
 - Verfügbarkeits-Hinweis auch bei den Bewerbern direkt auf der Jobkarte (kompakt, gleicher Wortlaut)
+
+### Liste blockierter Nutzer (2026-11-18)
+- Einstellungen → Privacy & Data → „Blocked users“ (Worker und Arbeitgeber): Foto/Initiale, Name (Arbeitgeber = Firmenname), Rolle, „Blocked on …“, „Unblock“ mit Bestätigung; Lade-, Fehler- und Leerzustand, Erklärung was Blockieren bewirkt
+- Backend: `GET /safety/blocks` liefert zusätzlich Rolle und Foto (gebündelt, `src/utils/blockedUsers.js` + Tests)

@@ -790,6 +790,15 @@ final class APIClient {
         try validate(response: response, data: data)
     }
 
+    func fetchBlockedUsers() async throws -> [BlockedUser] {
+        let req = try makeRequest(path: "/safety/blocks", method: "GET")
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try validate(response: response, data: data)
+        struct W: Decodable { let blocks: [BlockedUser] }
+        let dec = JSONDecoder(); dec.dateDecodingStrategy = .flexibleISO8601
+        return try dec.decode(W.self, from: data).blocks
+    }
+
     func markConversationRead(conversationId: String) async throws {
         let req = try makeRequest(path: "/messages/\(conversationId)/read", method: "PATCH")
         let (data, response) = try await URLSession.shared.data(for: req)
