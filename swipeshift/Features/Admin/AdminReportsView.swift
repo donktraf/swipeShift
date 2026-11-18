@@ -8,7 +8,10 @@
 import SwiftUI
 
 struct AdminReportsView: View {
-    @State private var showClosed = false
+    private enum Mode { case open, closed, reliability }
+
+    @State private var mode: Mode = .open
+    private var showClosed: Bool { mode == .closed }
     @State private var reports: [AdminReport] = []
     @State private var isLoading = true
     @State private var loadError: String?
@@ -16,9 +19,10 @@ struct AdminReportsView: View {
     var body: some View {
         SubScreenShell(title: "Reports") {
             VStack(spacing: 16) {
-                Picker("Status", selection: $showClosed) {
-                    Text("Open").tag(false)
-                    Text("Closed").tag(true)
+                Picker("Status", selection: $mode) {
+                    Text("Open").tag(Mode.open)
+                    Text("Closed").tag(Mode.closed)
+                    Text("Reliability").tag(Mode.reliability)
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal, 16)
@@ -27,12 +31,14 @@ struct AdminReportsView: View {
                     .padding(.horizontal, 16)
             }
         }
-        .task(id: showClosed) { await load() }
+        .task(id: mode) { if mode != .reliability { await load() } }
     }
 
     @ViewBuilder
     private var content: some View {
-        if isLoading {
+        if mode == .reliability {
+            AdminReliabilitySection()
+        } else if isLoading {
             ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
         } else if let loadError {
             VStack(spacing: 10) {
@@ -368,5 +374,140 @@ struct AdminReportDetailView: View {
             actionError = error.localizedDescription
         }
         isWorking = false
+    }
+}
+
+// MARK: - Reliability (auffaellige Worker + Anwesenheits-Einsprueche)
+
+/// Nur ein Hinweis fuer Admins — es gibt keine automatischen Einschraenkungen und keinen Einfluss auf Instant Match.
+struct AdminReliabilitySection: View {
+    @State private var data: AdminReliabilityResponse?
+    @State private var isLoading = true
+    @State private var loadError: String?
+    @State private var resolving: AdminAttendanceDispute?
+    @State private var actionError: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            if isLoading {
+                ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
+            } else if let loadError {
+                VStack(spacing: 10) {
+                    Text(loadError).font(.system(size: 13)).foregroundColor(.red).multilineTextAlignment(.center)
+                    Button("Try again") { Task { await load() } }.buttonStyle(SSPrimaryButtonStyle())
+                }
+                .padding(.vertical, 24)
+            } else if let data {
+                sectionTitle("Open disputes (\(data.disputes.count))")
+                if data.disputes.isEmpty {
+                    emptyText("No open disputes.")
+                } else {
+                    ForEach(data.disputes) { disputeCard($0) }
+                }
+
+                sectionTitle("Conspicuous workers · last \(data.windowDays) days")
+                Text("2 or more no-shows, or 3 or more late cancellations. This is a hint only, nothing is restricted automatically.")
+                    .font(.system(size: 12)).foregroundColor(.white.opacity(0.7))
+                if data.flagged.isEmpty {
+                    emptyText("No conspicuous workers.")
+                } else {
+                    ForEach(data.flagged) { flaggedCard($0) }
+                }
+            }
+        }
+        .task { await load() }
+        .confirmationDialog("Decide dispute", isPresented: Binding(get: { resolving != nil }, set: { if !$0 { resolving = nil } }), titleVisibility: .visible) {
+            if let d = resolving {
+                Button("Keep entry (\(d.status?.label ?? "as recorded"))") { Task { await resolve(d, uphold: true, attendance: nil) } }
+                ForEach(AttendanceStatus.allCases.filter { $0 != d.status }) { status in
+                    Button("Change to \(status.label)") { Task { await resolve(d, uphold: false, attendance: status) } }
+                }
+                Button("Cancel", role: .cancel) {}
+            }
+        } message: {
+            Text("The worker is notified about the decision.")
+        }
+        .alert("Something went wrong", isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })) {
+            Button("OK", role: .cancel) { actionError = nil }
+        } message: { Text(actionError ?? "") }
+    }
+
+    private func sectionTitle(_ text: String) -> some View {
+        Text(text).font(.system(size: 13, weight: .semibold)).foregroundColor(.white.opacity(0.85))
+    }
+
+    private func emptyText(_ text: String) -> some View {
+        Text(text).font(.system(size: 13)).foregroundColor(.white.opacity(0.6)).padding(.vertical, 6)
+    }
+
+    private func pill(_ text: String, color: Color) -> some View {
+        Text(text)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundColor(color)
+            .padding(.horizontal, 8).padding(.vertical, 3)
+            .background(color.opacity(0.12))
+            .clipShape(Capsule())
+    }
+
+    private func flaggedCard(_ f: AdminFlaggedWorker) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            ChatAvatar(photoUrl: nil, emoji: f.worker.initial, size: 44)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(f.worker.name).font(.system(size: 15, weight: .semibold)).lineLimit(1)
+                HStack(spacing: 6) {
+                    if f.noShows > 0 { pill("\(f.noShows) no-show\(f.noShows == 1 ? "" : "s")", color: .red) }
+                    if f.lateCancellations > 0 { pill("\(f.lateCancellations) late cancellation\(f.lateCancellations == 1 ? "" : "s")", color: .orange) }
+                    if f.worker.restriction.isRestricted { pill(f.worker.restriction.label, color: .red) }
+                }
+                Text("\(f.finishedShifts) finished shift\(f.finishedShifts == 1 ? "" : "s") · \(f.late) late")
+                    .font(.system(size: 11)).foregroundColor(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .background(Color(uiColor: .systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: SS.cardRadius))
+        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
+    }
+
+    private func disputeCard(_ d: AdminAttendanceDispute) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(d.worker.name).font(.system(size: 15, weight: .semibold)).lineLimit(1)
+                Spacer()
+                if let status = d.status { pill(status.label, color: status.color) }
+            }
+            Text("\(d.jobTitle) · \(d.company)").font(.system(size: 12)).foregroundColor(.secondary)
+            if let note = d.note {
+                Text("\"\(note)\"").font(.system(size: 13))
+            }
+            Text("Disputed \(d.disputedAt.formatted(date: .abbreviated, time: .shortened))")
+                .font(.system(size: 11)).foregroundColor(.secondary)
+            Button("Decide") { resolving = d }
+                .buttonStyle(SSPrimaryButtonStyle())
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(uiColor: .systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: SS.cardRadius))
+        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
+    }
+
+    @MainActor
+    private func load() async {
+        isLoading = true; loadError = nil
+        do { data = try await APIClient.shared.fetchAdminReliability() }
+        catch { loadError = error.localizedDescription }
+        isLoading = false
+    }
+
+    @MainActor
+    private func resolve(_ d: AdminAttendanceDispute, uphold: Bool, attendance: AttendanceStatus?) async {
+        do {
+            try await APIClient.shared.resolveAttendanceDispute(applyId: d.applyId, uphold: uphold, attendance: attendance)
+            await load()
+        } catch {
+            actionError = error.localizedDescription
+        }
     }
 }

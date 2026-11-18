@@ -22,13 +22,24 @@ struct WorkerApplicationItem: Identifiable, Decodable {
     let appliedAt:     Date
     let displayStatus: String   // "confirmed" | "applied" | "completed" | "cancelled"
     // Optional, damit aeltere Backend-Antworten weiter dekodieren
-    let cancellationKind:   String?   // "declined" | "jobCancelled"
+    let cancellationKind:   String?   // "declined" | "jobCancelled" | "workerCancelled"
     let cancellationReason: String?
     let paymentStatus:      String?   // "paid" | "pending" (nur completed)
     let earnings:           Double?
     let conversationId:     String?
     let distanceMiles:      Double?   // Worker → Job, nil ohne Koordinaten
     let jobNotes:           String?   // Hinweise des Employers (nur bei offener/angenommener Bewerbung)
+    // Reliability (alle optional, aeltere Backends liefern sie nicht)
+    let canCancel:          Bool?     // bestaetigte, noch nicht begonnene Schicht → "Cancel shift"
+    let lateIfCancelledNow: Bool?     // < 24 h bis Start → Warnung "late cancellation"
+    let lateCancellation:   Bool?     // vom Worker kurzfristig storniert
+    let attendance:         String?   // "attended" | "late" | "no_show" (vom Employer erfasst bzw. automatisch)
+    let attendanceSource:   String?   // "employer" | "auto" | "admin"
+    let canDispute:         Bool?
+    let disputeStatus:      String?   // nil | "pending" | "resolved"
+    let disputeResolution:  String?   // "upheld" | "changed"
+
+    var attendanceStatus: AttendanceStatus? { attendance.flatMap(AttendanceStatus.init(rawValue:)) }
 }
 
 // MARK: - Saved Jobs

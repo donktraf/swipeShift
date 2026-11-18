@@ -101,6 +101,7 @@ struct ApplicantCard: View {
                         .foregroundColor(.secondary)
                 }
             }
+            if let reliability = summary.reliability { ReliabilityLabel(summary: reliability) }
             ApplicantTagRow(tags: summary.tags)
             if let fit = shiftFit { ApplicantShiftFitLabel(fit: fit) }
             if let availability = summary.availabilityText {

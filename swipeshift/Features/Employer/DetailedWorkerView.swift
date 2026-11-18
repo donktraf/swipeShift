@@ -48,6 +48,7 @@ struct DetailedWorkerView: View {
                     if let profile {
                         accountSection(profile)
                         ratingsSection(profile)
+                        reliabilitySection(profile)
                         pastJobsSection(profile)
                         if let bio = profile.worker.bio?.trimmingCharacters(in: .whitespacesAndNewlines), !bio.isEmpty {
                             aboutSection(bio)
@@ -283,6 +284,25 @@ struct DetailedWorkerView: View {
                                 value: since.formatted(.dateTime.month(.wide).year()))
                     }
                 }
+            }
+        }
+    }
+
+    // MARK: - Reliability
+
+    @ViewBuilder
+    private func reliabilitySection(_ profile: WorkerProfileDTO) -> some View {
+        if let reliability = profile.reliability {
+            sectionCard("Reliability") {
+                VStack(alignment: .leading, spacing: 6) {
+                    ReliabilityLabel(summary: reliability, font: 14)
+                    Text(reliability.isNew
+                         ? "The show-up rate appears after 3 finished shifts."
+                         : "Based on finished shifts in the last 12 months.")
+                        .font(.system(size: 12)).foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(14)
             }
         }
     }

@@ -16,6 +16,8 @@ struct WorkerProfileDTO: Decodable {
     let account: WorkerAccountStatus?
     /// Nur mit Job-Kontext: "Category matches · 2 of 3 required skills · ..."
     let matchHint: String?
+    /// Anwesenheit / No-Shows / kurzfristige Stornos (fehlt in aelteren Backend-Antworten)
+    let reliability: ReliabilitySummary?
 }
 
 struct WorkerPastJob: Decodable, Identifiable {

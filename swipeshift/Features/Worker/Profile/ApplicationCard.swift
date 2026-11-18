@@ -16,6 +16,8 @@ struct ApplicationCard: View {
     let onWithdraw: () -> Void
     let onViewJob: () -> Void
     let onOpenChat: () -> Void
+    /// Nach Schicht-Storno bzw. Einspruch: Liste neu laden
+    var onChanged: () -> Void = {}
 
     @State private var showWithdrawAlert = false
     @State private var isWithdrawing     = false
@@ -72,11 +74,29 @@ struct ApplicationCard: View {
                 Label(reason, systemImage: "xmark.circle.fill")
                     .font(.system(size: 12)).foregroundColor(.red.opacity(0.85))
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14).padding(.bottom, item.lateCancellation == true ? 4 : 10)
+            }
+            if status == .cancelled, item.lateCancellation == true {
+                Text("This counted as a late cancellation (less than 24 hours before the start).")
+                    .font(.system(size: 11)).foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 14).padding(.bottom, 10)
+            }
+
+            // Vom Employer erfasste Anwesenheit (+ einmaliger Einspruch)
+            if status == .completed {
+                AttendanceStatusRow(item: item, onChanged: onChanged)
             }
 
             Divider().padding(.horizontal, 14)
             quickActions
+
+            // Bestaetigte, noch nicht begonnene Schicht stornieren (< 24 h = kurzfristig, Warnung im Dialog)
+            if status == .confirmed, item.canCancel == true {
+                Divider().padding(.horizontal, 14)
+                CancelShiftButton(applyId: item.id, jobTitle: item.jobTitle,
+                                  lateIfCancelledNow: item.lateIfCancelledNow == true) { _ in onChanged() }
+            }
 
             if status == .applied {
                 Divider().padding(.horizontal, 14)

@@ -65,7 +65,8 @@ struct WorkerCalendarView: View {
             CalendarEntryDetailSheet(
                 entry: entry,
                 onViewJob: { openJob(entry) },
-                onOpenChat: { openChat(entry) }
+                onOpenChat: { openChat(entry) },
+                onCancelled: { Task { await loadEntries() } }
             )
         }
         .applicationNavigation(navigation)

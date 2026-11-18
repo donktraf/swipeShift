@@ -30,6 +30,12 @@ struct CalendarEntry: Identifiable, Equatable {
     let category: String?
     let distanceMiles: Double?
     let jobNotes: String?
+    /// Bestaetigte, noch nicht begonnene Schicht → "Cancel shift"; < 24 h = kurzfristige Stornierung
+    let canCancel: Bool
+    let lateIfCancelledNow: Bool
+    /// Vom Employer erfasste Anwesenheit (vergangene Schichten) + Stand eines Einspruchs
+    let attendance: String?
+    let disputeStatus: String?
     var hasConflict = false
 
     init?(item: WorkerApplicationItem) {
@@ -58,6 +64,10 @@ struct CalendarEntry: Identifiable, Equatable {
         category = item.category == "—" ? nil : item.category
         distanceMiles = item.distanceMiles
         jobNotes = item.jobNotes
+        canCancel = item.canCancel == true
+        lateIfCancelledNow = item.lateIfCancelledNow == true
+        attendance = item.attendance
+        disputeStatus = item.disputeStatus
     }
 
     /// Vergangen = abgeschlossen, storniert oder Schicht vorbei → ausgegraut, eigene Liste
@@ -195,6 +205,12 @@ struct CalendarEntryRow: View {
                         .font(.system(size: 11)).italic()
                         .foregroundColor(.secondary)
                         .lineLimit(2)
+                }
+                if entry.status == .completed, let a = entry.attendance.flatMap(AttendanceStatus.init(rawValue:)) {
+                    let review = entry.disputeStatus == "pending"
+                    Label(review ? "Under review" : a.label, systemImage: review ? "hourglass" : a.icon)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(review ? .orange : a.color)
                 }
                 if entry.hasConflict {
                     Label("Overlaps with another shift", systemImage: "exclamationmark.triangle.fill")

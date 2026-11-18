@@ -16,6 +16,8 @@ struct CalendarEntryDetailSheet: View {
     let entry: CalendarEntry
     let onViewJob: () -> Void
     let onOpenChat: () -> Void
+    /// Nach erfolgreichem Schicht-Storno (Kalender neu laden)
+    var onCancelled: () -> Void = {}
 
     var body: some View {
         NavigationStack {
@@ -97,6 +99,10 @@ struct CalendarEntryDetailSheet: View {
             detailRow(icon: "building.2", label: "Employer", value: entry.company)
             Divider().padding(.leading, 44)
             detailRow(icon: "dollarsign.circle", label: "Pay", value: payValue)
+            if entry.status == .completed, entry.attendance != nil {
+                Divider().padding(.leading, 44)
+                AttendanceInfoRow(attendance: entry.attendance, disputeStatus: entry.disputeStatus)
+            }
             if let payment = entry.paymentStatus {
                 Divider().padding(.leading, 44)
                 detailRow(icon: payment == "paid" ? "checkmark.seal" : "hourglass",
@@ -155,6 +161,13 @@ struct CalendarEntryDetailSheet: View {
                         .clipShape(RoundedRectangle(cornerRadius: 14))
                 }
                 .buttonStyle(.plain)
+            }
+
+            if entry.canCancel {
+                CancelShiftButton(applyId: entry.id, jobTitle: entry.title, lateIfCancelledNow: entry.lateIfCancelledNow) { _ in
+                    onCancelled()
+                    dismiss()
+                }
             }
         }
     }

@@ -16,6 +16,13 @@ struct PayableWorker: Identifiable, Decodable {
     let hoursWorked: Double
     let hourlyRate: Double
     var isPaid: Bool
+    /// "paid" | "pending" | "no_show" (nicht berechnet) | "under_review" (No-Show-Einspruch, Zahlung angehalten)
+    var paymentState: String? = nil
+
+    var isNoShow: Bool { paymentState == "no_show" }
+    var isUnderReview: Bool { paymentState == "under_review" }
+    /// Bezahlbar = noch offen und weder No-Show noch unter Pruefung
+    var isPayable: Bool { !isPaid && !isNoShow && !isUnderReview }
 
     var totalEarned: Double { hoursWorked * hourlyRate }
 }
@@ -39,14 +46,17 @@ struct JobPaymentView: View {
 
     // MARK: - Computed
 
-    private var unpaidWorkers: [PayableWorker] { workers.filter { !$0.isPaid } }
+    private var unpaidWorkers: [PayableWorker] { workers.filter { $0.isPayable } }
     private var paidWorkers:   [PayableWorker] { workers.filter {  $0.isPaid } }
+    /// No-Show (nicht berechnet) bzw. No-Show unter Einspruch (Zahlung angehalten)
+    private var heldWorkers:   [PayableWorker] { workers.filter { $0.isNoShow || $0.isUnderReview } }
 
     private var totalAmount:    Double { workers.reduce(0) { $0 + $1.totalEarned } }
     private var paidAmount:     Double { paidWorkers.reduce(0) { $0 + $1.totalEarned } }
     private var remainingAmount: Double { unpaidWorkers.reduce(0) { $0 + $1.totalEarned } }
 
     private var allPaid: Bool { unpaidWorkers.isEmpty }
+    private var payableCount: Int { workers.filter { !$0.isNoShow && !$0.isUnderReview }.count }
 
     // MARK: - Body
 
@@ -55,6 +65,8 @@ struct JobPaymentView: View {
             VStack(spacing: 20) {
                 jobHeader
                 summaryBar
+                // Anwesenheit nach Schichtende (blendet sich vor Schichtende aus)
+                AttendanceSectionView(jobId: jobId)
 
                 if isLoading {
                     ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
@@ -70,10 +82,13 @@ struct JobPaymentView: View {
                     if !unpaidWorkers.isEmpty {
                         workerSection(title: "Pending Payment", workers: unpaidWorkers, isPaid: false)
                     }
+                    if !heldWorkers.isEmpty {
+                        workerSection(title: "Not billed / On hold", workers: heldWorkers, isPaid: false)
+                    }
                     if !paidWorkers.isEmpty {
                         workerSection(title: "Paid", workers: paidWorkers, isPaid: true)
                     }
-                    if !workers.isEmpty { payActionButton }
+                    if payableCount > 0 { payActionButton }
                     Spacer().frame(height: 20)
                 }
             }
@@ -102,7 +117,7 @@ struct JobPaymentView: View {
             }
             Button("Cancel", role: .cancel) { showPayAllConfirm = false }
         } message: {
-            Text("You are about to pay \(Money.format(totalAmount, fractionDigits: 2)) to all \(workers.count) workers.")
+            Text("You are about to pay \(Money.format(remainingAmount, fractionDigits: 2)) to \(unpaidWorkers.count) worker\(unpaidWorkers.count == 1 ? "" : "s"). No-shows are not billed.")
         }
         // Pay remaining confirmation
         .alert("Pay Remaining Workers?", isPresented: $showPayRemainingConfirm) {
@@ -226,7 +241,21 @@ struct JobPaymentView: View {
                     .font(.system(size: 15, weight: .bold))
                     .foregroundColor(.primary)
 
-                if worker.isPaid {
+                if worker.isNoShow {
+                    Text("No-show — not billed")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.red)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color.red.opacity(0.1))
+                        .clipShape(Capsule())
+                } else if worker.isUnderReview {
+                    Text("Under review")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.orange)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color.orange.opacity(0.12))
+                        .clipShape(Capsule())
+                } else if worker.isPaid {
                     Text("Paid")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundColor(.green)
@@ -258,7 +287,9 @@ struct JobPaymentView: View {
 
     @ViewBuilder
     private var payActionButton: some View {
-        if allPaid {
+        if allPaid && !heldWorkers.isEmpty && paidWorkers.isEmpty {
+            EmptyView()
+        } else if allPaid {
             HStack(spacing: 10) {
                 Image(systemName: "checkmark.seal.fill")
                     .foregroundColor(.green)
@@ -313,14 +344,14 @@ struct JobPaymentView: View {
     }
 
     private func markAllPaid() {
-        withAnimation { for i in workers.indices { workers[i].isPaid = true } }
+        withAnimation { for i in workers.indices where workers[i].isPayable { workers[i].isPaid = true } }
         Task { try? await APIClient.shared.payAllWorkers(jobId: jobId) }
     }
 
     private func markRemainingPaid() {
-        let unpaidIds = workers.filter { !$0.isPaid }.map(\.id)
+        let unpaidIds = workers.filter { $0.isPayable }.map(\.id)
         withAnimation {
-            for i in workers.indices where !workers[i].isPaid { workers[i].isPaid = true }
+            for i in workers.indices where workers[i].isPayable { workers[i].isPaid = true }
         }
         Task {
             for applyId in unpaidIds {

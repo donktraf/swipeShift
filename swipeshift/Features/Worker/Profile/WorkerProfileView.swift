@@ -19,6 +19,10 @@ struct WorkerProfileView: View {
             VStack(spacing: 0) {
                 profileHeader
                     .padding(.bottom, 24)
+                // Eigene Zuverlaessigkeit (Anwesenheit, No-Shows, kurzfristige Stornos) — nur der Worker selbst und Employer sehen sie
+                WorkerReliabilityCard()
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 16)
                 navigationList
                 Spacer().frame(height: 100)
             }

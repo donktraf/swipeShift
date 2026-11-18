@@ -24,6 +24,8 @@ struct ApplicantSummary: Decodable, Equatable {
     /// Rohwerte fuer "Available for this shift" (fehlen in aelteren Payloads)
     var availableDays: [String]? = nil
     var availableTimes: [String]? = nil
+    /// Anwesenheit / No-Shows / kurzfristige Stornos (fehlt in aelteren Payloads)
+    var reliability: ReliabilitySummary? = nil
 }
 
 // MARK: - Formatierung

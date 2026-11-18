@@ -77,7 +77,8 @@ struct JobApplicationsView: View {
                                         onViewJob: { navigation.openJob(jobId: item.jobId) },
                                         onOpenChat: {
                                             navigation.openChat(conversationId: item.conversationId, messageStore: messageStore)
-                                        }
+                                        },
+                                        onChanged: { Task { await load() } }
                                     )
                                 }
                             }

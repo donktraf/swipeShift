@@ -1271,6 +1271,70 @@ extension APIClient {
         try validate(response: resp, data: data)
     }
 
+    // MARK: - Reliability (Anwesenheit, Stornierung, Einspruch)
+
+    /// POST /worker/applications/:id/cancel — angenommene, noch nicht begonnene Schicht stornieren.
+    /// Rueckgabe: war es eine kurzfristige Stornierung (< 24 h vor Start)?
+    @discardableResult
+    func cancelShift(applyId: String, reason: String? = nil) async throws -> Bool {
+        var req = try makeRequest(path: "/worker/applications/\(applyId)/cancel", method: "POST")
+        var body: [String: String] = [:]
+        if let reason, !reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { body["reason"] = reason }
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+        struct R: Decodable { let lateCancellation: Bool }
+        return (try? JSONDecoder().decode(R.self, from: data).lateCancellation) ?? false
+    }
+
+    /// POST /worker/applications/:id/dispute — einmaliger Einspruch gegen "late"/"no-show" (Notiz max. 300 Zeichen)
+    func disputeAttendance(applyId: String, note: String) async throws {
+        var req = try makeRequest(path: "/worker/applications/\(applyId)/dispute", method: "POST")
+        req.httpBody = try JSONEncoder().encode(["note": note])
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+    }
+
+    func fetchWorkerReliability() async throws -> ReliabilitySummary {
+        let req = try makeRequest(path: "/worker/reliability", method: "GET")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+        return try JSONDecoder().decode(WorkerReliabilityResponse.self, from: data).reliability
+    }
+
+    func fetchJobAttendance(jobId: String) async throws -> JobAttendanceResponse {
+        let req = try makeRequest(path: "/employer/jobs/\(jobId)/attendance", method: "GET")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+        let dec = JSONDecoder(); dec.dateDecodingStrategy = .flexibleISO8601
+        return try dec.decode(JobAttendanceResponse.self, from: data)
+    }
+
+    func recordAttendance(applyId: String, status: AttendanceStatus) async throws {
+        var req = try makeRequest(path: "/employer/applicants/\(applyId)/attendance", method: "POST")
+        req.httpBody = try JSONEncoder().encode(["status": status.rawValue])
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+    }
+
+    func fetchAdminReliability() async throws -> AdminReliabilityResponse {
+        let req = try makeRequest(path: "/admin/reliability", method: "GET")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+        let dec = JSONDecoder(); dec.dateDecodingStrategy = .flexibleISO8601
+        return try dec.decode(AdminReliabilityResponse.self, from: data)
+    }
+
+    /// uphold = Eintrag bleibt; sonst wird die Anwesenheit auf `attendance` geaendert
+    func resolveAttendanceDispute(applyId: String, uphold: Bool, attendance: AttendanceStatus? = nil) async throws {
+        let encoded = applyId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? applyId
+        var req = try makeRequest(path: "/admin/attendance/\(encoded)/resolve", method: "POST")
+        let body: [String: Any] = uphold ? ["uphold": true] : ["attendance": attendance?.rawValue ?? ""]
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+    }
+
     // MARK: - Admin (Moderation)
 
     func fetchAdminReports(closed: Bool) async throws -> [AdminReport] {

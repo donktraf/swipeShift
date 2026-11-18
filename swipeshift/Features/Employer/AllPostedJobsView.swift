@@ -21,6 +21,7 @@ struct InlineApplicant: Identifiable, Decodable, Hashable {
     var availableDays: [String]? = nil
     var availableTimes: [String]? = nil
     var hasScheduleConflict: Bool? = nil
+    var reliability: ReliabilitySummary? = nil
 
     var id: String { applyId }
 
@@ -92,6 +93,8 @@ struct EmployerJob: Identifiable, Decodable, Hashable {
     /// Bewerbungen seit dem letzten Oeffnen der Bewerberliste ("N new matches")
     var newMatchCount: Int? = nil
     var inlineApplicants: [InlineApplicant]? = nil
+    /// Angenommene Worker, deren Anwesenheit noch erfasst werden soll (Schicht vorbei, 48-h-Fenster offen)
+    var attendancePendingCount: Int? = nil
     /// Schichtbeginn (ISO 8601), fuer den Shift-Fit-Hinweis der Inline-Bewerber
     var startTime: String? = nil
     let createdAt: String
@@ -180,6 +183,7 @@ struct AllPostedJobsView: View {
 
     // Payment Navigation
     @State private var jobForPayment: EmployerJob? = nil
+    @State private var jobForAttendance: EmployerJob? = nil
     @State private var showPayments = false
 
     enum PostedJobTab: String, CaseIterable {
@@ -235,6 +239,7 @@ struct AllPostedJobsView: View {
                                     jobForPayment = job
                                     showPayments  = true
                                 },
+                                onRecordAttendance: { jobForAttendance = job },
                                 inlineStates: inlineStates,
                                 onInlineAccept:  { inlineDecision = .accept($0) },
                                 onInlineDecline: { inlineDecision = .decline($0) },
@@ -259,6 +264,9 @@ struct AllPostedJobsView: View {
                     jobLocation: job.location
                 )
             }
+        }
+        .navigationDestination(item: $jobForAttendance) { job in
+            AttendanceScreen(jobId: job.id, jobTitle: job.title) { Task { await load() } }
         }
         .navigationDestination(item: $jobForApplicants) { job in
             AllApplicantsView(jobId: job.id, jobTitle: job.title)
@@ -467,6 +475,7 @@ private struct PostedJobCard: View {
     let onDelete:       () -> Void
     let onViewApplicants: () -> Void
     let onViewPayments: () -> Void
+    let onRecordAttendance: () -> Void
     let inlineStates: [String: Bool]
     let onInlineAccept:  (InlineApplicant) -> Void
     let onInlineDecline: (InlineApplicant) -> Void
@@ -555,6 +564,18 @@ private struct PostedJobCard: View {
                 .padding(.horizontal, 14).padding(.vertical, 10)
             }
 
+            // Anwesenheit erfassen: Schicht vorbei, Worker noch ohne Eintrag (48-h-Fenster)
+            if let pending = job.attendancePendingCount, pending > 0 {
+                Divider().padding(.horizontal, 14)
+                Button(action: onRecordAttendance) {
+                    Label("Record attendance (\(pending))", systemImage: "checkmark.shield")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.orange)
+                        .frame(maxWidth: .infinity).padding(.vertical, 10)
+                }
+                .buttonStyle(.plain)
+            }
+
             // Action Buttons (nur bei relevanten Status)
             let showPayBtn = job.status == "inProgress" || job.status == "completed"
             let showActionRow = job.status == "draft" || job.status == "published" || job.status == "inProgress" || showPayBtn
@@ -595,6 +616,7 @@ private struct PostedJobCard: View {
                     .foregroundColor(.primary)
                     .lineLimit(1)
                 ApplicantRatingLabel(average: applicant.ratingAverage, count: applicant.reviewCount)
+                if let reliability = applicant.reliability { ReliabilityLabel(summary: reliability, font: 11) }
                 if decision == nil, let fit = ApplicantShiftFit.evaluate(
                     hasConflict: applicant.hasScheduleConflict == true,
                     availableDays: applicant.availableDays ?? [],
