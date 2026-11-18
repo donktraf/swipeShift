@@ -826,3 +826,14 @@ Gefunden beim Profile-Screen-Abgleich: Legal-Schalter (Worker + Arbeitgeber) und
 - Veröffentlichen (POST, PUT, PATCH) prüft nach den Terms die Vollständigkeit: Titel, Kategorie, Ort, jede Schicht mit Start < Ende, Stundenlohn > 0, ≥ 1 Platz → sonst 400 `INCOMPLETE_JOB` mit `missing`; App zeigt fehlende Angaben + „Edit draft“; Post-Job-Formular verlangt jetzt auch Ort + Stundenlohn
 - `GET /jobs/mine`: `applicantCount` = nur unbeantwortete manuelle Bewerbungen (Wireframe), dazu `instantMatchCount`, `totalApplicationCount`; Jobkarte zeigt „N new“ nur bei veröffentlichten Jobs
 - Helper: `STATUS_TRANSITIONS`/`evaluateStatusChange`, `missingPublishFields`/`publishGate` (jobData.js), `summarizeJobApplies` (applyCounts.js) + Tests
+
+### Kleine Reste aus dem App Development Tracker (2026-11-18)
+- Kalender (beide Seiten): Job-Hinweise des Arbeitgebers sichtbar (Worker nur bei offener/angenommener Bewerbung)
+- Gemerkte Firmen: „Last worked: …“ (letzter eigener Job dort), sonst „Last posted: …“
+- Gemerkte Jobs: „Not interested“ — entfernt aus Gemerkt und blendet den Job überall aus (`Skip.notInterested`), Rückgängig-Banner (6 s); ein früherer Swipe-Skip bleibt dabei erhalten
+- Arbeitgeber-Jobkarte: bis zu 2 offene Bewerber mit Accept/Decline, „Message“ nach Annahme, Pille „N new matches“ (`Job.applicantsSeenAt`, gesetzt über `POST /jobs/:id/applicants/seen`, ohne `updatedAt` zu ändern)
+- Bewerberkarte: „Available for this shift“ / „Outside stated availability“ (App, Gerätezeitzone, nur Schichtbeginn) / „Has another job at this time“ (Server, nur offene Bewerbungen)
+- Worker-Detailprofil: vergangene Jobs (max. 10, Firma/Job/Datum/Bewertung, keine Kommentare), Konto (E-Mail bestätigt, Mitglied seit — Pausiert wird bewusst nicht gezeigt), Match-Hinweis im Kontext eines eigenen Jobs (Kategorie, Skills ≥ 4, Arbeitserlaubnis, Mindestalter)
+- Behoben: Bewerberliste des Arbeitgebers lieferte Serverfehler, sobald Bewerber da waren (Profilfoto aus falschem Modell abgefragt, seit März)
+- Backend-utils: `scheduleConflict.js`, `employerJobCard.js`, `workerDetail.js`, `savedCompanyDates.js`, `jobNotes.js` (+ Tests); Migration `20261118180000_applicants_seen_and_not_interested` (lokal angewendet)
+- Offen: Verfügbarkeits-Hinweis noch nicht bei den Bewerbern direkt auf der Jobkarte
