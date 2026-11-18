@@ -8,6 +8,8 @@ const { resolvePeriod, prismaRange, currentWeekRange } = require("./utils/period
 const { payPerWorker, shiftHours } = require("./utils/jobCost");
 const { distanceMilesBetween } = require("./utils/haversine");
 const { companyJobsWhere, truncateText } = require("./utils/companyStats");
+const { jobNotesForApply } = require("./utils/jobNotes");
+const { lastCompanyActivity } = require("./utils/savedCompanyDates");
 const { deriveApplicationStatus } = require("./utils/applicationStatus");
 const { reviewOverall, summarizeEmployerReviews, computeWouldWorkAgain, validateWorkerReviewBody } = require("./utils/reviewLogic");
 
@@ -35,7 +37,7 @@ router.get("/applications", requireAuth, requireVerifiedEmail, async (req, res) 
             id: true, title: true, company: true, logoEmoji: true,
             location: true, payText: true, shiftText: true, lat: true, lng: true,
             startTime: true, endTime: true, category: true,
-            status: true, cancellationReason: true, payAmount: true,
+            status: true, cancellationReason: true, payAmount: true, jobNotes: true,
           },
         },
         conversation: { select: { id: true } },
@@ -66,6 +68,8 @@ router.get("/applications", requireAuth, requireVerifiedEmail, async (req, res) 
         cancellationKind,
         cancellationReason,
         paymentStatus,
+        // Hinweise des Employers (nur bei offener/angenommener Bewerbung, utils/jobNotes.js)
+        jobNotes:       jobNotesForApply(a.status, job?.jobNotes),
         // Verdienst fuer diese Schicht (gleiche Formel wie Finanz-Uebersicht)
         earnings:       job ? payPerWorker(job) : 0,
         // Entfernung Worker → Job in Meilen (null ohne Koordinaten)
@@ -409,7 +413,7 @@ router.get("/saved-companies", requireAuth, requireVerifiedEmail, async (req, re
         const [jobs, reviews] = await Promise.all([
           prisma.job.findMany({
             where:  companyJobsWhere(sc.companyName),
-            select: { logoEmoji: true, isVerified: true, status: true, location: true, employerId: true },
+            select: { logoEmoji: true, isVerified: true, status: true, location: true, employerId: true, createdAt: true },
             orderBy: { createdAt: "desc" },
           }),
           prisma.workerReview.findMany({
@@ -420,6 +424,14 @@ router.get("/saved-companies", requireAuth, requireVerifiedEmail, async (req, re
         return { sc, jobs, reviews };
       })
     );
+
+    // Angenommene Jobs des Workers in EINER Abfrage (fuer "Last worked"), danach je Firma zugeordnet
+    const acceptedApplies = savedList.length
+      ? await prisma.apply.findMany({
+          where:  { userId, status: "accepted" },
+          select: { job: { select: { company: true, status: true, startTime: true, endTime: true } } },
+        })
+      : [];
 
     // Employer-Profile aller gespeicherten Firmen in EINER Abfrage (statt eine pro Firma)
     const employerIds = [...new Set(enriched.flatMap(({ jobs }) => {
@@ -456,6 +468,13 @@ router.get("/saved-companies", requireAuth, requireVerifiedEmail, async (req, re
         industry:    employer?.industry || null,
         about:       truncateText(employer?.companyDescription, 140),
         savedAt:     sc.savedAt,
+        // "Last worked" (juengster vergangener Job mit angenommener Bewerbung) sonst "Last posted"
+        lastActivity: lastCompanyActivity(
+          acceptedApplies
+            .filter((a) => a.job?.company?.toLowerCase() === sc.companyName.toLowerCase())
+            .map((a) => a.job),
+          jobs,
+        ),
       };
     });
 

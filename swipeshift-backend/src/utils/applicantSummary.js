@@ -106,6 +106,9 @@ function summarizeApplicant({ worker = null, reviews = [], applies = [], now = n
     // Nur das Badge — das Alter selbst wird nie ausgeliefert
     isAdult: worker?.dateOfBirth ? isAtLeast18(worker.dateOfBirth, now) : false,
     availabilityText: availabilityText(worker?.availability, worker?.availableTimes),
+    // Rohwerte fuer den Abgleich "Available for this shift" (App rechnet mit der Geraete-Zeitzone)
+    availableDays: availableDays(worker?.availability),
+    availableTimes: cleanWhitelist(worker?.availableTimes, AVAILABLE_TIMES),
   };
 }
 

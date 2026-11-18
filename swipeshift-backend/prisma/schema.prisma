@@ -295,6 +295,8 @@ model Job {
   jobNotes              String?  @db.Text
   instantMatch          Boolean  @default(false)
   termsAcceptedAt       DateTime?
+  // Zeitpunkt, zu dem der Employer die Bewerberliste dieses Jobs zuletzt geoeffnet hat ("New Matches")
+  applicantsSeenAt      DateTime?
 
   // Categorisation
   tags      String[]
@@ -449,6 +451,8 @@ model Skip {
   id        String   @id @default(uuid())
   userId    String
   jobId     String
+  // true = "Not interested" (aus Gespeichert) → Job wird in ALLEN Feeds ausgeblendet, nicht nur im Swipe-Feed
+  notInterested Boolean @default(false)
   createdAt DateTime @default(now())
 
   job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)

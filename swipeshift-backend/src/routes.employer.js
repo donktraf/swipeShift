@@ -14,6 +14,8 @@ const { loadApplicantSummaries } = require("./applicantSummaries");
 const { countEmployerApplies } = require("./utils/applyCounts");
 const { averageRating } = require("./utils/applicantSummary");
 const { truncateText } = require("./utils/companyStats");
+const { computeScheduleConflicts } = require("./utils/scheduleConflict");
+const { buildPastJobs, buildAccountStatus, buildMatchHint } = require("./utils/workerDetail");
 const { ageFromBirthDate, availableDays, summarizeReviews, summarizeCompletedJobs, cleanSelfRatedSkills, stringList } = require("./utils/workerProfile");
 
 const router = express.Router();
@@ -29,9 +31,11 @@ router.get("/applicants", requireAuth, requireVerifiedEmail, async (req, res) =>
     // Alle Jobs des Arbeitgebers
     const myJobs = await prisma.job.findMany({
       where: { employerId },
-      select: { id: true, title: true, payText: true, shiftText: true, location: true, logoEmoji: true },
+      select: { id: true, title: true, payText: true, shiftText: true, location: true, logoEmoji: true, startTime: true, endTime: true },
     });
-    const jobIds  = myJobs.map((j) => j.id);
+    // Optional: nur ein Job (Schnellaktion "View Applicants"). Nur eigene Jobs → fremde jobId liefert nichts.
+    const onlyJobId = typeof req.query.jobId === "string" && req.query.jobId ? req.query.jobId : null;
+    const jobIds  = myJobs.filter((j) => !onlyJobId || j.id === onlyJobId).map((j) => j.id);
     const jobMap  = Object.fromEntries(myJobs.map((j) => [j.id, j]));
 
     if (!jobIds.length) return res.json({ applicants: [] });
@@ -47,8 +51,8 @@ router.get("/applicants", requireAuth, requireVerifiedEmail, async (req, res) =>
     const userIds = [...new Set(applies.map((a) => a.userId))];
     const users   = await prisma.user.findMany({
       where:  { id: { in: userIds } },
-      select: { id: true, firstName: true, lastName: true, location: true, profilePhotoUrl: true },
-      // profilePhotoUrl kommt aus Worker-Relation
+      select: { id: true, firstName: true, lastName: true, location: true },
+      // profilePhotoUrl liegt nur am Worker (siehe workerPhotoMap unten)
     });
 
     // Worker-Profil (für profilePhotoUrl)
@@ -63,8 +67,20 @@ router.get("/applicants", requireAuth, requireVerifiedEmail, async (req, res) =>
     // Bewertungen/Jobzahlen/Profilfelder aller Bewerber gebuendelt (kein N+1)
     const summaries = await loadApplicantSummaries(userIds);
 
+    // Zeitkonflikt: hat der Bewerber einen anderen angenommenen Job zur selben Zeit? (eine Query fuer alle)
+    const acceptedApplies = await prisma.apply.findMany({
+      where:  { userId: { in: userIds }, status: "accepted" },
+      select: { id: true, userId: true, jobId: true, job: { select: { startTime: true, endTime: true, status: true } } },
+    });
+    // Nur fuer offene (pending) Bewerbungen relevant
+    const conflicts = computeScheduleConflicts(
+      applies.filter((a) => a.status === "pending").map((a) => ({ id: a.id, userId: a.userId, jobId: a.jobId, job: jobMap[a.jobId] })),
+      acceptedApplies,
+    );
+
     const applicants = applies.map((a) => ({
       applyId:       a.id,
+      hasScheduleConflict: conflicts.has(a.id),
       userId:        a.userId,
       appliedAt:     a.createdAt,
       status:        a.status,
@@ -99,6 +115,15 @@ router.get("/workers/:userId", requireAuth, requireVerifiedEmail, async (req, re
     const employerId = req.auth.sub;
     const { userId } = req.params;
 
+    // Optionaler Job-Kontext fuer den Match-Hinweis — nur, wenn der Job diesem Arbeitgeber gehoert
+    const jobId = typeof req.query.jobId === "string" ? req.query.jobId : null;
+    const contextJob = jobId
+      ? await prisma.job.findFirst({
+          where: { id: jobId, employerId },
+          select: { category: true, requiredSkills: true, workAuthorizationRequired: true, minAge: true },
+        })
+      : null;
+
     const hasApplied = await prisma.apply.findFirst({
       where: { userId, job: { employerId } },
       select: { id: true },
@@ -109,6 +134,7 @@ router.get("/workers/:userId", requireAuth, requireVerifiedEmail, async (req, re
       where: { id: userId },
       select: {
         id: true, firstName: true, lastName: true, location: true, emailVerifiedAt: true,
+        pausedAt: true, createdAt: true,
         worker: {
           select: {
             dateOfBirth: true, bio: true, profilePhotoUrl: true, jobInterests: true, availability: true,
@@ -135,7 +161,9 @@ router.get("/workers/:userId", requireAuth, requireVerifiedEmail, async (req, re
         where: { userId },
         select: {
           status: true, isPaid: true,
-          job: { select: { category: true, endTime: true, status: true, cancellationReason: true } },
+          // fuer Past Jobs: Firma/Titel/Datum + die Bewertung, die der Employer dieses Jobs vergeben hat (ohne Kommentar)
+          review: { select: { communication: true, teamwork: true, reliability: true, underPressure: true, workQuality: true } },
+          job: { select: { title: true, company: true, startTime: true, category: true, endTime: true, status: true, cancellationReason: true } },
         },
       }),
     ]);
@@ -174,6 +202,9 @@ router.get("/workers/:userId", requireAuth, requireVerifiedEmail, async (req, re
         ...summary,
         ...summarizeCompletedJobs(applies),
       },
+      pastJobs: buildPastJobs(applies.filter((a) => a.status === "accepted")),
+      account: buildAccountStatus(user),
+      matchHint: buildMatchHint(contextJob, w)?.text ?? null,
       recentReviews: reviews
         .filter((r) => r.comment && r.comment.trim())
         .slice(0, 3)
@@ -954,6 +985,7 @@ router.get("/calendar", requireAuth, requireVerifiedEmail, async (req, res) => {
         payAmount: true,
         payText: true,
         shiftText: true,
+        jobNotes: true,
         applies: {
           where: { status: "accepted" },
           select: {
@@ -985,6 +1017,7 @@ router.get("/calendar", requireAuth, requireVerifiedEmail, async (req, res) => {
         category:      j.category ?? null,
         payText:       j.payText ?? "",
         shiftText:     j.shiftText ?? "",
+        jobNotes:      j.jobNotes?.trim() || null,
         shiftCost:     j.status === "completed" ? costs.completed : costs.planned,
         workers: j.applies.map((a) => ({
           applyId:  a.id,

@@ -12,6 +12,8 @@ const { buildJobData, validateJobBody, checkDraftAccess, publishGate, resolveCre
 const { isBlockedBetween } = require("./utils/safety");
 const { normalizeCancellationReason } = require("./utils/applicationStatus");
 const { companyJobsWhere, countCompletedJobs } = require("./utils/companyStats");
+const { countNewMatches, pickInlineApplies } = require("./utils/employerJobCard");
+const { loadApplicantSummaries } = require("./applicantSummaries");
 
 const router = express.Router();
 
@@ -49,6 +51,13 @@ async function getSeenJobIds(userId) {
     appliedIds: new Set(applies.map((a) => a.jobId)),
     skippedIds: new Set(skips.map((s) => s.jobId)),
   };
+}
+
+// Jobs, die der User explizit mit "Not interested" markiert hat — werden in ALLEN Feeds ausgeblendet
+// (normale Swipe-Skips nur im Swipe-Feed, siehe GET /jobs)
+async function getNotInterestedJobIds(userId) {
+  const rows = await prisma.skip.findMany({ where: { userId, notInterested: true }, select: { jobId: true } });
+  return rows.map((r) => r.jobId);
 }
 
 // ─────────────────────────────────────────────
@@ -150,6 +159,9 @@ router.get("/", requireAuth, requireVerifiedEmail, async (req, res) => {
     if (isSwipeFeed) {
       const { appliedIds, skippedIds } = await getSeenJobIds(userId);
       seenIds = [...appliedIds, ...skippedIds];
+    } else {
+      // Dashboard-Sektionen/Kategorien: nur "Not interested"-Jobs ausblenden
+      seenIds = await getNotInterestedJobIds(userId);
     }
 
     const baseWhere = {
@@ -241,12 +253,14 @@ router.get("/nearby", requireAuth, requireVerifiedEmail, async (req, res) => {
     }
 
     // Radar zeigt immer alle Jobs — unabhängig von apply/skip
+    const notInterestedIds = await getNotInterestedJobIds(userId);
     const allJobs = await prisma.job.findMany({
       where: {
         ...(await pausedEmployerFilter(userId)),
         status: "published",
         lat: { not: null },
         lng: { not: null },
+        ...(notInterestedIds.length > 0 && { id: { notIn: notInterestedIds } }),
       },
     });
 
@@ -483,15 +497,38 @@ router.post("/:id/skip", requireAuth, requireVerifiedEmail, async (req, res) => 
     const userId = req.auth.sub;
     const jobId  = req.params.id;
 
+    // notInterested: true → "Not interested" aus Gespeichert: entfernt zusaetzlich den Save und blendet den Job
+    // in allen Feeds aus (nicht nur im Swipe-Feed)
+    const notInterested = req.body?.notInterested === true;
+
+    // hadSkip: es gab schon einen normalen Swipe-Skip → Undo darf ihn nicht loeschen (siehe DELETE unten)
+    const before = await prisma.skip.findUnique({ where: { userId_jobId: { userId, jobId } }, select: { notInterested: true } });
     await prisma.skip.upsert({
       where:  { userId_jobId: { userId, jobId } },
-      create: { userId, jobId },
-      update: {},
+      create: { userId, jobId, notInterested },
+      update: notInterested ? { notInterested: true } : {},
     });
+    if (notInterested) await prisma.save.deleteMany({ where: { userId, jobId } });
 
-    return res.json({ ok: true });
+    return res.json({ ok: true, hadSkip: !!before && before.notInterested === false });
   } catch (err) {
     console.error("POST /jobs/:id/skip error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─────────────────────────────────────────────
+// DELETE /jobs/:id/skip — Skip zurueknehmen (Undo von "Not interested")
+// ─────────────────────────────────────────────
+router.delete("/:id/skip", requireAuth, requireVerifiedEmail, async (req, res) => {
+  try {
+    const where = { userId: req.auth.sub, jobId: req.params.id };
+    // ?restoreSkip=1: der Skip existierte vorher als normaler Swipe-Skip → nur "Not interested" zuruecknehmen
+    if (req.query.restoreSkip === "1") await prisma.skip.updateMany({ where, data: { notInterested: false } });
+    else await prisma.skip.deleteMany({ where });
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("DELETE /jobs/:id/skip error:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -543,14 +580,43 @@ router.get("/mine", requireAuth, requireVerifiedEmail, async (req, res) => {
       where: { employerId },
       orderBy: { createdAt: "desc" },
       include: {
-        applies: { select: { status: true, autoAccepted: true } },
+        applies: { select: { id: true, userId: true, status: true, autoAccepted: true, createdAt: true, conversation: { select: { id: true } } } },
       },
     });
+
+    // Inline-Bewerber (max. 2 pro Job) – Profildaten fuer ALLE Jobs gebuendelt (kein N+1)
+    const inlineByJob = new Map(jobs.map(({ id, status, applies }) =>
+      [id, status === "published" ? pickInlineApplies(applies) : []]));
+    const inlineUserIds = [...new Set([...inlineByJob.values()].flat().map((a) => a.userId))];
+    const [summaries, users] = inlineUserIds.length
+      ? await Promise.all([
+          loadApplicantSummaries(inlineUserIds),
+          prisma.user.findMany({
+            where: { id: { in: inlineUserIds } },
+            select: { id: true, firstName: true, lastName: true, worker: { select: { profilePhotoUrl: true } } },
+          }),
+        ])
+      : [new Map(), []];
+    const userById = new Map(users.map((u) => [u.id, u]));
 
     // Zaehler siehe utils/applyCounts.js (applicantCount = nur unbeantwortete manuelle Bewerbungen)
     const result = jobs.map(({ applies, ...job }) => ({
       ...job,
       ...summarizeJobApplies(applies),
+      newMatchCount: countNewMatches(applies, job.applicantsSeenAt),
+      inlineApplicants: inlineByJob.get(job.id).map((a) => {
+        const u = userById.get(a.userId);
+        return {
+          applyId: a.id,
+          userId: a.userId,
+          // Conversation entsteht schon beim Bewerben; die App zeigt "Message" erst nach Annahme
+          conversationId: a.conversation?.id ?? null,
+          name: [u?.firstName, u?.lastName].filter(Boolean).join(" ") || "Unknown",
+          profilePhotoUrl: u?.worker?.profilePhotoUrl ?? null,
+          ratingAverage: summaries.get(a.userId)?.ratingAverage ?? null,
+          reviewCount: summaries.get(a.userId)?.reviewCount ?? 0,
+        };
+      }),
     }));
 
     return res.json({ jobs: result });
@@ -745,6 +811,21 @@ router.get("/:id", requireAuth, requireVerifiedEmail, async (req, res) => {
 // ─────────────────────────────────────────────
 // GET /jobs/:id/applicants — Bewerber für einen Job
 // ─────────────────────────────────────────────
+router.post("/:id/applicants/seen", requireAuth, requireVerifiedEmail, async (req, res) => {
+  try {
+    const job = await prisma.job.findUnique({ where: { id: req.params.id }, select: { employerId: true } });
+    if (!job) return res.status(404).json({ error: "Job not found" });
+    if (job.employerId !== req.auth.sub) return res.status(403).json({ error: "Forbidden" });
+    // Raw-UPDATE nur dieser Spalte: ein Prisma-update wuerde Job.updatedAt (@updatedAt) anheben und damit
+    // den optimistischen Lock in PATCH /jobs/:id/status + die "Last saved"-Anzeige verfaelschen
+    await prisma.$executeRaw`UPDATE "Job" SET "applicantsSeenAt" = NOW() WHERE "id" = ${req.params.id}`;
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("POST /jobs/:id/applicants/seen error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 router.get("/:id/applicants", requireAuth, requireVerifiedEmail, async (req, res) => {
   try {
     const employerId = req.auth.sub;
