@@ -114,6 +114,21 @@ struct APIErrorBody: Decodable {
     let code: String?
     /// Nur bei INCOMPLETE_JOB: fehlende Pflichtfelder
     let missing: [String]?
+    /// Nur bei REAUTH_REQUIRED: verfuegbare Re-Auth-Methoden ("totp", "password", "email")
+    let methods: [String]?
+    /// Nur bei TOO_MANY_ATTEMPTS (Re-Auth): Wartezeit in Minuten
+    let retryAfterMinutes: Int?
+}
+
+/// GET /auth/me/reauth/methods
+struct ReauthMethodsDTO: Decodable {
+    let methods: [String]
+    let emailHint: String?
+}
+
+/// POST /auth/me/reauth
+struct ReauthResultDTO: Decodable {
+    let validUntil: Date
 }
 
 extension Notification.Name {

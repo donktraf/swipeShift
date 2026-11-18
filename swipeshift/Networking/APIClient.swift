@@ -1232,6 +1232,30 @@ extension APIClient {
         return try JSONDecoder().decode(AccountSettingsResponseDTO.self, from: data).settings
     }
 
+    // GET /auth/me/reauth/methods — Methoden fuer die Re-Auth (Reihenfolge = Praeferenz)
+    func fetchReauthMethods() async throws -> ReauthMethodsDTO {
+        let req = try makeRequest(path: "/auth/me/reauth/methods", method: "GET")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+        return try JSONDecoder().decode(ReauthMethodsDTO.self, from: data)
+    }
+
+    // POST /auth/me/reauth/email-code — Code an die Konto-E-Mail senden
+    func sendReauthEmailCode() async throws {
+        let req = try makeRequest(path: "/auth/me/reauth/email-code", method: "POST")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+    }
+
+    // POST /auth/me/reauth — method: "totp" | "password" | "email"; secret = Code bzw. Passwort
+    func reauthenticate(method: String, secret: String) async throws {
+        var req = try makeRequest(path: "/auth/me/reauth", method: "POST")
+        let key = method == "password" ? "password" : "code"
+        req.httpBody = try JSONEncoder().encode(["method": method, key: secret])
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+    }
+
     // POST /auth/me/pause
     func setAccountPaused(_ paused: Bool) async throws -> Bool {
         var req = try makeRequest(path: "/auth/me/pause", method: "POST")
@@ -1249,6 +1273,8 @@ struct APIError: LocalizedError {
     let message: String
     let code: String?
     var missing: [String]? = nil
+    var methods: [String]? = nil
+    var retryAfterMinutes: Int? = nil
     var errorDescription: String? { message }
 }
 
@@ -1264,7 +1290,8 @@ func validate(response: URLResponse, data: Data) throws {
 
         // Lesbare Backend-Meldung ({ error }, optional mit code) durchreichen statt rohem JSON
         if let message = body?.error, !message.isEmpty {
-            throw APIError(status: http.statusCode, message: message, code: body?.code, missing: body?.missing)
+            throw APIError(status: http.statusCode, message: message, code: body?.code, missing: body?.missing,
+                           methods: body?.methods, retryAfterMinutes: body?.retryAfterMinutes)
         }
 
         let raw = String(data: data, encoding: .utf8) ?? "<no body>"

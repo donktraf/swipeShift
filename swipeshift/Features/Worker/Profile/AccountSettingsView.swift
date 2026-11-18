@@ -778,6 +778,7 @@ struct PaymentsPayoutsView: View {
     @State private var isSaving           = false
     @State private var errorMessage:      String?
     @State private var showSavedToast     = false
+    @State private var reauthMethods:     [String]?       // gesetzt = Re-Auth-Sheet sichtbar
 
     var body: some View {
         SubScreenShell(title: "Payments & Payouts") {
@@ -794,6 +795,12 @@ struct PaymentsPayoutsView: View {
         .onDisappear {
             accountNumber = ""
             confirmAccount = ""
+        }
+        .sheet(isPresented: Binding(get: { reauthMethods != nil }, set: { if !$0 { reauthMethods = nil } })) {
+            ReauthSheet(methods: reauthMethods ?? []) {
+                reauthMethods = nil
+                Task { await savePayout() }   // Formularwerte bleiben erhalten, Speichern automatisch wiederholen
+            }
         }
     }
 
@@ -888,7 +895,6 @@ struct PaymentsPayoutsView: View {
         .opacity(canSave ? 1 : 0.5)
 
         // TODO: Echte Auszahlungen (Zahlungsdienstleister) gibt es noch nicht — Daten werden nur hinterlegt
-        // TODO: Re-Auth (Passwort/2FA) vor dem Aendern von Auszahlungsdaten
         Text("Payouts aren't active yet. Your details are stored encrypted and will be used once payouts launch.")
             .font(.system(size: 12))
             .foregroundColor(.secondary)
@@ -1098,6 +1104,11 @@ struct PaymentsPayoutsView: View {
             withAnimation { showSavedToast = true }
         } catch {
             let message = (error as? APIError)?.message ?? ""
+            if let api = error as? APIError, api.code == "REAUTH_REQUIRED" {
+                reauthMethods = api.methods?.isEmpty == false ? api.methods : ["email"]
+                isSaving = false
+                return
+            }
             if message.contains("routingNumber") {
                 errorMessage = "Check the routing number"
             } else if message.contains("accountNumber") {
@@ -1111,6 +1122,153 @@ struct PaymentsPayoutsView: View {
             }
         }
         isSaving = false
+    }
+}
+
+// MARK: - Re-Auth Sheet (Step-up vor dem Aendern von Auszahlungsdaten)
+
+struct ReauthSheet: View {
+    let methods: [String]
+    let onSuccess: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var method: String
+    @State private var secret = ""
+    @State private var emailHint = "your email"
+    @State private var codeSent = false
+    @State private var isBusy = false
+    @State private var errorMessage: String?
+    @FocusState private var focused: Bool
+
+    init(methods: [String], onSuccess: @escaping () -> Void) {
+        self.methods = methods
+        self.onSuccess = onSuccess
+        _method = State(initialValue: methods.first ?? "email")
+    }
+
+    private func title(_ m: String) -> String {
+        switch m {
+        case "totp":     return "Authenticator"
+        case "password": return "Password"
+        default:         return "Email code"
+        }
+    }
+
+    private var canSubmit: Bool {
+        !(method == "password" ? secret : secret.trimmingCharacters(in: .whitespaces)).isEmpty && !isBusy && (method != "email" || codeSent)
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Confirm it's you")
+                    .font(.system(size: 22, weight: .bold))
+                Text("For your security, please confirm your identity before changing payout details.")
+                    .font(.system(size: 14))
+                    .foregroundColor(.secondary)
+
+                if methods.count > 1 {
+                    Picker("Method", selection: $method) {
+                        ForEach(methods, id: \.self) { Text(title($0)).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .onChange(of: method) { _, _ in secret = ""; errorMessage = nil }
+                }
+
+                switch method {
+                case "totp":
+                    Text("Enter the 6-digit code from your authenticator app, or one of your backup codes.")
+                        .font(.system(size: 13)).foregroundColor(.secondary)
+                    TextField("Code", text: $secret)
+                        .textContentType(.oneTimeCode)
+                        .textInputAutocapitalization(.characters)
+                        .autocorrectionDisabled()
+                        .focused($focused)
+                        .textFieldStyle(.roundedBorder)
+                case "password":
+                    SecureField("Password", text: $secret)
+                        .textContentType(.password)
+                        .focused($focused)
+                        .textFieldStyle(.roundedBorder)
+                default:
+                    if codeSent {
+                        Text("We sent a 6-digit code to \(emailHint).")
+                            .font(.system(size: 13)).foregroundColor(.secondary)
+                        TextField("6-digit code", text: $secret)
+                            .keyboardType(.numberPad)
+                            .textContentType(.oneTimeCode)
+                            .focused($focused)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                    Button(codeSent ? "Send a new code" : "Send code to \(emailHint)") {
+                        Task { await sendCode() }
+                    }
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(SS.primary)
+                    .disabled(isBusy)
+                }
+
+                if let errorMessage {
+                    Text(errorMessage).font(.system(size: 13)).foregroundColor(.red)
+                }
+
+                Button { Task { await submit() } } label: {
+                    if isBusy { ProgressView().tint(.white).frame(maxWidth: .infinity) }
+                    else { Text("Confirm").fontWeight(.semibold).frame(maxWidth: .infinity) }
+                }
+                .buttonStyle(SSPrimaryButtonStyle())
+                .disabled(!canSubmit)
+                .opacity(canSubmit ? 1 : 0.5)
+
+                Spacer()
+            }
+            .padding(20)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { Button("Cancel") { dismiss() } }
+            }
+            .task {
+                if let info = try? await APIClient.shared.fetchReauthMethods(), let hint = info.emailHint, !hint.isEmpty {
+                    emailHint = hint
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .interactiveDismissDisabled(isBusy)
+    }
+
+    private func message(for error: Error) -> String {
+        guard let api = error as? APIError else { return "Something went wrong. Please try again." }
+        if api.code == "TOO_MANY_ATTEMPTS", let m = api.retryAfterMinutes {
+            return "Too many wrong attempts. Try again in \(m) minute\(m == 1 ? "" : "s")."
+        }
+        if api.code == "CODE_ATTEMPTS_EXCEEDED" { return "Too many attempts — request a new code." }
+        return api.message
+    }
+
+    private func sendCode() async {
+        isBusy = true; errorMessage = nil
+        do {
+            try await APIClient.shared.sendReauthEmailCode()
+            codeSent = true
+            secret = ""
+        } catch {
+            errorMessage = message(for: error)
+        }
+        isBusy = false
+    }
+
+    private func submit() async {
+        isBusy = true; errorMessage = nil
+        do {
+            // Passwort unveraendert senden (Leerzeichen koennen Teil des Passworts sein), Codes trimmen
+            try await APIClient.shared.reauthenticate(method: method, secret: method == "password" ? secret : secret.trimmingCharacters(in: .whitespaces))
+            isBusy = false
+            onSuccess()
+            return
+        } catch {
+            errorMessage = message(for: error)
+        }
+        isBusy = false
     }
 }
 
