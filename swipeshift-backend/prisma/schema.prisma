@@ -119,6 +119,7 @@ enum TwoFactorPurpose {
   disable
   totp_enable // Mail-Code als Re-Auth vor der TOTP-Einrichtung
   reauth      // Mail-Code als Step-up vor dem Aendern von Auszahlungsdaten
+  switch_email // Mail-Code beim Wechsel Authenticator -> E-Mail (an Sitzung gebunden)
 }
 
 // Einmal-Code (6-stellig, gehasht) fuer Login-Challenge bzw. 2FA an-/ausschalten.
@@ -128,6 +129,7 @@ model TwoFactorCode {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   purpose    TwoFactorPurpose
+  sessionId  String?   // nur switch_email: Sitzung, die den Wechsel gestartet hat
   codeHash   String
   attempts   Int       @default(0)
   expiresAt  DateTime

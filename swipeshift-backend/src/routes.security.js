@@ -8,13 +8,16 @@
 //   GET  /auth/2fa                      { enabled }
 //   POST /auth/2fa/request              { action: "enable"|"disable", method?: "email"|"totp" } → Code per Mail
 //                                       (enable+totp: Mail-Code als Re-Auth vor der Einrichtung; auch bei
-//                                       aktiver E-Mail-2FA erlaubt = Wechsel email→totp; bei aktivem TOTP 409)
+//                                       aktiver E-Mail-2FA erlaubt = Wechsel email→totp; bei aktivem TOTP 409; TOTP→email: /2fa/switch-to-email/*)
 //   POST /auth/2fa/confirm              { challengeId, code } → 2FA an/aus
 //   POST /auth/2fa/verify-login         { challengeId, code } → Token (ohne Auth)
 //   POST /auth/2fa/resend               { challengeId } → neuer Login-Code (ohne Auth; 400 bei TOTP)
 //   POST /auth/2fa/totp/setup           { challengeId, code } (Mail-Code, purpose totp_enable) → { secret, otpauthUri }
 //   POST /auth/2fa/totp/backup-codes    { code } (aktueller TOTP-Code) → neue Backup-Codes
-//   POST /auth/2fa/totp/confirm         { code } → TOTP aktiv + 8 Backup-Codes (einmalig)
+//   POST /auth/2fa/totp/confirm         { code } → TOTP aktiv + 8 Backup-Codes (einmalig); bei aktiver E-Mail-2FA
+//                                       atomarer Wechsel email→totp (2FA bleibt durchgehend an)
+//   POST /auth/2fa/switch-to-email/start   { code } (TOTP-/Backup-Code) → Mail-Code (purpose switch_email, an Sitzung gebunden)
+//   POST /auth/2fa/switch-to-email/confirm { challengeId, code } → Methode email, TOTP-Daten + Backup-Codes geloescht
 //   Bei Methode totp akzeptieren confirm(disable) und verify-login TOTP-Code ODER Backup-Code.
 
 const express = require("express");
@@ -30,6 +33,7 @@ const {
   isLockActive, nextLockState, lockOptsFor, minutesUntil, shouldSendLockMail, LOCK_MAIL_INTERVAL_MS,
   GLOBAL_LOCK_IP, IP_LOCK_OPTS, GLOBAL_LOCK_OPTS,
   currentMethod, challengeMatchesUser, maskEmail,
+  canSwitchMethod, switchBindingValid, methodChangedMail,
 } = require("./utils/twoFactor");
 const totp = require("./utils/totp");
 const { normalizeIp } = require("./utils/clientIp");
@@ -447,9 +451,9 @@ router.post("/2fa/request", requireAuth, sendLimiter, async (req, res) => {
     if (action === "enable" && !wantsTotp && user.twoFactorEnabled)
       return res.status(409).json({ error: "Two-factor authentication is already on.", code: "ALREADY_ENABLED" });
     // Entscheidung: Wechsel email→totp ist erlaubt (Mail-Code genuegt als Bestaetigung, E-Mail-2FA bleibt bis
-    // zur TOTP-Bestaetigung aktiv). Bei aktivem TOTP: erst ausschalten.
+    // zur TOTP-Bestaetigung aktiv). Bei aktivem TOTP: 409.
     if (wantsTotp && methodOf(user) === "totp")
-      return res.status(409).json({ error: "The authenticator app is already on. Turn two-factor off first to set it up again.", code: "ALREADY_ENABLED" });
+      return res.status(409).json({ error: "The authenticator app is already on.", code: "ALREADY_ENABLED" });
     if (action === "disable" && !user.twoFactorEnabled)
       return res.status(409).json({ error: "Two-factor authentication is already off.", code: "ALREADY_DISABLED" });
     if (action === "enable" && !user.emailVerifiedAt)
@@ -627,6 +631,7 @@ router.post("/2fa/totp/confirm", requireAuth, codeLimiter, async (req, res) => {
       return codeErrorResponse(res, "CODE_INVALID", true);
     }
 
+    const wasEmail = methodOf(user) === "email";
     const freshAfter = new Date(Date.now() - totp.PENDING_TTL_MS);
     const backupCodes = await prisma.$transaction(async (tx) => {
       // Atomar: nur wenn das Pending-Secret noch exakt dasselbe (und frisch) ist
@@ -660,10 +665,100 @@ router.post("/2fa/totp/confirm", requireAuth, codeLimiter, async (req, res) => {
     if (!backupCodes)
       return res.status(409).json({ error: "This setup is no longer valid. Please start again.", code: "SETUP_EXPIRED" });
 
+    // Methodenwechsel email→totp: Sicherheits-Mail (nicht blockierend)
+    if (wasEmail) sendMail({ to: user.email, ...methodChangedMail("totp") }).catch((err) => console.error("2FA switch mail failed:", err.message));
+
     // Klartext-Codes nur in dieser einen Antwort
     return res.json({ ok: true, enabled: true, method: "totp", backupCodes });
   } catch (err) {
     console.error("POST /auth/2fa/totp/confirm error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ───────────────────────── Wechsel Authenticator → E-Mail-Codes ─────────────────────────
+// Schritt 1: aktueller TOTP-/Backup-Code (Besitz des bisherigen Faktors) → Mail-Code, an User+Sitzung gebunden.
+// Schritt 2: Mail-Code (Postfach funktioniert) → atomar method=email, TOTP-Daten + Backup-Codes weg.
+
+router.post("/2fa/switch-to-email/start", requireAuth, sendLimiter, async (req, res) => {
+  const parsed = z.object({ code: z.string().min(1).max(32) }).safeParse(req.body);
+  if (!parsed.success || !req.auth.sid) return res.status(400).json({ error: "Invalid input" });
+
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.auth.sub } });
+    if (!user) return res.status(404).json({ error: "User not found" });
+    if (await lockResponseIfLocked(res, user.id, ipOf(req))) return;
+    const can = canSwitchMethod(user, "email");
+    if (!can.ok)
+      return res.status(409).json({
+        error: can.code === "NOT_ENABLED" ? "Two-factor authentication isn't turned on." : "Email codes are already on.",
+        code: can.code,
+      });
+
+    const check = await verifyTotpFactor(user.id, parsed.data.code);
+    if (!check.ok) {
+      if (check.decryptFailed) return res.status(500).json({ error: "Could not verify the code. Please try again." });
+      if (!(await registerFailure(user.id, ipOf(req)))) return sendLocked(res, null);
+      return codeErrorResponse(res, "CODE_INVALID", true);
+    }
+    await clearFailures(user.id, ipOf(req));
+
+    // Der Faktor ist jetzt verbraucht (TOTP-Schritt bzw. Backup-Code). Scheitert der Mailversand,
+    // klar sagen, dass ein NEUER Code noetig ist — sonst versucht man es mit demselben Code erneut.
+    try {
+      return res.json(await issueTwoFactorCode(user, "switch_email", { sessionId: req.auth.sid }));
+    } catch (mailErr) {
+      console.error("POST /auth/2fa/switch-to-email/start mail error:", mailErr);
+      return res.status(503).json({
+        error: "We couldn't send the email code. Wait for a new code in your authenticator app (or use another backup code) and try again.",
+        code: "MAIL_FAILED",
+      });
+    }
+  } catch (err) {
+    console.error("POST /auth/2fa/switch-to-email/start error:", err);
+    return res.status(500).json({ error: "Could not send the code. Please try again." });
+  }
+});
+
+router.post("/2fa/switch-to-email/confirm", requireAuth, codeLimiter, async (req, res) => {
+  const parsed = codeSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid input" });
+
+  try {
+    const userId = req.auth.sub;
+    // Bindung VOR dem Verbrauch pruefen: ein fremder/anderer Sitzungs-Code bleibt unberuehrt und zaehlt nur als ungueltig
+    const pre = await prisma.twoFactorCode.findUnique({ where: { id: parsed.data.challengeId } });
+    if (!switchBindingValid(pre, { userId, sessionId: req.auth.sid })) return codeErrorResponse(res, "CODE_INVALID");
+
+    const { error, isTotp, minutes } = await consumeCode(parsed.data.challengeId, parsed.data.code, {
+      purpose: ["switch_email"],
+      userId,
+      ip: ipOf(req),
+    });
+    if (error) return codeErrorResponse(res, error, isTotp, minutes);
+
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
+    const switched = await prisma.$transaction(async (tx) => {
+      const { count } = await tx.user.updateMany({
+        where: { id: userId, twoFactorEnabled: true, twoFactorMethod: "totp" },
+        data: {
+          twoFactorMethod: "email",
+          totpSecretEnc: null, totpPendingEnc: null, totpPendingAt: null, totpLastStep: null,
+        },
+      });
+      if (count !== 1) return false;
+      await tx.twoFactorBackupCode.deleteMany({ where: { userId } });
+      await invalidateOpenCodes(userId, tx);
+      await tx.userSession.updateMany({ where: { userId }, data: { reauthAt: null } }); // Step-up verfaellt
+      return true;
+    });
+    if (!switched)
+      return res.status(409).json({ error: "The authenticator app isn't turned on anymore.", code: "NOT_ENABLED" });
+
+    if (user) sendMail({ to: user.email, ...methodChangedMail("email") }).catch((err) => console.error("2FA switch mail failed:", err.message));
+    return res.json({ ok: true, enabled: true, method: "email" });
+  } catch (err) {
+    console.error("POST /auth/2fa/switch-to-email/confirm error:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
 });

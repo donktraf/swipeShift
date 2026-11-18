@@ -80,9 +80,40 @@ function challengeMatchesUser(purpose, isTotp, user) {
       return !isTotp && method === null;
     case "totp_enable":
       return !isTotp && method !== "totp";
+    case "switch_email":
+      return !isTotp && method === "totp";
     default:
       return false;
   }
+}
+
+// Direkter Methodenwechsel bei aktiver 2FA. to: "totp" | "email".
+// Rueckgabe: { ok: true } oder { ok: false, code: "ALREADY_ENABLED" | "NOT_ENABLED" }
+function canSwitchMethod(user, to) {
+  const method = currentMethod(user);
+  if (!method) return { ok: false, code: "NOT_ENABLED" }; // nichts zu wechseln: normales Aktivieren
+  if (method === to) return { ok: false, code: "ALREADY_ENABLED" };
+  return { ok: true };
+}
+
+// Mail-Code des Wechsels TOTP -> E-Mail muss zu User UND Sitzung passen, die den Wechsel gestartet haben
+function switchBindingValid(record, { userId, sessionId }) {
+  return !!record && !!sessionId && record.purpose === "switch_email"
+    && record.userId === userId && record.sessionId === sessionId;
+}
+
+// Sicherheits-Mail nach erfolgreichem Wechsel
+function methodChangedMail(to) {
+  const label = to === "totp" ? "an authenticator app" : "email codes";
+  const subject = to === "totp"
+    ? "Two-factor method changed to authenticator app"
+    : "Two-factor method changed to email codes";
+  const tail = "If this wasn't you, change your password right away and review your active sessions.";
+  return {
+    subject,
+    text: `The two-factor method on your SwipeShift account was changed to ${label}.\n\n${tail}`,
+    html: `<p>The two-factor method on your SwipeShift account was changed to <b>${label}</b>.</p><p>${tail}</p>`,
+  };
 }
 
 function generateCode() {
@@ -123,7 +154,7 @@ module.exports = {
   CODE_TTL_MS,
   MAX_ATTEMPTS,
   TOTP_CHALLENGE_MARKER,
-  USER_FAIL_LIMIT, USER_LOCK_MS, LOCK_WINDOW_MS, GLOBAL_LOCK_IP, GLOBAL_LOCK_OPTS, IP_LOCK_OPTS, LOCK_MAIL_INTERVAL_MS, isLockActive, nextLockState, lockOptsFor, isLockRowExpired, minutesUntil, shouldSendLockMail, currentMethod, challengeMatchesUser,
+  USER_FAIL_LIMIT, USER_LOCK_MS, LOCK_WINDOW_MS, GLOBAL_LOCK_IP, GLOBAL_LOCK_OPTS, IP_LOCK_OPTS, LOCK_MAIL_INTERVAL_MS, isLockActive, nextLockState, lockOptsFor, isLockRowExpired, minutesUntil, shouldSendLockMail, currentMethod, challengeMatchesUser, canSwitchMethod, switchBindingValid, methodChangedMail,
   generateCode,
   hashCode,
   codeMatches,

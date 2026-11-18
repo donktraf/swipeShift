@@ -63,6 +63,10 @@ const PURPOSE_COPY = {
     subject: "Confirm it's you",
     line: "Use this code to confirm it's you before changing your payout details on SwipeShift.",
   },
+  switch_email: {
+    subject: "Switch to email codes",
+    line: "Use this code to confirm that you want to receive your two-factor codes by email instead of an authenticator app.",
+  },
   disable: {
     subject: "Turn off two-factor authentication",
     line: "Use this code to turn off two-factor authentication for your SwipeShift account.",
@@ -70,7 +74,7 @@ const PURPOSE_COPY = {
 };
 
 // Erzeugt einen neuen Code (alte offene Codes desselben Zwecks werden ungueltig) und mailt ihn.
-async function issueTwoFactorCode(user, purpose) {
+async function issueTwoFactorCode(user, purpose, { sessionId = null } = {}) {
   const code = generateCode();
 
   await prisma.twoFactorCode.updateMany({
@@ -82,6 +86,7 @@ async function issueTwoFactorCode(user, purpose) {
     data: {
       userId: user.id,
       purpose,
+      sessionId,
       codeHash: hashCode(code, JWT_SECRET),
       expiresAt: new Date(Date.now() + CODE_TTL_MS),
     },
