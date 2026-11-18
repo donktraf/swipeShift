@@ -6,11 +6,38 @@
 const { prisma } = require("./prisma.js");
 const { signToken, JWT_SECRET, SESSION_TTL_MS } = require("./auth");
 const { sendMail } = require("./mailer");
+const { restrictionResponse } = require("./utils/moderation");
 const { deviceInfoFromRequest } = require("./utils/deviceInfo");
 const { pushTokenFromHeaders } = require("./utils/pushPayload");
 const { generateCode, hashCode, maskEmail, CODE_TTL_MS, TOTP_CHALLENGE_MARKER } = require("./utils/twoFactor");
 
+// Gesperrte/gebannte Konten bekommen keine Sitzung (Login, Social Login, 2FA-Abschluss)
+class AccountRestrictedError extends Error {
+  constructor(response) {
+    super(response.body.code);
+    this.response = response; // { status, body }
+  }
+}
+
+async function assertNotRestricted(user) {
+  let u = user;
+  // Aufrufer mit schmalem select ohne Sperrfelder: frisch aus der DB lesen (fail-closed)
+  if (u.bannedAt === undefined && u.suspendedUntil === undefined) {
+    u = await prisma.user.findUnique({ where: { id: user.id }, select: { bannedAt: true, suspendedUntil: true, suspensionReason: true } });
+  }
+  const restricted = u && restrictionResponse(u);
+  if (restricted) throw new AccountRestrictedError(restricted);
+}
+
+// Fuer Route-Handler: true, wenn err eine Sperre war und die Antwort gesendet wurde
+function respondIfRestricted(err, res) {
+  if (!(err instanceof AccountRestrictedError)) return false;
+  res.status(err.response.status).json(err.response.body);
+  return true;
+}
+
 async function createSession(user, req) {
+  await assertNotRestricted(user);
   const session = await prisma.userSession.create({
     data: {
       userId: user.id,
@@ -133,6 +160,7 @@ async function issueTotpChallenge(user, purpose) {
 
 // Gemeinsamer Abschluss aller Logins. `extra` landet zusaetzlich in der Antwort (z.B. isNewUser).
 async function completeLogin(user, req, { userOverrides = {}, extra = {} } = {}) {
+  await assertNotRestricted(user); // vor 2FA-Challenge: keine Codes an gesperrte Konten
   if (user.twoFactorEnabled) {
     const challenge = user.twoFactorMethod === "totp"
       ? await issueTotpChallenge(user, "login")
@@ -143,4 +171,4 @@ async function completeLogin(user, req, { userOverrides = {}, extra = {} } = {})
   return { token, user: authUserPayload(user, userOverrides), ...extra };
 }
 
-module.exports = { createSession, authUserPayload, issueTwoFactorCode, issueTotpChallenge, completeLogin };
+module.exports = { AccountRestrictedError, respondIfRestricted, createSession, authUserPayload, issueTwoFactorCode, issueTotpChallenge, completeLogin };

@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "NODE_ENV=development nodemon src/index.js",
     "start": "node src/index.js",
+    "make-admin": "node scripts/make-admin.js",
     "test": "NODE_ENV=test node --test $(find src -name '*.test.js')"
   },
   "dependencies": {

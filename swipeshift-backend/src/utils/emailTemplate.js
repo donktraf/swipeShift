@@ -20,16 +20,16 @@ function plainLine(value, max = 120) {
 }
 
 // { heading, paragraphs: string[] } → { html, text }
-function renderEmail({ heading, paragraphs = [] }) {
+function renderEmail({ heading, paragraphs = [], footer = FOOTER }) {
   const h = plainLine(heading, 160);
   const ps = paragraphs.map((p) => plainLine(p, 600)).filter(Boolean);
   const html = `<div style="font-family:-apple-system,Helvetica,Arial,sans-serif;max-width:480px;margin:0 auto;color:#1c1c1e">
 <h2 style="margin:0 0 16px">${escapeHtml(h)}</h2>
 ${ps.map((p) => `<p style="font-size:15px;line-height:1.5;margin:0 0 12px">${escapeHtml(p)}</p>`).join("\n")}
 <hr style="border:none;border-top:1px solid #e5e5ea;margin:24px 0 12px">
-<p style="font-size:12px;color:#8e8e93;margin:0">${escapeHtml(FOOTER)}</p>
+<p style="font-size:12px;color:#8e8e93;margin:0">${escapeHtml(footer)}</p>
 </div>`;
-  const text = `${h}\n\n${ps.join("\n\n")}\n\n--\n${FOOTER}`;
+  const text = `${h}\n\n${ps.join("\n\n")}\n\n--\n${footer}`;
   return { html, text };
 }
 

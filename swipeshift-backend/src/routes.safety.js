@@ -7,6 +7,7 @@ const { sendMail } = require("./mailer");
 const rateLimit = require("express-rate-limit");
 const { validateReport } = require("./utils/safety");
 const { buildBlockedList } = require("./utils/blockedUsers");
+const { autoSuspendIfNeeded } = require("./moderation");
 
 // Pro User (JWT ist per requireAuth gesetzt, Limiter laeuft danach); Fallback IP
 const keyByUser = (req) => req.auth?.sub || req.ip;
@@ -116,6 +117,13 @@ router.post("/reports", requireAuth, reportLimiter, handle("POST /safety/reports
     });
   } catch (err) {
     console.error("POST /safety/reports mail error:", err);
+  }
+
+  // 3 verschiedene Melder mit offenen Reports → Auto-Sperre bis zur Pruefung (Fehler duerfen den Request nicht scheitern lassen)
+  try {
+    await autoSuspendIfNeeded(reportedUserId);
+  } catch (err) {
+    console.error("POST /safety/reports auto-suspend error:", err);
   }
 
   return res.status(201).json({ ok: true, id: report.id });

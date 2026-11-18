@@ -21,6 +21,7 @@ const companiesRoutes       = require("./routes.companies");
 const notificationsRoutes   = require("./routes.notifications");
 const safetyRoutes          = require("./routes.safety");
 const pushDeviceRoutes      = require("./routes.pushDevices");
+const adminRoutes           = require("./routes.admin");
 const { startScheduler }    = require("./scheduler");
 
 // Produktion ohne TOTP_ENCRYPTION_KEY → Start abbrechen (Secrets nie unverschluesselt)
@@ -58,6 +59,7 @@ app.use("/messages",       messagesRoutes);
 app.use("/companies",      companiesRoutes);
 app.use("/notifications",  notificationsRoutes);
 app.use("/safety",         safetyRoutes);
+app.use("/admin",          adminRoutes);
 
 const PORT = process.env.PORT || 3000;
 

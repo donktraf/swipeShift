@@ -16,6 +16,9 @@ const { companyJobsWhere, countCompletedJobs } = require("./utils/companyStats")
 const { countNewMatches, pickInlineApplies, inlineScheduleConflicts } = require("./utils/employerJobCard");
 const { loadApplicantSummaries } = require("./applicantSummaries");
 
+const { restrictedEmployerIds } = require("./restrictedUsers");
+const { restrictedWhere, isRestricted, visibleApplyFilter } = require("./utils/moderation");
+
 const router = express.Router();
 
 // Pausierte Arbeitgeber: ihre Jobs sind fuer Worker unsichtbar und nicht bewerbbar
@@ -24,7 +27,7 @@ const router = express.Router();
 // Gespeichert, Deep Link) bleiben sichtbar – Bewerben ist dort per BLOCKED-Check in POST /:id/apply gesperrt.
 async function pausedEmployerFilter(userId) {
   const paused = await prisma.user.findMany({
-    where: { pausedAt: { not: null }, role: "employer" },
+    where: { role: "employer", OR: [{ pausedAt: { not: null } }, ...restrictedWhere().OR] },
     select: { id: true },
   });
   const hiddenIds = paused.map((u) => u.id);
@@ -365,8 +368,8 @@ router.post("/:id/apply", requireAuth, requireVerifiedEmail, async (req, res) =>
     // Job muss published sein — und der Arbeitgeber darf nicht pausiert sein
     let employerPaused = false;
     if (job.employerId) {
-      const employer = await prisma.user.findUnique({ where: { id: job.employerId }, select: { pausedAt: true } });
-      employerPaused = !!employer?.pausedAt;
+      const employer = await prisma.user.findUnique({ where: { id: job.employerId }, select: { pausedAt: true, bannedAt: true, suspendedUntil: true, suspensionReason: true } });
+      employerPaused = !!employer?.pausedAt || isRestricted(employer);
     }
     if (job.status !== "published" || employerPaused) {
       return res.status(400).json({ error: "JOB_UNAVAILABLE" });
@@ -588,7 +591,8 @@ router.get("/mine", requireAuth, requireVerifiedEmail, async (req, res) => {
       where: { employerId },
       orderBy: { createdAt: "desc" },
       include: {
-        applies: { select: { id: true, userId: true, status: true, autoAccepted: true, createdAt: true, conversation: { select: { id: true } } } },
+        // Offene Bewerbungen gesperrter/gebannter Worker zaehlen/erscheinen nicht (angenommene bleiben)
+        applies: { where: visibleApplyFilter(), select: { id: true, userId: true, status: true, autoAccepted: true, createdAt: true, conversation: { select: { id: true } } } },
       },
     });
 
@@ -804,6 +808,15 @@ router.get("/:id", requireAuth, requireVerifiedEmail, async (req, res) => {
   try {
     const job = await prisma.job.findUnique({ where: { id } });
     if (!job) return res.status(404).json({ error: "Job not found" });
+    // Job eines gesperrten/gebannten Employers: nur noch sichtbar, wenn der Nutzer bereits eine Bewerbung darauf hat
+    // (Kalender/Verlauf bleiben heil) bzw. selbst der Employer ist
+    if (job.employerId && job.employerId !== userId) {
+      const hidden = await restrictedEmployerIds();
+      if (hidden.has(job.employerId)) {
+        const mine = await prisma.apply.findFirst({ where: { userId, jobId: id }, select: { id: true } });
+        if (!mine) return res.status(404).json({ error: "JOB_UNAVAILABLE", code: "JOB_UNAVAILABLE" });
+      }
+    }
     const [enriched] = await enrichJobsWithRatings([job], userId);
 
     // Firmenblock: Branche/Business Areas (Employer-Profil) + abgeschlossene Schichten der Firma
@@ -861,6 +874,8 @@ router.get("/:id/applicants", requireAuth, requireVerifiedEmail, async (req, res
       where: {
         jobId,
         ...(statusFilter ? { status: statusFilter } : {}),
+        // Offene Bewerbungen gesperrter/gebannter Worker sind ausgeblendet
+        ...visibleApplyFilter(),
       },
       orderBy: { createdAt: "desc" },
     });

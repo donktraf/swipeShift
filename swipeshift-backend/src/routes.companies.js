@@ -8,6 +8,7 @@ const { cleanSocialLinks } = require("./utils/profileFields");
 const { computeResponseStats } = require("./utils/responseStats");
 const { computeWouldWorkAgain } = require("./utils/reviewLogic");
 const { companyJobsWhere, countCompletedJobs } = require("./utils/companyStats");
+const { restrictedEmployerIds } = require("./restrictedUsers");
 const { deriveRatingTags, averageCategories } = require("./utils/ratingTags");
 
 // GET /companies/:name
@@ -17,7 +18,8 @@ router.get("/:name", async (req, res) => {
     const companyName = decodeURIComponent(req.params.name);
 
     // Alle Jobs + Worker-Reviews für dieses Unternehmen parallel laden
-    const [jobs, workerReviews] = await Promise.all([
+    const hiddenEmployers = await restrictedEmployerIds();
+    let [jobs, workerReviews] = await Promise.all([
     prisma.job.findMany({
       where:   companyJobsWhere(companyName),
       select:  {
@@ -43,6 +45,8 @@ router.get("/:name", async (req, res) => {
     }),
     ]);
 
+    // Jobs gesperrter/gebannter Employer sind nicht oeffentlich sichtbar
+    jobs = jobs.filter((j) => !j.employerId || !hiddenEmployers.has(j.employerId));
     if (!jobs.length) return res.status(404).json({ error: "Company not found" });
 
     // Employer-Nutzer für erweiterte Firmeninfos (optional)

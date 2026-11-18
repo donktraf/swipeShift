@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const { requireAuth } = require("./auth");
 const { prisma } = require("./prisma");
+const { visibleApplyFilter } = require("./utils/moderation");
 
 // GET /notifications — dynamic notifications from existing DB data
 router.get("/", requireAuth, async (req, res) => {
@@ -77,6 +78,7 @@ router.get("/", requireAuth, async (req, res) => {
           job: { employerId: userId },
           status: "pending",
           autoAccepted: false, // Instant-Match-Bewerbungen brauchen keine Antwort
+          ...visibleApplyFilter(), // nicht von gesperrten/gebannten Workern
         },
         include: {
           user: { select: { firstName: true, lastName: true } },
@@ -126,6 +128,25 @@ router.get("/", requireAuth, async (req, res) => {
       }
 
       // 3. Reviews received from workers (future feature placeholder — skip for now)
+    }
+
+    // Verwarnungen durch das Moderationsteam (alle Rollen); Details/Notiz bleiben intern
+    const warnings = await prisma.moderationAction.findMany({
+      where: { targetUserId: userId, action: "warn" },
+      orderBy: { createdAt: "desc" },
+      take: 10,
+      select: { id: true, createdAt: true },
+    });
+    for (const w of warnings) {
+      notifications.push({
+        id: `warning-${w.id}`,
+        category: "system",
+        title: "Warning from SwipeShift",
+        body: "Our team reviewed a report about your account and issued a warning. Please follow our community guidelines — further violations can lead to a suspension.",
+        timestamp: w.createdAt,
+        actionLabel: null,
+        actionPayload: null,
+      });
     }
 
     // Sort all by timestamp descending

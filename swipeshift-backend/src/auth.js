@@ -4,6 +4,7 @@ const { shouldTouchLastSeen } = require("./utils/chatPresence");
 const { sanitizeCity } = require("./utils/deviceInfo");
 const { sanitizeTimeZone } = require("./utils/notifyPolicy");
 const { setBounded, shouldWriteTimeZone } = require("./utils/boundedCache");
+const { restrictionResponse } = require("./utils/moderation");
 
 // In-Memory-Drosselung fuer lastSeenAt/lastActiveAt-Updates (pro Prozess), damit nicht jeder
 // Request einen DB-Write ausloest. Verlust bei Neustart ist unkritisch.
@@ -89,7 +90,10 @@ async function requireAuth(req, res, next) {
   try {
     session = await db().userSession.findUnique({
       where: { id: payload.sid },
-      select: { userId: true, revokedAt: true, expiresAt: true },
+      select: {
+        userId: true, revokedAt: true, expiresAt: true,
+        user: { select: { bannedAt: true, suspendedUntil: true, suspensionReason: true } },
+      },
     });
   } catch (err) {
     console.error("requireAuth session lookup failed:", err);
@@ -104,6 +108,10 @@ async function requireAuth(req, res, next) {
   ) {
     return sessionError(res);
   }
+
+  // Gesperrte/gebannte Konten: auch mit noch gueltigem Token abweisen (Sessions werden bei Sperre zusaetzlich widerrufen)
+  const restricted = restrictionResponse(session.user);
+  if (restricted) return res.status(401).json(restricted.body);
 
   req.auth = payload; // { sub, role, email, sid, iat, exp }
   touchLastSeen(payload.sub);

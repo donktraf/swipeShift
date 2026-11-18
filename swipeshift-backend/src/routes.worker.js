@@ -10,6 +10,7 @@ const { payPerWorker, shiftHours } = require("./utils/jobCost");
 const { distanceMilesBetween } = require("./utils/haversine");
 const { companyJobsWhere, truncateText } = require("./utils/companyStats");
 const { jobNotesForApply } = require("./utils/jobNotes");
+const { restrictedEmployerIds } = require("./restrictedUsers");
 const { lastCompanyActivity } = require("./utils/savedCompanyDates");
 const { deriveApplicationStatus } = require("./utils/applicationStatus");
 const { reviewOverall, summarizeEmployerReviews, computeWouldWorkAgain, validateWorkerReviewBody } = require("./utils/reviewLogic");
@@ -127,7 +128,7 @@ router.get("/saved", requireAuth, requireVerifiedEmail, async (req, res) => {
           select: {
             id: true, title: true, company: true, logoEmoji: true,
             location: true, payText: true, shiftText: true, category: true,
-            tags: true, lat: true, lng: true, status: true, openSpots: true, startTime: true,
+            tags: true, lat: true, lng: true, status: true, openSpots: true, startTime: true, employerId: true,
           },
         },
       },
@@ -144,7 +145,11 @@ router.get("/saved", requireAuth, requireVerifiedEmail, async (req, res) => {
       : [];
     const applyMap = Object.fromEntries(applies.map((a) => [a.jobId, a.status]));
 
-    const saved = saves.map((s) => {
+    // Jobs gesperrter/gebannter Employer ausblenden — ausser der Worker hat sich beworben (Verlauf bleibt heil)
+    const hiddenEmployers = await restrictedEmployerIds();
+    const visibleSaves = saves.filter((s) => !(s.job?.employerId && hiddenEmployers.has(s.job.employerId)) || applyMap[s.jobId]);
+
+    const saved = visibleSaves.map((s) => {
       const applyStatus = applyMap[s.jobId];
       let appliedStatus = null;
       if (applyStatus === "pending")   appliedStatus = "Applied";
@@ -412,6 +417,7 @@ router.get("/saved-companies", requireAuth, requireVerifiedEmail, async (req, re
       orderBy: { savedAt: "desc" },
     });
 
+    const hiddenEmployers = await restrictedEmployerIds();
     const enriched = await Promise.all(
       savedList.map(async (sc) => {
         const [jobs, reviews] = await Promise.all([
@@ -425,7 +431,8 @@ router.get("/saved-companies", requireAuth, requireVerifiedEmail, async (req, re
             select: { overallExperience: true },
           }),
         ]);
-        return { sc, jobs, reviews };
+        // Jobs gesperrter/gebannter Employer zaehlen nicht als offene Jobs
+        return { sc, jobs: jobs.filter((j) => !j.employerId || !hiddenEmployers.has(j.employerId)), reviews };
       })
     );
 

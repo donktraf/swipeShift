@@ -19,6 +19,9 @@ const { computeScheduleConflicts } = require("./utils/scheduleConflict");
 const { buildPastJobs, buildAccountStatus, buildMatchHint } = require("./utils/workerDetail");
 const { ageFromBirthDate, availableDays, summarizeReviews, summarizeCompletedJobs, cleanSelfRatedSkills, stringList } = require("./utils/workerProfile");
 
+const { visibleApplyFilter, isRestricted } = require("./utils/moderation");
+const RESTRICTION_FIELDS = { bannedAt: true, suspendedUntil: true, suspensionReason: true };
+
 const router = express.Router();
 
 // ─────────────────────────────────────────────
@@ -43,7 +46,8 @@ router.get("/applicants", requireAuth, requireVerifiedEmail, async (req, res) =>
 
     // Alle Bewerbungen für diese Jobs
     const applies = await prisma.apply.findMany({
-      where:   { jobId: { in: jobIds } },
+      // Offene Bewerbungen gesperrter/gebannter Worker sind ausgeblendet
+      where:   { jobId: { in: jobIds }, ...visibleApplyFilter() },
       orderBy: { createdAt: "desc" },
       include: { conversation: { select: { id: true } } },
     });
@@ -135,7 +139,7 @@ router.get("/workers/:userId", requireAuth, requireVerifiedEmail, async (req, re
       where: { id: userId },
       select: {
         id: true, firstName: true, lastName: true, location: true, emailVerifiedAt: true,
-        pausedAt: true, createdAt: true,
+        pausedAt: true, createdAt: true, bannedAt: true,
         worker: {
           select: {
             dateOfBirth: true, bio: true, profilePhotoUrl: true, jobInterests: true, availability: true,
@@ -146,7 +150,7 @@ router.get("/workers/:userId", requireAuth, requireVerifiedEmail, async (req, re
         },
       },
     });
-    if (!user) return res.status(404).json({ error: "Worker not found" });
+    if (!user || user.bannedAt) return res.status(404).json({ error: "Worker not found" }); // gebannt = nicht mehr abrufbar
 
     const [reviews, applies] = await Promise.all([
       prisma.review.findMany({
@@ -234,11 +238,12 @@ router.post("/applicants/:applyId/accept", requireAuth, requireVerifiedEmail, as
 
     const apply = await prisma.apply.findUnique({
       where:   { id: applyId },
-      include: { job: { select: { employerId: true } } },
+      include: { job: { select: { employerId: true } }, user: { select: RESTRICTION_FIELDS } },
     });
 
     if (!apply)                              return res.status(404).json({ error: "Application not found" });
     if (apply.job.employerId !== employerId) return res.status(403).json({ error: "Forbidden" });
+    if (isRestricted(apply.user))            return res.status(409).json({ error: "This worker is no longer available.", code: "WORKER_UNAVAILABLE" });
 
     await prisma.apply.update({
       where: { id: applyId },
@@ -308,7 +313,7 @@ router.get("/stats", requireAuth, requireVerifiedEmail, async (req, res) => {
 
     const allApplies = myJobIds.length
       ? await prisma.apply.findMany({
-          where:  { jobId: { in: myJobIds } },
+          where:  { jobId: { in: myJobIds }, ...visibleApplyFilter() },
           select: { id: true, createdAt: true, status: true, autoAccepted: true },
         })
       : [];
@@ -504,7 +509,7 @@ router.get("/assigned-workers", requireAuth, requireVerifiedEmail, async (req, r
             userId: true,
             autoAccepted: true,
             user: {
-              select: { id: true, firstName: true, lastName: true },
+              select: { id: true, firstName: true, lastName: true, ...RESTRICTION_FIELDS },
             },
           },
         },
@@ -523,6 +528,7 @@ router.get("/assigned-workers", requireAuth, requireVerifiedEmail, async (req, r
         applyId:     a.id,
         userId:      a.userId,
         autoAccepted: a.autoAccepted === true,
+        restricted:  isRestricted(a.user), // gesperrt/gebannt: bleibt sichtbar (Bezahlung), nur markiert
         name:        `${a.user?.firstName ?? ""} ${a.user?.lastName ?? ""}`.trim(),
         photoEmoji:  "👤",
         rating:      0.0,
@@ -555,7 +561,7 @@ router.get("/jobs/:jobId/payments", requireAuth, requireVerifiedEmail, async (re
 
     const applies = await prisma.apply.findMany({
       where:   { jobId, status: "accepted" },
-      include: { user: { select: { id: true, firstName: true, lastName: true } } },
+      include: { user: { select: { id: true, firstName: true, lastName: true, ...RESTRICTION_FIELDS } } },
       orderBy: { createdAt: "asc" },
     });
 
@@ -575,6 +581,7 @@ router.get("/jobs/:jobId/payments", requireAuth, requireVerifiedEmail, async (re
       hoursWorked,
       hourlyRate,
       isPaid:      a.isPaid,
+      restricted:  isRestricted(a.user), // bleibt bezahlbar, nur markiert
     }));
 
     return res.json({ workers });
@@ -913,7 +920,7 @@ router.get("/saved-applicants", requireAuth, requireVerifiedEmail, async (req, r
     const employerId = req.auth.sub;
 
     const saved = await prisma.savedApplicant.findMany({
-      where:   { employerId },
+      where:   { employerId, apply: visibleApplyFilter() },
       include: {
         apply: {
           include: {
@@ -998,7 +1005,7 @@ router.get("/calendar", requireAuth, requireVerifiedEmail, async (req, res) => {
           where: { status: "accepted" },
           select: {
             id: true, userId: true, isPaid: true,
-            user: { select: { firstName: true, lastName: true, worker: { select: { profilePhotoUrl: true } } } },
+            user: { select: { firstName: true, lastName: true, ...RESTRICTION_FIELDS, worker: { select: { profilePhotoUrl: true } } } },
           },
         },
       },
@@ -1032,6 +1039,7 @@ router.get("/calendar", requireAuth, requireVerifiedEmail, async (req, res) => {
           userId:   a.userId,
           name:     `${a.user?.firstName ?? ""} ${a.user?.lastName ?? ""}`.trim() || "Unknown",
           photoUrl: a.user?.worker?.profilePhotoUrl ?? null,
+          restricted: isRestricted(a.user),
           summary:  summaries.get(a.userId) ?? null,
         })),
         averageWorkerRating: averageRating(workerSummaries),

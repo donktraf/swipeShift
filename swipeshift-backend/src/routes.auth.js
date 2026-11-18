@@ -3,7 +3,9 @@ const express = require("express");
 const bcrypt = require("bcrypt");
 const { z } = require("zod");
 const { v4: uuid } = require("uuid");
-const { completeLogin } = require("./sessions");
+const { completeLogin, respondIfRestricted } = require("./sessions");
+const { normalizeEmail, decideAppleLogin, decideGoogleLogin, needsTakeoverCleanup } = require("./utils/socialLogin");
+const { sanitizeTakenOverAccount } = require("./accountTakeover");
 const { prisma } = require("./prisma.js");
 const crypto = require("crypto");
 const { sendMail } = require("./mailer");
@@ -147,6 +149,12 @@ const mailLimiter = rateLimit({
 
 router.post("/register", registerLimiter, async (req, res) => {
 
+  // E-Mail vor der Validierung normalisieren (trim + lowercase), damit der Bestehende-Konten-/Bann-Check greift.
+  // TODO: Plus-Adressen/Gmail-Punkte werden nicht kanonisiert (siehe utils/socialLogin.js).
+  if (req.body && typeof req.body === "object" && typeof req.body.email === "string") {
+    req.body = { ...req.body, email: normalizeEmail(req.body.email) };
+  }
+
   const parsed = registerSchema.safeParse(req.body);
 
   if (!parsed.success) {
@@ -279,6 +287,9 @@ router.post("/login", loginLimiter, async (req, res) => {
       passwordHash: true,
       twoFactorEnabled: true,
       twoFactorMethod: true,
+      bannedAt: true,
+      suspendedUntil: true,
+      suspensionReason: true,
     },
   });
 
@@ -315,6 +326,7 @@ router.post("/login", loginLimiter, async (req, res) => {
     return res.json(await completeLogin(user, req));
   } catch (err) {
     // z.B. Mailversand fuer den 2FA-Code fehlgeschlagen — nicht den Prozess abstuerzen lassen
+    if (respondIfRestricted(err, res)) return;
     console.error("POST /auth/login completeLogin error:", err);
     return res.status(500).json({ error: "Could not complete sign-in. Please try again." });
   }
@@ -487,50 +499,41 @@ router.post("/google", async (req, res) => {
 
     console.log("Google Object: ", payload);
 
-    const email = payload.email.toLowerCase();
+    const email = normalizeEmail(payload.email);
     const firstName = payload.given_name || "User";
     const lastName = payload.family_name || "Google";
-    const profilePhotoUrl = payload.picture || null;
 
     let user = await prisma.user.findUnique({
       where: { email }
     });
 
-    // Google bestätigt die Email -> dann in  DB speichern
+    // Nur die von Google VERIFIZIERTE Token-E-Mail darf ein Konto matchen/anlegen (siehe utils/socialLogin.js)
     const googleSaysVerified = payload.email_verified === true;
+    const decision = decideGoogleLogin({ tokenEmail: email, emailVerified: googleSaysVerified, existingUser: user });
+    if (decision.action === "reject") return res.status(decision.status).json({ error: decision.error });
 
     const SOCIAL_LOGIN_PASSWORD_PLACEHOLDER = "SOCIAL_LOGIN";
 
     //merken ob User gerade neu erstellt wird
     let isNewUser = false;
 
-    if (!user) {
-      isNewUser = true, // ✅
+    if (decision.action === "create") {
+      isNewUser = true;
       user = await prisma.user.create({
         data: {
           email,
           passwordHash: SOCIAL_LOGIN_PASSWORD_PLACEHOLDER, // ✅ wird nie genutzt
           onboarding: "pendingRole",
-          //role: null,
           firstName,
           lastName,
           location: null,
-          //profilePhotoUrl: profilePhotoUrl,
-          emailVerifiedAt: googleSaysVerified ? new Date() : null,
+          emailVerifiedAt: new Date(),
         },
       });
-
       console.log("User gibts nicht also wurde er registriert");
-    } else {
-      console.log("User existiert. Email aber noch nicht verifiziert");
-      // ✅ Falls User existiert und noch NICHT verified, aber Google sagt verified -> updaten
-      if (googleSaysVerified && !user.emailVerifiedAt) {
-        console.log("Google hat Email verifiziert.", )
-        user = await prisma.user.update({
-          where: { id: user.id },
-          data: { emailVerifiedAt: new Date() },
-        });
-      }
+    } else if (needsTakeoverCleanup(user)) {
+      // Bisher unverifiziertes Passwort-Konto wird per Google uebernommen: Angreifer-Passwort/2FA/Sitzungen weg
+      user = await sanitizeTakenOverAccount(user);
     }
 
     return res.json(
@@ -540,6 +543,7 @@ router.post("/google", async (req, res) => {
       })
     );
   } catch (e) {
+    if (respondIfRestricted(e, res)) return;
     console.error("Google auth error:", e);
     console.error(e);
     return res.status(401).json({ error: "Invalid token" });
@@ -561,41 +565,80 @@ router.post("/apple", async (req, res) => {
 
     console.log("Apple aud:", payload.aud, "iss:", payload.iss, "sub:", payload.sub);
 
-    // Apple payload: email evtl vorhanden, sub ist stabiler Identifier
-    const appleEmail = (payload.email || email || "").toLowerCase();
-    if (!appleEmail) {
-      // Falls Apple keine Email liefert (passiert je nach Einstellungen),
-      // musst du alternativ über `sub` mappen.
-      return res.status(400).json({ error: "Apple did not provide email" });
-    }
+    // Apple liefert die E-Mail nicht immer im Token. Der Body (`email`) ist UNVERIFIZIERT:
+    // nie zum Einloggen in ein bestehendes Konto, hoechstens als Kontaktangabe fuer ein neues (siehe utils/socialLogin.js).
+    const appleSub = typeof payload.sub === "string" ? payload.sub : "";
+    const lookupEmail = normalizeEmail(payload.email) || normalizeEmail(email);
 
-    let user = await prisma.user.findUnique({ where: { email: appleEmail } });
-
-    //merken ob User gerade neu erstellt wird
-    let isNewUser = false;
-
-    if (!user) {
-      isNewUser = true;
-      user = await prisma.user.create({
-        data: {
-          email: appleEmail,
-          passwordHash: "SOCIAL_LOGIN",
-          role: null,
-          onboarding: "pendingRole",
-          firstName: firstName || "User",
-          lastName: lastName || "Apple",
-          location: null,
-        },
+    // Entscheidung + Konto laden/anlegen. Bei paralleler Erst-Anmeldung (Unique-Konflikt auf appleSub/email)
+    // wird genau einmal neu entschieden — nie "Invalid token".
+    const resolveAppleUser = async (attempt) => {
+      const [userBySub, userByEmail] = await Promise.all([
+        appleSub ? prisma.user.findUnique({ where: { appleSub } }) : null,
+        lookupEmail ? prisma.user.findUnique({ where: { email: lookupEmail } }) : null,
+      ]);
+      const decision = decideAppleLogin({
+        tokenSub: appleSub,
+        tokenEmail: payload.email,
+        tokenEmailVerified: payload.email_verified,
+        bodyEmail: email,
+        userBySub,
+        userByEmail,
       });
-    }
+      if (decision.action === "reject") return { reject: { status: decision.status, body: { error: decision.error, code: decision.code } } };
+
+      if (decision.action === "login") {
+        let user = decision.user;
+        // Erster Apple-Login eines bestehenden Kontos (per verifizierter Token-E-Mail): Subject merken
+        if (decision.linkSub && user.appleSub && user.appleSub !== appleSub) {
+          // Konto ist schon mit einer ANDEREN Apple-ID verknuepft → nicht ueberschreiben
+          return { reject: { status: 409, body: { error: "This account is linked to a different Apple ID.", code: "APPLE_ID_MISMATCH" } } };
+        }
+        if (decision.linkSub && needsTakeoverCleanup(user)) {
+          user = await sanitizeTakenOverAccount(user); // Pre-Hijacking-Schutz (siehe accountTakeover.js)
+        }
+        if (decision.linkSub && !user.appleSub) {
+          user = await prisma.user.update({ where: { id: user.id }, data: { appleSub } });
+        }
+        return { user, isNewUser: false };
+      }
+
+      try {
+        const user = await prisma.user.create({
+          data: {
+            email: decision.email,
+            appleSub,
+            passwordHash: "SOCIAL_LOGIN",
+            role: null,
+            onboarding: "pendingRole",
+            firstName: firstName || "User",
+            lastName: lastName || "Apple",
+            location: null,
+            emailVerifiedAt: decision.emailVerified ? new Date() : null, // Body-E-Mail bleibt unverifiziert
+          },
+        });
+        return { user, isNewUser: true };
+      } catch (err) {
+        if (err?.code === "P2002" && attempt === 0) return resolveAppleUser(1);
+        if (err?.code === "P2002") {
+          return { reject: { status: 409, body: { error: "Please try signing in again.", code: "TRY_AGAIN" } } };
+        }
+        throw err;
+      }
+    };
+
+    const resolved = await resolveAppleUser(0);
+    if (resolved.reject) return res.status(resolved.reject.status).json(resolved.reject.body);
+    const { user, isNewUser } = resolved;
 
     return res.json(
       await completeLogin(user, req, {
-        userOverrides: { isEmailVerified: payload.email_verified ?? true, hasSocialLogin: true },
+        userOverrides: { isEmailVerified: !!user.emailVerifiedAt, hasSocialLogin: true },
         extra: { isNewUser },
       })
     );
   } catch (e) {
+    if (respondIfRestricted(e, res)) return;
     console.error("Apple auth error:", e);
     return res.status(401).json({ error: "Invalid token" });
   }

@@ -26,7 +26,7 @@ const { z } = require("zod");
 const { prisma } = require("./prisma.js");
 const { removeDevicesForSessions } = require("./pushDevices");
 const { requireAuth, JWT_SECRET } = require("./auth");
-const { createSession, authUserPayload, issueTwoFactorCode, issueTotpChallenge } = require("./sessions");
+const { respondIfRestricted, createSession, authUserPayload, issueTwoFactorCode, issueTotpChallenge } = require("./sessions");
 const { sendMail } = require("./mailer");
 const {
   codeMatches, isCodeUsable, TOTP_CHALLENGE_MARKER, MAX_ATTEMPTS,
@@ -530,6 +530,7 @@ router.post("/2fa/verify-login", codeLimiter, async (req, res) => {
       user: authUserPayload(user, isSocial ? { profilePhotoUrl: user.profilePhotoUrl ?? null } : {}),
     });
   } catch (err) {
+    if (respondIfRestricted(err, res)) return;
     console.error("POST /auth/2fa/verify-login error:", err);
     return res.status(500).json({ error: "Internal server error" });
   }

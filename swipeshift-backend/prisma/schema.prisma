@@ -36,6 +36,9 @@ model User {
 
   emailVerifiedAt DateTime?
 
+  // Apple-Subject (stabile Apple-ID) → Apple-Login matcht darueber statt ueber unverifizierte E-Mail
+  appleSub String? @unique
+
   // Presence fuer Chat: zuletzt aktiv (gedrosselt aktualisiert in requireAuth)
   lastSeenAt DateTime?
 
@@ -56,6 +59,14 @@ model User {
   settings Json?
   // Konto pausiert: Worker kann sich nicht bewerben, Jobs eines Employers sind ausgeblendet
   pausedAt DateTime?
+  // Moderation: Admin-Konto (nur per CLI-Skript `npm run make-admin` gesetzt, nie per API)
+  isAdmin Boolean @default(false)
+  // Gesperrt bis (Zukunft = gesperrt; "pending_review" = Auto-Sperre ohne festes Ende, Zeitpunkt weit in der Zukunft)
+  suspendedUntil   DateTime?
+  // Dauerhaft gebannt
+  bannedAt         DateTime?
+  // "pending_review" | "admin" (siehe src/utils/moderation.js)
+  suspensionReason String?
   // IANA-Zeitzone des Geraets (Header X-Time-Zone) → Ruhezeiten fuer Push, siehe src/utils/notifyPolicy.js
   timeZone String?
 
@@ -556,7 +567,28 @@ model UserReport {
   details        String?  @db.Text
   status         String   @default("open")
   createdAt      DateTime @default(now())
+  // Moderation: "action_taken" | "dismissed"
+  resolvedAt     DateTime?
+  resolvedById   String?
+  resolution     String?
 
   @@index([reporterId, reportedUserId, conversationId])
   @@index([status])
+  @@index([reportedUserId, status])
+}
+
+// Protokoll aller Moderationsentscheidungen (adminId null = System, z.B. Auto-Sperre)
+model ModerationAction {
+  id           String   @id @default(uuid())
+  reportId     String?
+  targetUserId String
+  adminId      String?
+  // "warn" | "suspend" | "ban" | "dismiss" | "auto_suspend" | "lift"
+  action       String
+  durationDays Int?
+  note         String?  @db.Text
+  createdAt    DateTime @default(now())
+
+  @@index([targetUserId, createdAt])
+  @@index([reportId])
 }
