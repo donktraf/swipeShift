@@ -15,6 +15,7 @@ const { normalizeCancellationReason } = require("./utils/applicationStatus");
 const { companyJobsWhere, countCompletedJobs } = require("./utils/companyStats");
 const { countNewMatches, pickInlineApplies, inlineScheduleConflicts } = require("./utils/employerJobCard");
 const { loadApplicantSummaries } = require("./applicantSummaries");
+const rel = require("./utils/reliability");
 
 const { restrictedEmployerIds } = require("./restrictedUsers");
 const { restrictedWhere, isRestricted, visibleApplyFilter } = require("./utils/moderation");
@@ -409,6 +410,12 @@ router.post("/:id/apply", requireAuth, requireVerifiedEmail, async (req, res) =>
       if (conflict) return res.status(409).json({ error: "SCHEDULING_CONFLICT" });
     }
 
+    // Der Worker hat diese (angenommene) Schicht selbst storniert → keine erneute Bewerbung auf denselben Job
+    const previous = await prisma.apply.findUnique({ where: { userId_jobId: { userId, jobId } }, select: { status: true } });
+    if (previous?.status === rel.CANCELLED_BY_WORKER) {
+      return res.status(409).json({ error: "ALREADY_CANCELLED", message: "You cancelled this shift earlier and can't apply to it again." });
+    }
+
     // Apply + Conversation in einer Transaktion.
     // Instant Match: Zaehlen der angenommenen Bewerbungen + Insert muessen atomar sein, sonst koennten
     // zwei parallele Bewerbungen den letzten freien Platz beide bekommen. Daher Isolation Serializable
@@ -592,9 +599,15 @@ router.get("/mine", requireAuth, requireVerifiedEmail, async (req, res) => {
       orderBy: { createdAt: "desc" },
       include: {
         // Offene Bewerbungen gesperrter/gebannter Worker zaehlen/erscheinen nicht (angenommene bleiben)
-        applies: { where: visibleApplyFilter(), select: { id: true, userId: true, status: true, autoAccepted: true, createdAt: true, conversation: { select: { id: true } } } },
+        applies: { where: visibleApplyFilter(), select: { id: true, userId: true, status: true, autoAccepted: true, createdAt: true, attendance: true, disputedAt: true, conversation: { select: { id: true } } } },
       },
     });
+    // Anwesenheit noch zu erfassen (Schicht vorbei, 48-h-Fenster offen) → Hinweis auf der Jobkarte
+    const now = new Date();
+    const attendancePendingByJob = new Map(jobs.map((j) => [j.id,
+      j.applies.filter((a) => rel.attendanceState(a, j, now).pending).length]));
+    // Vom Worker stornierte Schichten sind keine Bewerbungen mehr (Zaehler, Inline-Bewerber, New Matches)
+    for (const j of jobs) j.applies = j.applies.filter((a) => a.status !== rel.CANCELLED_BY_WORKER);
 
     // Inline-Bewerber (max. 2 pro Job) – Profildaten fuer ALLE Jobs gebuendelt (kein N+1)
     const inlineByJob = new Map(jobs.map(({ id, status, applies }) =>
@@ -621,6 +634,7 @@ router.get("/mine", requireAuth, requireVerifiedEmail, async (req, res) => {
     const result = jobs.map(({ applies, ...job }) => ({
       ...job,
       ...summarizeJobApplies(applies),
+      attendancePendingCount: attendancePendingByJob.get(job.id) ?? 0,
       newMatchCount: countNewMatches(applies, job.applicantsSeenAt),
       inlineApplicants: inlineByJob.get(job.id).map((a) => {
         const u = userById.get(a.userId);
@@ -633,6 +647,7 @@ router.get("/mine", requireAuth, requireVerifiedEmail, async (req, res) => {
           profilePhotoUrl: u?.worker?.profilePhotoUrl ?? null,
           ratingAverage: summaries.get(a.userId)?.ratingAverage ?? null,
           reviewCount: summaries.get(a.userId)?.reviewCount ?? 0,
+          reliability: summaries.get(a.userId)?.reliability ?? null,
           // Shift-Fit-Hinweis (wie auf der Bewerberkarte)
           availableDays: summaries.get(a.userId)?.availableDays ?? [],
           availableTimes: summaries.get(a.userId)?.availableTimes ?? [],
@@ -873,7 +888,7 @@ router.get("/:id/applicants", requireAuth, requireVerifiedEmail, async (req, res
     const applies = await prisma.apply.findMany({
       where: {
         jobId,
-        ...(statusFilter ? { status: statusFilter } : {}),
+        status: statusFilter ? String(statusFilter) : { in: rel.LISTED_STATUSES },
         // Offene Bewerbungen gesperrter/gebannter Worker sind ausgeblendet
         ...visibleApplyFilter(),
       },

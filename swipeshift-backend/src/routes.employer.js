@@ -20,6 +20,8 @@ const { buildPastJobs, buildAccountStatus, buildMatchHint } = require("./utils/w
 const { ageFromBirthDate, availableDays, summarizeReviews, summarizeCompletedJobs, cleanSelfRatedSkills, stringList } = require("./utils/workerProfile");
 
 const { visibleApplyFilter, isRestricted } = require("./utils/moderation");
+const rel = require("./utils/reliability");
+const { loadReliability, recordEmployerAttendance } = require("./reliability");
 const RESTRICTION_FIELDS = { bannedAt: true, suspendedUntil: true, suspensionReason: true };
 
 const router = express.Router();
@@ -47,7 +49,8 @@ router.get("/applicants", requireAuth, requireVerifiedEmail, async (req, res) =>
     // Alle Bewerbungen für diese Jobs
     const applies = await prisma.apply.findMany({
       // Offene Bewerbungen gesperrter/gebannter Worker sind ausgeblendet
-      where:   { jobId: { in: jobIds }, ...visibleApplyFilter() },
+      // (vom Worker stornierte Schichten erscheinen hier nicht mehr)
+      where:   { jobId: { in: jobIds }, status: { in: rel.LISTED_STATUSES }, ...visibleApplyFilter() },
       orderBy: { createdAt: "desc" },
       include: { conversation: { select: { id: true } } },
     });
@@ -152,7 +155,7 @@ router.get("/workers/:userId", requireAuth, requireVerifiedEmail, async (req, re
     });
     if (!user || user.bannedAt) return res.status(404).json({ error: "Worker not found" }); // gebannt = nicht mehr abrufbar
 
-    const [reviews, applies] = await Promise.all([
+    const [reviews, applies, reliabilityMap] = await Promise.all([
       prisma.review.findMany({
         where: { workerId: userId },
         orderBy: { createdAt: "desc" },
@@ -171,6 +174,7 @@ router.get("/workers/:userId", requireAuth, requireVerifiedEmail, async (req, re
           job: { select: { title: true, company: true, startTime: true, category: true, endTime: true, status: true, cancellationReason: true } },
         },
       }),
+      loadReliability([userId]), // Anwesenheit / No-Shows / kurzfristige Stornos
     ]);
 
     const w = user.worker;
@@ -208,6 +212,7 @@ router.get("/workers/:userId", requireAuth, requireVerifiedEmail, async (req, re
         ...summarizeCompletedJobs(applies),
       },
       pastJobs: buildPastJobs(applies.filter((a) => a.status === "accepted")),
+      reliability: reliabilityMap.get(userId) ?? null,
       account: buildAccountStatus(user),
       matchHint: buildMatchHint(contextJob, w)?.text ?? null,
       recentReviews: reviews
@@ -244,6 +249,7 @@ router.post("/applicants/:applyId/accept", requireAuth, requireVerifiedEmail, as
     if (!apply)                              return res.status(404).json({ error: "Application not found" });
     if (apply.job.employerId !== employerId) return res.status(403).json({ error: "Forbidden" });
     if (isRestricted(apply.user))            return res.status(409).json({ error: "This worker is no longer available.", code: "WORKER_UNAVAILABLE" });
+    if (apply.status === rel.CANCELLED_BY_WORKER) return res.status(409).json({ error: "The worker cancelled this shift.", code: "CANCELLED_BY_WORKER" });
 
     await prisma.apply.update({
       where: { id: applyId },
@@ -274,6 +280,7 @@ router.post("/applicants/:applyId/decline", requireAuth, requireVerifiedEmail, a
 
     if (!apply)                              return res.status(404).json({ error: "Application not found" });
     if (apply.job.employerId !== employerId) return res.status(403).json({ error: "Forbidden" });
+    if (apply.status === rel.CANCELLED_BY_WORKER) return res.status(409).json({ error: "The worker cancelled this shift.", code: "CANCELLED_BY_WORKER" });
 
     await prisma.apply.update({
       where: { id: applyId },
@@ -304,7 +311,7 @@ router.get("/stats", requireAuth, requireVerifiedEmail, async (req, res) => {
       select: {
         id: true, status: true, payAmount: true, openSpots: true, category: true,
         startTime: true, endTime: true,
-        applies: { where: { status: "accepted" }, select: { isPaid: true } },
+        applies: { where: { status: "accepted" }, select: { isPaid: true, attendance: true, disputedAt: true, disputeResolvedAt: true } },
       },
     });
     const myJobIds = myJobs.map((j) => j.id);
@@ -371,7 +378,7 @@ router.get("/financials", requireAuth, requireVerifiedEmail, async (req, res) =>
         id: true, title: true, status: true, payAmount: true,
         openSpots: true, startTime: true, endTime: true,
         shiftText: true, logoEmoji: true, category: true,
-        applies: { where: { status: "accepted" }, select: { isPaid: true } },
+        applies: { where: { status: "accepted" }, select: { isPaid: true, attendance: true, disputedAt: true, disputeResolvedAt: true } },
       },
       orderBy: { startTime: "desc" },
     });
@@ -434,7 +441,8 @@ router.get("/financials", requireAuth, requireVerifiedEmail, async (req, res) =>
 
     // status: upcoming | completed | paid (alle angenommenen Worker bezahlt)
     const toListItem = (kind) => (j) => {
-      const fullyPaid = j.applies.length > 0 && j.applies.every(a => a.isPaid);
+      const payable = rel.billable(j.applies); // endgueltige No-Shows werden nicht bezahlt
+      const fullyPaid = payable.length > 0 && payable.every(a => a.isPaid);
       return {
         id:        j.id,
         title:     j.title,
@@ -479,6 +487,7 @@ router.post("/applicants/:applyId/unassign", requireAuth, requireVerifiedEmail, 
 
     if (!apply)                              return res.status(404).json({ error: "Application not found" });
     if (apply.job.employerId !== employerId) return res.status(403).json({ error: "Forbidden" });
+    if (apply.status === rel.CANCELLED_BY_WORKER) return res.status(409).json({ error: "The worker cancelled this shift.", code: "CANCELLED_BY_WORKER" });
 
     await prisma.apply.update({ where: { id: applyId }, data: { status: "pending", autoAccepted: false } });
     return res.json({ ok: true, applyId, action: "unassigned" });
@@ -579,7 +588,9 @@ router.get("/jobs/:jobId/payments", requireAuth, requireVerifiedEmail, async (re
       jobTitle:    job.title,
       shiftDate:   shiftLabel,
       hoursWorked,
-      hourlyRate,
+      // No-Show (endgueltig): nicht berechnet → Stundenlohn 0; bei offenem Einspruch noch nicht bezahlbar
+      hourlyRate:  rel.isFinalNoShow(a) ? 0 : hourlyRate,
+      paymentState: rel.paymentState(a), // paid | pending | no_show | under_review
       isPaid:      a.isPaid,
       restricted:  isRestricted(a.user), // bleibt bezahlbar, nur markiert
     }));
@@ -608,6 +619,8 @@ router.post("/jobs/:jobId/workers/:applyId/pay", requireAuth, requireVerifiedEma
     if (!apply)                              return res.status(404).json({ error: "Application not found" });
     if (apply.jobId !== jobId)               return res.status(400).json({ error: "Apply does not belong to this job" });
     if (apply.job.employerId !== employerId) return res.status(403).json({ error: "Forbidden" });
+    if (rel.isNoShowUnderReview(apply)) return res.status(409).json({ error: "The worker disputed the no-show. Payment is on hold until our team has reviewed it.", code: "NO_SHOW_UNDER_REVIEW" });
+    if (rel.isFinalNoShow(apply))       return res.status(409).json({ error: "This worker was recorded as a no-show and is not billed.", code: "NO_SHOW" });
 
     await prisma.apply.update({ where: { id: applyId }, data: { isPaid: true } });
     if (!apply.isPaid) events.paymentReceived([applyId]); // fire-and-forget
@@ -635,10 +648,14 @@ router.post("/jobs/:jobId/pay-all", requireAuth, requireVerifiedEmail, async (re
     if (!job)                          return res.status(404).json({ error: "Job not found" });
     if (job.employerId !== employerId) return res.status(403).json({ error: "Forbidden" });
 
-    // Nur frisch bezahlte Worker benachrichtigen
-    const unpaid = await prisma.apply.findMany({ where: { jobId, status: "accepted", isPaid: false }, select: { id: true } });
+    // Nur frisch bezahlte Worker benachrichtigen; No-Shows (endgueltig oder unter Einspruch) werden uebersprungen
+    const candidates = await prisma.apply.findMany({
+      where: { jobId, status: "accepted", isPaid: false },
+      select: { id: true, attendance: true, disputedAt: true, disputeResolvedAt: true },
+    });
+    const unpaid = candidates.filter(rel.isPayable);
     const { count } = await prisma.apply.updateMany({
-      where: { jobId, status: "accepted" },
+      where: { jobId, status: "accepted", id: { in: unpaid.map((a) => a.id) } },
       data:  { isPaid: true },
     });
     events.paymentReceived(unpaid.map((a) => a.id)); // fire-and-forget
@@ -646,6 +663,76 @@ router.post("/jobs/:jobId/pay-all", requireAuth, requireVerifiedEmail, async (re
     return res.json({ ok: true, updatedCount: count });
   } catch (err) {
     console.error("POST /employer/jobs/:jobId/pay-all error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─────────────────────────────────────────────
+// GET /employer/jobs/:jobId/attendance
+// Angenommene Worker eines Jobs mit Anwesenheits-Status (Erfassung nach Schichtende, 48-h-Fenster).
+// Regeln: utils/reliability.js
+// ─────────────────────────────────────────────
+router.get("/jobs/:jobId/attendance", requireAuth, requireVerifiedEmail, async (req, res) => {
+  try {
+    const employerId = req.auth.sub;
+    const { jobId }  = req.params;
+    const now = new Date();
+
+    const job = await prisma.job.findUnique({
+      where:  { id: jobId },
+      select: { id: true, title: true, employerId: true, status: true, startTime: true, endTime: true },
+    });
+    if (!job)                          return res.status(404).json({ error: "Job not found" });
+    if (job.employerId !== employerId) return res.status(403).json({ error: "Forbidden" });
+
+    const applies = await prisma.apply.findMany({
+      where:   { jobId, status: "accepted" },
+      include: { user: { select: { id: true, firstName: true, lastName: true } } },
+      orderBy: { createdAt: "asc" },
+    });
+
+    const workers = applies.map((a) => {
+      const state = rel.attendanceState(a, job, now);
+      return {
+        applyId:          a.id,
+        userId:           a.userId,
+        name:             `${a.user?.firstName ?? ""} ${a.user?.lastName ?? ""}`.trim() || "Unknown",
+        attendance:       a.attendance ?? null,
+        attendanceSource: a.attendanceSource ?? null,
+        canRecord:        state.canRecord,
+        pending:          state.pending,
+        disputeStatus:    rel.disputeStatus(a),
+        disputeNote:      a.disputedAt ? a.disputeNote : null,
+      };
+    });
+    const state = rel.attendanceState({ status: "accepted" }, job, now);
+
+    return res.json({
+      job: { id: job.id, title: job.title, startTime: job.startTime, endTime: job.endTime },
+      ended: state.ended,
+      deadline: state.deadline,
+      guidance: rel.GUIDANCE_TEXT,
+      workers,
+    });
+  } catch (err) {
+    console.error("GET /employer/jobs/:id/attendance error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─────────────────────────────────────────────
+// POST /employer/applicants/:applyId/attendance  { status: "attended" | "late" | "no_show" }
+// Nach Schichtende, bis 48 h danach bzw. bis der Worker widerspricht.
+// ─────────────────────────────────────────────
+router.post("/applicants/:applyId/attendance", requireAuth, requireVerifiedEmail, async (req, res) => {
+  try {
+    const result = await recordEmployerAttendance({
+      applyId: req.params.applyId, employerId: req.auth.sub, value: req.body?.status,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error, code: result.code });
+    return res.json({ ok: true, applyId: req.params.applyId, attendance: result.attendance });
+  } catch (err) {
+    console.error("POST /employer/applicants/:id/attendance error:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -1004,7 +1091,7 @@ router.get("/calendar", requireAuth, requireVerifiedEmail, async (req, res) => {
         applies: {
           where: { status: "accepted" },
           select: {
-            id: true, userId: true, isPaid: true,
+            id: true, userId: true, isPaid: true, attendance: true, disputedAt: true, disputeResolvedAt: true,
             user: { select: { firstName: true, lastName: true, ...RESTRICTION_FIELDS, worker: { select: { profilePhotoUrl: true } } } },
           },
         },

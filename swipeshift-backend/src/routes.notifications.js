@@ -31,6 +31,34 @@ router.get("/", requireAuth, async (req, res) => {
         });
       }
 
+      // 1b. Zuverlaessigkeit: erfasster No-Show / eigene kurzfristige Stornierung (letzte 30 Tage)
+      const sinceReliability = new Date(Date.now() - 30 * 24 * 3_600_000);
+      const reliabilityEvents = await prisma.apply.findMany({
+        where: {
+          userId,
+          OR: [
+            { status: "accepted", attendance: "no_show", attendanceSetAt: { gte: sinceReliability } },
+            { status: "cancelled_by_worker", lateCancellation: true, cancelledAt: { gte: sinceReliability } },
+          ],
+        },
+        include: { job: { select: { title: true, company: true } } },
+        take: 10,
+      });
+      for (const a of reliabilityEvents) {
+        const noShow = a.status === "accepted";
+        notifications.push({
+          id: `${noShow ? "no-show" : "late-cancel"}-${a.id}`,
+          category: "jobActivity",
+          title: noShow ? "We missed you at your shift" : "Late cancellation noted",
+          body: noShow
+            ? `${a.job.company} marked you as not showing up for ${a.job.title}. You can dispute this once under Job Applications.`
+            : `You cancelled ${a.job.title} less than 24 hours before it started.`,
+          timestamp: (noShow ? a.attendanceSetAt : a.cancelledAt) ?? a.createdAt,
+          actionLabel: null,
+          actionPayload: null,
+        });
+      }
+
       // 2. Reviews received
       const reviews = await prisma.review.findMany({
         where: { workerId: userId },
@@ -97,6 +125,26 @@ router.get("/", requireAuth, async (req, res) => {
           timestamp: a.createdAt,
           actionLabel: "View Applicant",
           actionPayload: { applyId: a.id },
+        });
+      }
+
+      // 1b. Worker hat eine bestaetigte Schicht storniert (letzte 14 Tage)
+      const cancelledByWorker = await prisma.apply.findMany({
+        where: { job: { employerId: userId }, status: "cancelled_by_worker", cancelledAt: { gte: new Date(Date.now() - 14 * 24 * 3_600_000) } },
+        include: { user: { select: { firstName: true, lastName: true } }, job: { select: { title: true } } },
+        orderBy: { cancelledAt: "desc" },
+        take: 10,
+      });
+      for (const a of cancelledByWorker) {
+        const name = [a.user.firstName, a.user.lastName].filter(Boolean).join(" ") || "A worker";
+        notifications.push({
+          id: `worker-cancelled-${a.id}`,
+          category: "jobActivity",
+          title: "Worker cancelled a shift",
+          body: `${name} cancelled their shift for ${a.job.title}. The spot is open again.`,
+          timestamp: a.cancelledAt,
+          actionLabel: null,
+          actionPayload: null,
         });
       }
 

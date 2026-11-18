@@ -3,6 +3,8 @@
 //   GET  /admin/reports/:id                  Detail inkl. Melder-Notizen, Chat-Verlauf (letzte 100), Historie
 //   POST /admin/reports/:id/actions          { action: warn|suspend|ban|dismiss, durationDays?, note? }
 //   POST /admin/users/:id/lift               Sperre/Bann aufheben
+//   GET  /admin/reliability                  Auffaellige Worker (>= 2 No-Shows / >= 3 kurzfristige Stornos in 90 Tagen) + offene Anwesenheits-Einsprueche
+//   POST /admin/attendance/:applyId/resolve  { uphold: true } | { attendance: attended|late|no_show }
 const express = require("express");
 const rateLimit = require("express-rate-limit");
 const { prisma } = require("./prisma.js");
@@ -11,6 +13,8 @@ const { requireAdmin } = require("./middlewares/requireAdmin");
 const { describeBlockedUser } = require("./utils/blockedUsers");
 const m = require("./utils/moderation");
 const { applyReportAction, liftRestriction } = require("./moderation");
+const rel = require("./utils/reliability");
+const events = require("./notifyEvents");
 
 const router = express.Router();
 
@@ -177,6 +181,84 @@ router.post("/users/:id/lift", handle("POST /admin/users/:id/lift", async (req, 
   if (!can.ok) return res.status(can.status).json({ error: can.error });
   if (!m.isRestricted(target)) return res.status(409).json({ error: "This account is not suspended.", code: "NOT_RESTRICTED" });
   await liftRestriction({ target, adminId: req.auth.sub });
+  return res.json({ ok: true });
+}));
+
+// ─── Reliability: auffaellige Worker + offene Einsprueche (nur Hinweis, keine automatischen Einschraenkungen) ───
+router.get("/reliability", handle("GET /admin/reliability", async (req, res) => {
+  const now = new Date();
+
+  // Alle relevanten Zeilen der letzten 90 Tage, je Worker gebuendelt
+  const rows = await prisma.apply.findMany({
+    where: rel.reliabilityRowsWhere(now, rel.ADMIN_WINDOW_DAYS),
+    select: {
+      userId: true, status: true, attendance: true, disputedAt: true, disputeResolvedAt: true,
+      lateCancellation: true, cancelledAt: true, job: { select: { endTime: true } },
+    },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }], // deterministisch, falls das Limit greift
+    take: 5000,
+  });
+  const byUser = new Map();
+  for (const row of rows) {
+    if (!byUser.has(row.userId)) byUser.set(row.userId, []);
+    byUser.get(row.userId).push(row);
+  }
+  const flagged = [];
+  for (const [userId, list] of byUser) {
+    const summary = rel.summarizeReliability(list, now, { windowDays: rel.ADMIN_WINDOW_DAYS });
+    if (rel.isConspicuous(summary)) flagged.push({ userId, summary });
+  }
+  flagged.sort((a, b) => b.summary.noShows - a.summary.noShows || b.summary.lateCancellations - a.summary.lateCancellations);
+
+  const disputes = await prisma.apply.findMany({
+    where: { status: "accepted", disputedAt: { not: null }, disputeResolvedAt: null },
+    orderBy: [{ disputedAt: "asc" }, { id: "asc" }],
+    take: 100,
+    select: {
+      id: true, userId: true, attendance: true, attendanceSource: true, attendanceSetAt: true, disputeNote: true, disputedAt: true,
+      job: { select: { title: true, company: true, employerId: true, startTime: true, endTime: true } },
+    },
+  });
+
+  const briefs = await loadBriefs([...flagged.slice(0, 50).map((f) => f.userId), ...disputes.map((d) => d.userId)]);
+  return res.json({
+    windowDays: rel.ADMIN_WINDOW_DAYS,
+    thresholds: { noShows: rel.ADMIN_NO_SHOW_THRESHOLD, lateCancellations: rel.ADMIN_LATE_CANCEL_THRESHOLD },
+    flagged: flagged.slice(0, 50).map(({ userId, summary }) => ({
+      worker: { ...brief(briefs.get(userId), userId), restriction: restrictionOf(briefs.get(userId)) },
+      finishedShifts: summary.finishedShifts, noShows: summary.noShows, late: summary.late,
+      lateCancellations: summary.lateCancellations,
+    })),
+    disputes: disputes.map((d) => ({
+      applyId: d.id,
+      worker: brief(briefs.get(d.userId), d.userId),
+      jobTitle: d.job.title, company: d.job.company, shiftStart: d.job.startTime, shiftEnd: d.job.endTime,
+      attendance: d.attendance, attendanceSource: d.attendanceSource, attendanceSetAt: d.attendanceSetAt,
+      note: d.disputeNote, disputedAt: d.disputedAt,
+    })),
+  });
+}));
+
+router.post("/attendance/:applyId/resolve", handle("POST /admin/attendance/:applyId/resolve", async (req, res) => {
+  const parsed = rel.parseDisputeResolution(req.body);
+  if (!parsed.ok) return res.status(400).json({ error: parsed.error });
+
+  const applyId = String(req.params.applyId);
+  const apply = await prisma.apply.findUnique({ where: { id: applyId }, select: { id: true, status: true, disputedAt: true, disputeResolvedAt: true } });
+  if (!apply || apply.status !== "accepted") return res.status(404).json({ error: "Application not found" });
+  if (!apply.disputedAt) return res.status(409).json({ error: "This entry has no dispute.", code: "NO_DISPUTE" });
+  if (apply.disputeResolvedAt) return res.status(409).json({ error: "This dispute was already handled.", code: "ALREADY_RESOLVED" });
+
+  const now = new Date();
+  const { count } = await prisma.apply.updateMany({
+    where: { id: applyId, status: "accepted", disputedAt: { not: null }, disputeResolvedAt: null },
+    data: {
+      disputeResolvedAt: now, disputeResolution: parsed.resolution,
+      ...(parsed.attendance ? { attendance: parsed.attendance, attendanceSource: "admin", attendanceSetAt: now } : {}),
+    },
+  });
+  if (count !== 1) return res.status(409).json({ error: "This dispute was already handled.", code: "ALREADY_RESOLVED" });
+  events.attendanceDisputeResolved(applyId); // fire-and-forget
   return res.json({ ok: true });
 }));
 

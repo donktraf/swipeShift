@@ -12,7 +12,9 @@ const { companyJobsWhere, truncateText } = require("./utils/companyStats");
 const { jobNotesForApply } = require("./utils/jobNotes");
 const { restrictedEmployerIds } = require("./restrictedUsers");
 const { lastCompanyActivity } = require("./utils/savedCompanyDates");
-const { deriveApplicationStatus } = require("./utils/applicationStatus");
+const { deriveApplicationStatus, normalizeCancellationReason } = require("./utils/applicationStatus");
+const rel = require("./utils/reliability");
+const { loadReliability } = require("./reliability");
 const { reviewOverall, summarizeEmployerReviews, computeWouldWorkAgain, validateWorkerReviewBody } = require("./utils/reviewLogic");
 
 const EARNINGS_LIST_LIMIT = 100;
@@ -73,11 +75,22 @@ router.get("/applications", requireAuth, requireVerifiedEmail, async (req, res) 
         // Hinweise des Employers (nur bei offener/angenommener Bewerbung, utils/jobNotes.js)
         jobNotes:       jobNotesForApply(a.status, job?.jobNotes),
         // Verdienst fuer diese Schicht (gleiche Formel wie Finanz-Uebersicht)
-        earnings:       job ? payPerWorker(job) : 0,
+        earnings:       job && !rel.isFinalNoShow(a) ? payPerWorker(job) : 0, // No-Show wird nicht bezahlt
         // Entfernung Worker → Job in Meilen (null ohne Koordinaten)
         distanceMiles:  distanceMilesBetween(me?.lat, me?.lng, job?.lat, job?.lng),
         // Chat erst nach Annahme sinnvoll — die Conversation existiert aber ab Bewerbung
         conversationId: a.conversation?.id ?? null,
+        // Schicht stornieren (nur angenommen + in der Zukunft); lateIfCancelledNow = Warnung < 24 h vor Start
+        canCancel:         rel.canWorkerCancel(a, job, now),
+        lateIfCancelledNow: rel.isLateCancellation(job?.startTime, now),
+        cancelledAt:       a.cancelledAt ?? null,
+        lateCancellation:  a.lateCancellation === true,
+        // Anwesenheit (vom Employer erfasst, sonst automatisch) + einmaliger Einspruch
+        attendance:        a.attendance ?? null,
+        attendanceSource:  a.attendanceSource ?? null,
+        canDispute:        rel.canDispute(a, now),
+        disputeStatus:     rel.disputeStatus(a),
+        disputeResolution: a.disputeResolution ?? null,
       };
     });
 
@@ -107,6 +120,109 @@ router.delete("/applications/:applyId", requireAuth, requireVerifiedEmail, async
     return res.json({ ok: true });
   } catch (err) {
     console.error("DELETE /worker/applications/:id error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─────────────────────────────────────────────
+// POST /worker/applications/:applyId/cancel  { reason? }
+// Angenommene, noch nicht begonnene Schicht stornieren. < 24 h vor Start = kurzfristige Stornierung
+// (zaehlt in der Zuverlaessigkeit). Der Platz wird frei (Status cancelled_by_worker ist nicht "accepted").
+// ─────────────────────────────────────────────
+router.post("/applications/:applyId/cancel", requireAuth, requireVerifiedEmail, async (req, res) => {
+  try {
+    const workerId = req.auth.sub;
+    const { applyId } = req.params;
+    const now = new Date();
+
+    const apply = await prisma.apply.findUnique({
+      where:   { id: applyId },
+      include: { job: { select: { title: true, status: true, startTime: true, employerId: true } }, conversation: { select: { id: true } } },
+    });
+    if (!apply)                    return res.status(404).json({ error: "Application not found" });
+    if (apply.userId !== workerId) return res.status(403).json({ error: "Forbidden" });
+
+    const decision = rel.evaluateWorkerCancel(apply, apply.job, now);
+    if (!decision.ok) return res.status(decision.status).json({ error: decision.error, code: decision.code });
+
+    const reason = normalizeCancellationReason(req.body?.reason);
+    const claimed = await prisma.$transaction(async (tx) => {
+      // Bedingtes Update: nur der erste Request gewinnt (kein doppelter Storno / keine doppelten Nachrichten)
+      const { count } = await tx.apply.updateMany({
+        where: { id: applyId, userId: workerId, status: "accepted" },
+        data:  { status: rel.CANCELLED_BY_WORKER, cancelledAt: now, lateCancellation: decision.lateCancellation, cancelReason: reason },
+      });
+      if (count !== 1) return false;
+      if (apply.conversation) {
+        await tx.conversation.update({ where: { id: apply.conversation.id }, data: { status: "cancelled" } });
+        await tx.message.create({
+          data: {
+            conversationId: apply.conversation.id,
+            senderId:       workerId,
+            text:           `The worker cancelled this shift${decision.lateCancellation ? " less than 24 hours before the start" : ""}.${reason ? ` Reason: ${reason}` : ""}`,
+            isSystem:       true,
+            isRead:         false, // der Employer sieht den Hinweis als ungelesen
+          },
+        });
+      }
+      return true;
+    });
+    if (!claimed) return res.status(409).json({ error: "This shift was already changed.", code: "CHANGED" });
+
+    events.workerCancelledShift(applyId); // fire-and-forget: Employer informieren, bei < 24 h den Worker erinnern
+    return res.json({ ok: true, lateCancellation: decision.lateCancellation });
+  } catch (err) {
+    console.error("POST /worker/applications/:id/cancel error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─────────────────────────────────────────────
+// POST /worker/applications/:applyId/dispute  { note }
+// Einmaliger Einspruch gegen "late"/"no_show". Der Eintrag zaehlt bis zur Admin-Entscheidung nicht.
+// ─────────────────────────────────────────────
+router.post("/applications/:applyId/dispute", requireAuth, requireVerifiedEmail, async (req, res) => {
+  try {
+    const workerId = req.auth.sub;
+    const { applyId } = req.params;
+
+    const checked = rel.validateDisputeNote(req.body?.note);
+    if (!checked.ok) return res.status(400).json({ error: checked.error });
+
+    const apply = await prisma.apply.findUnique({ where: { id: applyId } });
+    if (!apply)                    return res.status(404).json({ error: "Application not found" });
+    if (apply.userId !== workerId) return res.status(403).json({ error: "Forbidden" });
+    if (apply.disputedAt)          return res.status(409).json({ error: "You already disputed this entry.", code: "ALREADY_DISPUTED" });
+    if (!rel.canDispute(apply)) {
+      const lateOrNoShow = apply.status === "accepted" && (apply.attendance === "late" || apply.attendance === "no_show");
+      return lateOrNoShow
+        ? res.status(409).json({ error: `You can dispute an entry within ${rel.DISPUTE_WINDOW_DAYS} days after it was recorded.`, code: "DISPUTE_WINDOW_CLOSED" })
+        : res.status(409).json({ error: "Only a late or no-show entry can be disputed.", code: "NOT_DISPUTABLE" });
+    }
+
+    const { count } = await prisma.apply.updateMany({
+      where: { id: applyId, userId: workerId, status: "accepted", attendance: apply.attendance, disputedAt: null },
+      data:  { disputeNote: checked.note, disputedAt: new Date() },
+    });
+    if (count !== 1) return res.status(409).json({ error: "This entry just changed. Please reload.", code: "CHANGED" });
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("POST /worker/applications/:id/dispute error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─────────────────────────────────────────────
+// GET /worker/reliability — eigene Zuverlaessigkeit (letzte 12 Monate). Nur der Worker selbst und Employer
+// mit Bewerbung sehen sie; andere Worker nie.
+// ─────────────────────────────────────────────
+router.get("/reliability", requireAuth, requireVerifiedEmail, async (req, res) => {
+  try {
+    const workerId = req.auth.sub;
+    const map = await loadReliability([workerId]);
+    return res.json({ reliability: map.get(workerId), windowDays: rel.WINDOW_DAYS, minShiftsForRate: rel.MIN_SHIFTS_FOR_RATE });
+  } catch (err) {
+    console.error("GET /worker/reliability error:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -336,7 +452,7 @@ router.get("/financials", requireAuth, requireVerifiedEmail, async (req, res) =>
     if (range.error) return res.status(400).json({ error: range.error });
     const startTimeRange = prismaRange(range);
 
-    const applies = await prisma.apply.findMany({
+    const allApplies = await prisma.apply.findMany({
       where: {
         userId: workerId,
         status: "accepted",
@@ -353,11 +469,13 @@ router.get("/financials", requireAuth, requireVerifiedEmail, async (req, res) =>
       },
       orderBy: { createdAt: "desc" },
     });
+    // Endgueltige No-Shows werden nicht bezahlt → kein Verdienst (utils/reliability.js)
+    const applies = rel.billable(allApplies);
 
     // "This week": Verdienst der laufenden Woche Mo–So (in SERVER-Lokalzeit, nicht Geraetezeit),
     // unabhaengig vom gewaehlten Zeitraum.
     // Gleiche Formel (payPerWorker), stornierte Jobs zaehlen nicht.
-    const weekApplies = await prisma.apply.findMany({
+    const weekRows = await prisma.apply.findMany({
       where: {
         userId: workerId,
         status: "accepted",
@@ -365,6 +483,7 @@ router.get("/financials", requireAuth, requireVerifiedEmail, async (req, res) =>
       },
       include: { job: { select: { payAmount: true, startTime: true, endTime: true } } },
     });
+    const weekApplies = rel.billable(weekRows);
     const thisWeekEarnings = weekApplies.reduce((sum, a) => sum + (a.job ? payPerWorker(a.job) : 0), 0);
 
     // Gleiche Rechnung wie beim Employer (Stundenlohn × Schichtstunden, utils/jobCost.js)

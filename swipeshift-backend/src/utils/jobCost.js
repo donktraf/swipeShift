@@ -7,6 +7,8 @@
 //   Kommend (geplant) = Lohn pro Worker × max(openSpots, angenommene Worker)
 //   Paid Out          = Lohn pro Worker × als bezahlt markierte Worker
 
+const { billable } = require("./reliability");
+
 const DEFAULT_SHIFT_HOURS = 8; // Fallback ohne Start/Ende — wie bisher im Payment-Screen
 
 // Schichtdauer in Stunden, auf 0,1 h gerundet (identisch zur Anzeige im Payment-Screen)
@@ -21,8 +23,10 @@ function payPerWorker(job) {
   return (job?.payAmount ?? 0) * shiftHours(job);
 }
 
-// applies: Liste angenommener Bewerbungen des Jobs ({ isPaid })
-function jobCosts(job, applies = []) {
+// applies: Liste angenommener Bewerbungen des Jobs ({ isPaid, attendance?, ... }).
+// Endgueltige No-Shows werden nicht berechnet (utils/reliability.js → billable).
+function jobCosts(job, allApplies = []) {
+  const applies   = billable(allApplies);
   const perWorker = payPerWorker(job);
   const accepted  = applies.length;
   const paid      = applies.filter(a => a.isPaid).length;

@@ -127,6 +127,60 @@ const reviewReceived = safe("reviewReceived", async ({ fromUserId, toUserId, job
   await notify(toUserId, copy.reviewReceived({ fromName, jobTitle: job?.title, jobId }));
 });
 
+// Worker: Employer hat einen No-Show erfasst → freundliche Erinnerung (Mail + Push, jobActivity)
+const noShowRecorded = safe("noShowRecorded", async (applyId) => {
+  const apply = await prisma.apply.findUnique({
+    where: { id: applyId },
+    select: { userId: true, jobId: true, attendance: true, job: { select: { title: true, company: true, employerId: true } } },
+  });
+  if (!apply || apply.attendance !== "no_show") return;
+  if (await blockedBetween(apply.job.employerId, apply.userId)) return;
+  // Claim: hoechstens eine Erinnerung pro Bewerbung, auch bei no_show → attended → no_show
+  const { count } = await prisma.apply.updateMany({ where: { id: applyId, noShowNotifiedAt: null }, data: { noShowNotifiedAt: new Date() } });
+  if (count !== 1) return;
+  await notify(apply.userId, copy.noShowRecorded({ jobTitle: apply.job.title, company: apply.job.company, jobId: apply.jobId }));
+});
+
+// Employer: Anwesenheit fehlt ~24 h nach Schichtende. Einmal pro Job (Claim ueber Job.attendanceReminderSentAt;
+// Raw-SQL, damit @updatedAt unberuehrt bleibt — PATCH /jobs/:id/status nutzt es als Optimistic Lock).
+const attendanceReminder = safe("attendanceReminder", async (jobId) => {
+  const claimed = await prisma.$executeRaw`UPDATE "Job" SET "attendanceReminderSentAt" = ${new Date()} WHERE "id" = ${jobId} AND "attendanceReminderSentAt" IS NULL`;
+  if (claimed !== 1) return;
+  const job = await prisma.job.findUnique({ where: { id: jobId }, select: { id: true, title: true, employerId: true, status: true } });
+  if (!job?.employerId || job.status === "cancelled" || job.status === "draft") return;
+  const pendingCount = await prisma.apply.count({ where: { jobId, status: "accepted", attendance: null } });
+  if (pendingCount === 0) return;
+  await notify(job.employerId, copy.attendanceReminder({ jobTitle: job.title, pendingCount, jobId }));
+});
+
+// Worker hat eine angenommene Schicht storniert → Employer informieren; bei kurzfristigem Storno zusaetzlich den Worker erinnern
+const workerCancelledShift = safe("workerCancelledShift", async (applyId) => {
+  const apply = await prisma.apply.findUnique({
+    where: { id: applyId },
+    select: { userId: true, jobId: true, status: true, lateCancellation: true, job: { select: { title: true, employerId: true } } },
+  });
+  if (!apply || apply.status !== "cancelled_by_worker") return;
+  if (apply.lateCancellation) {
+    await notify(apply.userId, copy.lateCancellationRecorded({ jobTitle: apply.job.title, jobId: apply.jobId }));
+  }
+  const employerId = apply.job.employerId;
+  if (!employerId || await blockedBetween(employerId, apply.userId)) return;
+  const workerName = await displayNameOf(apply.userId, "A worker");
+  await notify(employerId, copy.workerCancelledShift({ workerName, jobTitle: apply.job.title, jobId: apply.jobId, late: apply.lateCancellation }));
+});
+
+// Worker: Admin hat den Anwesenheits-Einspruch entschieden
+const attendanceDisputeResolved = safe("attendanceDisputeResolved", async (applyId) => {
+  const apply = await prisma.apply.findUnique({
+    where: { id: applyId },
+    select: { userId: true, jobId: true, attendance: true, disputeResolution: true, job: { select: { title: true } } },
+  });
+  if (!apply || !apply.disputeResolution) return;
+  await notify(apply.userId, copy.attendanceDisputeResolved({
+    jobTitle: apply.job.title, jobId: apply.jobId, resolution: apply.disputeResolution, attendance: apply.attendance,
+  }));
+});
+
 const accountPauseChanged = safe("accountPauseChanged", async (userId, paused) => {
   await notify(userId, paused ? copy.accountPaused() : copy.accountResumed());
 });
@@ -134,4 +188,5 @@ const accountPauseChanged = safe("accountPauseChanged", async (userId, paused) =
 module.exports = {
   applicationDecided, jobCancelled, workerApplied, newChatMessage,
   paymentReceived, paymentOpen, reviewReceived, accountPauseChanged,
+  noShowRecorded, attendanceReminder, workerCancelledShift, attendanceDisputeResolved,
 };

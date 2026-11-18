@@ -115,6 +115,78 @@ function instantMatchBooked({ workerName, jobTitle, jobId }) {
   });
 }
 
+// ── Zuverlaessigkeit ──
+// Freundliche Erinnerung nach einem erfassten No-Show (Worker, jobActivity). Nennt die Einspruchsmoeglichkeit.
+function noShowRecorded({ jobTitle, company, jobId }) {
+  const t = job(jobTitle);
+  const c = who(company, "The employer");
+  return make("jobActivity", {
+    title: "We missed you at your shift",
+    body: `${c} marked you as not showing up for "${t}". If that's not right, you can dispute it once in the app.`,
+    data: { type: "job", jobId },
+    subject: `We missed you at ${t}`,
+    paragraphs: [
+      `We missed you at "${t}". ${c} recorded that you didn't show up.`,
+      "Things come up. Showing up reliably helps you get booked, so we wanted to give you a friendly heads-up.",
+      "If this is a mistake, you can dispute it once with a short note: open the app, go to Job Applications and tap Dispute on the shift.",
+    ],
+  });
+}
+
+// Worker: eigene kurzfristige Stornierung wurde vermerkt
+function lateCancellationRecorded({ jobTitle, jobId }) {
+  const t = job(jobTitle);
+  return make("jobActivity", {
+    title: "Late cancellation noted",
+    body: `You cancelled "${t}" less than 24 hours before it started, so it counts as a late cancellation.`,
+    data: { type: "job", jobId },
+    subject: `Late cancellation noted: ${t}`,
+    paragraphs: [
+      `You cancelled "${t}" less than 24 hours before it started, so we noted it as a late cancellation.`,
+      "Cancelling earlier gives employers time to find a replacement and keeps your reliability looking good.",
+    ],
+  });
+}
+
+// Employer: ein bestaetigter Worker hat die Schicht storniert
+function workerCancelledShift({ workerName, jobTitle, jobId, late }) {
+  const t = job(jobTitle);
+  const w = who(workerName, "A worker");
+  return make("jobActivity", {
+    title: "Worker cancelled a shift",
+    body: `${w} cancelled their shift for "${t}"${late ? " less than 24 hours before the start" : ""}. The spot is open again.`,
+    data: { type: "applicants", jobId },
+    subject: `${w} cancelled: ${t}`,
+  });
+}
+
+// Employer: ~24 h nach Schichtende fehlt noch die Anwesenheit; nach 48 h zaehlt sie automatisch als "showed up"
+function attendanceReminder({ jobTitle, pendingCount, jobId }) {
+  const t = job(jobTitle);
+  const n = Number(pendingCount) || 0;
+  return make("jobActivity", {
+    title: "Record attendance",
+    body: `${n === 1 ? "1 worker is" : `${n} workers are`} still missing an attendance entry for "${t}". Without an entry they count as showed up after 48 hours.`,
+    data: { type: "applicants", jobId },
+    subject: `Record attendance for ${t}`,
+  });
+}
+
+// Worker: Admin hat den Einspruch entschieden
+function attendanceDisputeResolved({ jobTitle, jobId, resolution, attendance }) {
+  const t = job(jobTitle);
+  const label = { attended: "showed up", late: "arrived late", no_show: "a no-show" }[attendance];
+  const body = resolution === "changed" && label
+    ? `We reviewed your dispute for "${t}" and changed the entry to: ${label}.`
+    : `We reviewed your dispute for "${t}" and the original entry stays.`;
+  return make("jobActivity", {
+    title: "Dispute reviewed",
+    body,
+    data: { type: "job", jobId },
+    subject: `Your dispute for ${t} was reviewed`,
+  });
+}
+
 // ── messages ──
 // Push darf eine Vorschau zeigen, die E-Mail NIE den Nachrichtentext.
 function newMessagePush({ senderName, jobTitle, text, conversationId }) {
@@ -189,6 +261,7 @@ function accountResumed() {
 
 module.exports = {
   formatShiftStart, describeShiftStart, applicationAccepted, applicationDeclined, jobCancelled, shiftReminder,
+  noShowRecorded, attendanceReminder, lateCancellationRecorded, workerCancelledShift, attendanceDisputeResolved,
   newApplication, instantMatchBooked, newMessagePush, unreadMessageEmail,
   paymentReceived, paymentOpen, reviewReceived, accountPaused, accountResumed,
 };

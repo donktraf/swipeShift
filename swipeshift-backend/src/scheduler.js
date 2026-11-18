@@ -3,6 +3,7 @@
 //   - Schicht-Erinnerung (Start in 0–24 h, einmal pro Bewerbung via reminderSentAt)
 //   - Ungelesen-Mail (Chat-Nachricht nach 15 min ungelesen, max. 1/h pro Konversation+Empfaenger)
 //   - "Payment open" (Job vorbei, unbezahlte Worker, einmal pro Job)
+//   - Auto-Anwesenheit (48 h nach Schichtende ohne Employer-Eintrag → "attended", Claim per bedingtem Update)
 // Mehrere Server-Instanzen sind sicher: vor jedem Versand wird ein DB-Marker per bedingtem Update
 // beansprucht (nur der Gewinner sendet). Deaktiviert bei NODE_ENV=test.
 
@@ -10,6 +11,8 @@ const { prisma } = require("./prisma.js");
 const { notify } = require("./notify");
 const copy = require("./utils/notificationCopy");
 const events = require("./notifyEvents");
+const { runAutoAttendance } = require("./reliability");
+const { attendanceReminderWindow } = require("./utils/reliability");
 const { isBlockedBetween } = require("./utils/safety");
 const { describeBlockedUser } = require("./utils/blockedUsers");
 const {
@@ -133,8 +136,26 @@ async function runPaymentOpen(now = new Date()) {
   return jobs.length;
 }
 
+// ~24 h nach Schichtende: Employer erinnern, wenn fuer angenommene Worker noch die Anwesenheit fehlt (einmal pro Job)
+async function runAttendanceReminders(now = new Date()) {
+  const { endedAfter, endedBefore } = attendanceReminderWindow(now);
+  const jobs = await prisma.job.findMany({
+    where: {
+      attendanceReminderSentAt: null, employerId: { not: null },
+      status: { in: ["published", "inProgress", "completed"] },
+      endTime: { gt: endedAfter, lt: endedBefore },
+      applies: { some: { status: "accepted", attendance: null } },
+    },
+    select: { id: true },
+    orderBy: [{ endTime: "asc" }, { id: "asc" }],
+    take: BATCH,
+  });
+  for (const j of jobs) await events.attendanceReminder(j.id);
+  return jobs.length;
+}
+
 async function runAll(now = new Date()) {
-  for (const [name, fn] of [["shift reminders", runShiftReminders], ["unread message emails", runUnreadMessageEmails], ["payment open", runPaymentOpen]]) {
+  for (const [name, fn] of [["shift reminders", runShiftReminders], ["unread message emails", runUnreadMessageEmails], ["payment open", runPaymentOpen], ["attendance reminders", runAttendanceReminders], ["auto attendance", runAutoAttendance]]) {
     try {
       await fn(now);
     } catch (err) {
@@ -159,4 +180,4 @@ function startScheduler() {
   return timer;
 }
 
-module.exports = { startScheduler, runAll, runShiftReminders, runUnreadMessageEmails, runPaymentOpen, claimConversationEmail };
+module.exports = { startScheduler, runAll, runAutoAttendance, runAttendanceReminders, runShiftReminders, runUnreadMessageEmails, runPaymentOpen, claimConversationEmail };

@@ -332,6 +332,8 @@ model Job {
   applicantsSeenAt      DateTime?
   // "Payment open"-Hinweis an den Employer (Job vorbei, unbezahlte Worker) bereits verschickt
   paymentReminderSentAt DateTime?
+  // Erinnerung an den Employer, Anwesenheit zu erfassen (~24 h nach Schichtende) bereits verschickt
+  attendanceReminderSentAt DateTime?
 
   // Categorisation
   tags      String[]
@@ -357,7 +359,7 @@ model Apply {
   id        String   @id @default(uuid())
   userId    String
   jobId     String
-  status    String   @default("pending") // pending, accepted, declined
+  status    String   @default("pending") // pending, accepted, declined, cancelled_by_worker
   isPaid    Boolean  @default(false)
   // true = durch Instant Match automatisch angenommen (kein respondedAt, zaehlt nicht in Response-Stats)
   autoAccepted Boolean @default(false)
@@ -366,6 +368,23 @@ model Apply {
   respondedAt DateTime?
   // Schicht-Erinnerung (Push/Mail, ~24h vorher) bereits verschickt → genau einmal (bedingtes updateMany als Claim)
   reminderSentAt DateTime?
+
+  // Worker storniert eine ANGENOMMENE Schicht (status = cancelled_by_worker); lateCancellation = weniger als 24 h vor Start
+  cancelledAt      DateTime?
+  lateCancellation Boolean   @default(false)
+  cancelReason     String?
+
+  // Anwesenheit (vom Employer nach Schichtende erfasst, sonst nach 48 h automatisch "attended")
+  attendance        String?   // attended | late | no_show | null (noch offen)
+  attendanceSetAt   DateTime?
+  attendanceSource  String?   // employer | auto | admin
+  // Einmaliger Einspruch des Workers + Entscheidung eines Admins (upheld | changed)
+  disputeNote       String?
+  disputedAt        DateTime?
+  disputeResolvedAt DateTime?
+  disputeResolution String?
+  // No-Show-Erinnerung an den Worker bereits verschickt → hoechstens einmal pro Bewerbung (bedingtes updateMany als Claim)
+  noShowNotifiedAt  DateTime?
 
   user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   job            Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)

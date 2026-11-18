@@ -3,16 +3,25 @@
 // Rein und DB-frei → testbar.
 //
 //   displayStatus:      applied | confirmed | completed | cancelled
-//   cancellationKind:   declined | jobCancelled | null
+//   cancellationKind:   declined | jobCancelled | workerCancelled | null
 //   cancellationReason: Text fuer die UI (Employer-Grund falls angegeben, sonst Standardtext)
 //   paymentStatus:      paid | pending | null (nur bei completed)
 
 const DEFAULT_REASONS = {
   declined:     "Your application was declined.",
   jobCancelled: "The employer cancelled this job.",
+  workerCancelled: "You cancelled this shift.",
 };
 
 function deriveApplicationStatus(apply, job, now = new Date()) {
+  if (apply.status === "cancelled_by_worker") {
+    return {
+      displayStatus:      "cancelled",
+      cancellationKind:   "workerCancelled",
+      cancellationReason: DEFAULT_REASONS.workerCancelled,
+      paymentStatus:      null,
+    };
+  }
   // Stornierter Job schlaegt alles andere — vorher blieb ein angenommener Worker faelschlich "confirmed"
   if (job?.status === "cancelled") {
     const reason = typeof job.cancellationReason === "string" ? job.cancellationReason.trim() : "";
