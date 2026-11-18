@@ -54,6 +54,8 @@ final class APIClient {
         }
         // Grober Geraete-Ort ("Austin, TX"), falls bekannt — haelt "Active Sessions" aktuell
         DeviceInfo.applyCity(to: &req)
+        DeviceInfo.applyTimeZone(to: &req)
+        DeviceInfo.applyPushToken(to: &req) // auch 2FA-Abschluss (createSession) laeuft ueber makeRequest
         return req
     }
 
@@ -147,6 +149,7 @@ final class APIClient {
 
         // 3) HTTP Request bauen
         var request = URLRequest(url: components.url!)
+        DeviceInfo.applyTimeZone(to: &request)
         request.httpMethod = "GET"
 
         // 4) Auth Token setzen
@@ -281,6 +284,7 @@ final class APIClient {
 
     func forgotPassword(email: String) async throws -> ForgotPasswordResult {
         var request = URLRequest(url: baseURL.appendingPathComponent("auth/forgot-password"))
+        DeviceInfo.applyTimeZone(to: &request)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(["email": email])
@@ -293,6 +297,7 @@ final class APIClient {
 
     func resetPassword(email: String, token: String, newPassword: String) async throws {
         var request = URLRequest(url: baseURL.appendingPathComponent("auth/reset-password"))
+        DeviceInfo.applyTimeZone(to: &request)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
@@ -351,6 +356,7 @@ final class APIClient {
 
             let url = baseURL.appendingPathComponent(target.path)
             var request = URLRequest(url: url)
+            DeviceInfo.applyTimeZone(to: &request)
             request.httpMethod = "POST"
 
             let boundary = UUID().uuidString
@@ -424,6 +430,7 @@ final class APIClient {
     
     func resendVerification(email: String) async throws {
             var request = URLRequest(url: baseURL.appendingPathComponent("auth/resend-verification"))
+            DeviceInfo.applyTimeZone(to: &request)
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
@@ -578,6 +585,7 @@ final class APIClient {
         ]
 
         var request = URLRequest(url: components.url!)
+        DeviceInfo.applyTimeZone(to: &request)
         request.httpMethod = "GET"
 
         if let token {
@@ -1103,6 +1111,26 @@ extension APIClient {
         let req = try securityRequest("/auth/sessions/revoke-others")
         let (data, resp) = try await URLSession.shared.data(for: req)
         try validate(response: resp, data: data)
+    }
+
+    /// POST /auth/me/push-devices — APNs-Geraetetoken der aktuellen Sitzung registrieren (Upsert)
+    func registerPushDevice(token: String, environment: String) async throws {
+        var req = try makeRequest(path: "/auth/me/push-devices", method: "POST")
+        req.httpBody = try JSONEncoder().encode(["token": token, "environment": environment])
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+    }
+
+    /// DELETE /auth/me/push-devices/:token — mit explizitem Auth-Token, weil beim Logout der gespeicherte schon geloescht wird
+    /// Wirft nur bei Netzwerk-/Serverfehlern (→ spaeter erneut versuchen). 401/403/404 gelten als erledigt:
+    /// die Sitzung ist beendet (Backend hat die Geraete dabei schon geloescht) bzw. das Token ist unbekannt.
+    func unregisterPushDevice(token: String, authToken: String) async throws {
+        var req = try makeRequest(path: "/auth/me/push-devices/\(token)", method: "DELETE")
+        req.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
+        let (_, resp) = try await URLSession.shared.data(for: req)
+        guard let http = resp as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        if (200..<300).contains(http.statusCode) || [401, 403, 404].contains(http.statusCode) { return }
+        throw URLError(.badServerResponse)
     }
 
     /// POST /auth/logout — beendet die Sitzung serverseitig. Fehler sind egal (lokal wird trotzdem ausgeloggt).

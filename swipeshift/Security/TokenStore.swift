@@ -56,6 +56,45 @@ final class TokenStore {
         return token
     }
 
+    // MARK: Ausstehende Push-Abmeldungen (JSON; enthaelt alte Auth-Token → ebenfalls im Keychain)
+
+    private let pendingUnregisterAccount = "pending_push_unregister"
+
+    func savePendingUnregisterData(_ data: Data) {
+        let base: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: pendingUnregisterAccount
+        ]
+        SecItemDelete(base as CFDictionary)
+        var add = base
+        add[kSecValueData as String] = data
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        SecItemAdd(add as CFDictionary, nil)
+    }
+
+    func loadPendingUnregisterData() -> Data? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: pendingUnregisterAccount,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess else { return nil }
+        return item as? Data
+    }
+
+    func deletePendingUnregisterData() {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: pendingUnregisterAccount
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
+
     func deleteToken() {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,

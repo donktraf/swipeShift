@@ -479,6 +479,7 @@ final class UserStore: ObservableObject {
     @MainActor
     func logout() {
         // Sitzung auch serverseitig beenden (fire-and-forget), damit sie aus "Active Sessions" verschwindet
+        PushNotificationManager.shared.unregister(authToken: APIClient.shared.token) // Push-Token abmelden
         if let token = APIClient.shared.token {
             Task { await APIClient.shared.logoutRemote(token: token) }
         }

@@ -8,6 +8,7 @@ import SwiftUI
 struct EmployerHomeView: View {
     @EnvironmentObject var userStore: UserStore
     @EnvironmentObject var messageStore: MessageStore
+    @ObservedObject private var push = PushNotificationManager.shared
 
     @State private var selectedTab: EmployerTab = .dashboard
     @State private var showPostJob = false
@@ -59,6 +60,25 @@ struct EmployerHomeView: View {
             }
             .navigationBarHidden(true)
             .task { await messageStore.loadConversations() }
+            // Home ist sichtbar → eingeloggt + Onboarding fertig: einmalig Push-Berechtigung erfragen / Token registrieren
+            .task { await PushNotificationManager.shared.onHomeAppeared() }
+            // Tap auf eine Push-Benachrichtigung (auch Kaltstart)
+            // TODO: Es gibt keinen Employer-Deep-Link auf einen einzelnen Job/Bewerber — Tap oeffnet den passenden Tab.
+            .onChange(of: push.pendingRoute, initial: true) { _, route in
+                guard let route else { return }
+                push.pendingRoute = nil
+                // Tap aus der Benachrichtigung eines anderen Kontos (nach Konto-Wechsel) nie hier ausfuehren
+                guard route.belongs(to: userStore.currentUser?.id) else { return }
+                switch route.type {
+                case "chat":
+                    push.pendingConversationId = route.conversationId
+                    selectedTab = .messages
+                case "applicants":           selectedTab = .applicants
+                case "job", "payments":      selectedTab = .jobs
+                case "reviews", "account":   selectedTab = .profile
+                default: break
+                }
+            }
             .sheet(isPresented: $showPostJob) {
                 PostJobView()
                     .environmentObject(userStore)

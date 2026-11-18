@@ -138,7 +138,23 @@ enum DeviceInfo {
         }
     }
 
+    /// IANA-Zeitzone des Geraets (z.B. "Europe/Berlin") — das Backend braucht sie fuer die Ruhezeiten der Push-Benachrichtigungen.
+    static func applyTimeZone(to request: inout URLRequest) {
+        request.setValue(TimeZone.current.identifier, forHTTPHeaderField: "X-Time-Zone")
+    }
+
+    /// Aktuelles APNs-Token (nicht isoliert lesbar; vom PushNotificationManager gesetzt)
+    static let pushTokenKey = "SwipeShift.currentPushToken"
+
+    /// Backend-Sicherheitsnetz: bei Login/Register nimmt dieses Geraet ein evtl. noch beim Vorgaenger-User haengendes Token an sich
+    static func applyPushToken(to request: inout URLRequest) {
+        guard let token = UserDefaults.standard.string(forKey: pushTokenKey), !token.isEmpty else { return }
+        request.setValue(token, forHTTPHeaderField: "X-Push-Token")
+    }
+
     static func apply(to request: inout URLRequest) {
+        applyTimeZone(to: &request)
+        applyPushToken(to: &request)
         request.setValue(name, forHTTPHeaderField: "X-Device-Name")
         request.setValue(model, forHTTPHeaderField: "X-Device-Model")
         request.setValue(osVersion, forHTTPHeaderField: "X-OS-Version")

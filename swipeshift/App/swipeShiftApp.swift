@@ -11,6 +11,9 @@ import GoogleSignIn
 @main
 struct swipeShiftApp: App {
 
+    // APNs-Callbacks (Geraetetoken, Tap auf Push) — siehe PushNotificationManager
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+
     @StateObject private var userStore = UserStore()
     @StateObject private var jobStore = JobStore()
     @StateObject private var messageStore = MessageStore()

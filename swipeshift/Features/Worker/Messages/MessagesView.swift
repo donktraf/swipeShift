@@ -8,6 +8,10 @@ import SwiftUI
 struct MessagesView: View {
     @EnvironmentObject var messageStore: MessageStore
     var isEmployerMode: Bool = false
+    @ObservedObject private var push = PushNotificationManager.shared
+    // Chat, der durch Tap auf eine Push-Benachrichtigung geoeffnet wird
+    @State private var pushConversation: Conversation?
+    @State private var showPushChat = false
 
     private var activeConversations: [Conversation] {
         isEmployerMode ? messageStore.sortedEmployerConversations : messageStore.sortedConversations
@@ -52,6 +56,32 @@ struct MessagesView: View {
                 }
             }
         }
+        .navigationDestination(isPresented: $showPushChat) {
+            if let pushConversation {
+                ChatView(conversation: pushConversation, isEmployerMode: isEmployerMode)
+                    .environmentObject(messageStore)
+            }
+        }
+        // Konversationen koennen beim Tap noch laden → bei Aenderung erneut versuchen
+        .onChange(of: push.pendingConversationId, initial: true) { _, id in
+            guard id != nil else { return }
+            Task {
+                if openPushConversation() { return }
+                // Evtl. neue Konversation → einmal frisch laden; weiterhin unbekannt → Route verwerfen
+                await messageStore.loadConversations()
+                if !openPushConversation() { push.pendingConversationId = nil }
+            }
+        }
+    }
+
+    @discardableResult
+    private func openPushConversation() -> Bool {
+        guard let id = push.pendingConversationId,
+              let conversation = messageStore.conversations.first(where: { $0.id == id }) else { return false }
+        push.pendingConversationId = nil
+        pushConversation = conversation
+        showPushChat = true
+        return true
     }
 
     // MARK: - Konversationsliste

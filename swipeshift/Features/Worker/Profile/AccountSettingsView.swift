@@ -489,6 +489,7 @@ struct NotificationSettingsView: View {
     @State private var loadError: String?
     @State private var saveError: String?
     @State private var isSaving = false
+    @ObservedObject private var push = PushNotificationManager.shared
 
     var body: some View {
         SubScreenShell(title: "Notifications") {
@@ -510,10 +511,47 @@ struct NotificationSettingsView: View {
             }
         }
         .task { await load() }
+        .task { await push.refreshAuthorizationStatus() }
+        // Nach Rueckkehr aus den iOS-Einstellungen den Status neu lesen
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            Task { await push.refreshAuthorizationStatus() }
+        }
+    }
+
+    /// Hinweis, wenn Push auf Systemebene nicht erlaubt ist (die App-Schalter allein reichen dann nicht)
+    @ViewBuilder
+    private var systemPermissionHint: some View {
+        if push.authorizationStatus == .denied {
+            VStack(alignment: .leading, spacing: 10) {
+                Label("Push notifications are turned off for SwipeShift in iOS Settings, so you won't receive any push messages.",
+                      systemImage: "bell.slash.fill")
+                    .font(.system(size: 13))
+                    .foregroundColor(.primary)
+                Button("Open Settings") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                }
+                .font(.system(size: 14, weight: .semibold))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(14)
+            .background(Color.orange.opacity(0.12))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .padding(.horizontal, 16)
+        } else if push.authorizationStatus == .notDetermined {
+            Button("Allow Push Notifications") { Task { await push.requestPermission() } }
+                .font(.system(size: 14, weight: .semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(Color(uiColor: .systemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .padding(.horizontal, 16)
+        }
     }
 
     @ViewBuilder
     private func content(_ current: AccountSettingsDTO) -> some View {
+        systemPermissionHint
+
         // Kanal-Header
         HStack {
             Spacer()
@@ -622,8 +660,7 @@ struct NotificationSettingsView: View {
                 .padding(.horizontal, 20)
         }
 
-        // Ehrlicher Hinweis: es gibt noch keinen Push-/Mail-Versand fuer diese Kategorien
-        Text("Your choices are saved to your account. Push notifications are coming soon and will follow these settings automatically.")
+        Text("Quiet Hours mute push notifications only. Emails are still sent, and security emails (sign-in codes, password changes) are always delivered.")
             .font(.system(size: 12))
             .foregroundColor(.secondary)
             .padding(.horizontal, 20)

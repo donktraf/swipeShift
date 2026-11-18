@@ -9,6 +9,7 @@ struct WorkerHomeView: View {
     @EnvironmentObject var userStore: UserStore
     @EnvironmentObject var jobStore: JobStore
     @EnvironmentObject var messageStore: MessageStore
+    @ObservedObject private var push = PushNotificationManager.shared
 
     @State private var selectedTab: WorkerTab = .home
 
@@ -86,6 +87,16 @@ struct WorkerHomeView: View {
             }
             .navigationBarHidden(true)
             .task { await messageStore.loadConversations() }
+            // Home ist sichtbar → eingeloggt + Onboarding fertig: einmalig Push-Berechtigung erfragen / Token registrieren
+            .task { await PushNotificationManager.shared.onHomeAppeared() }
+            // Tap auf eine Push-Benachrichtigung (auch Kaltstart)
+            .onChange(of: push.pendingRoute, initial: true) { _, route in
+                guard let route else { return }
+                push.pendingRoute = nil
+                // Tap aus der Benachrichtigung eines anderen Kontos (nach Konto-Wechsel) nie hier ausfuehren
+                guard route.belongs(to: userStore.currentUser?.id) else { return }
+                handlePushRoute(route)
+            }
             // Navigation zu Kategorie-Liste
             .navigationDestination(isPresented: $navigateToCategoryList) {
                 if let category = selectedCategory {
@@ -111,6 +122,23 @@ struct WorkerHomeView: View {
                         .environmentObject(userStore)
                 }
             }
+        }
+    }
+}
+
+extension WorkerHomeView {
+    /// Push-Tap → vorhandene Navigation: Job-Detail per Deep-Link-Mechanismus, Chat/Payments/Account ueber Tabs
+    fileprivate func handlePushRoute(_ route: PushRoute) {
+        switch route.type {
+        case "chat":
+            push.pendingConversationId = route.conversationId
+            selectedTab = .messages
+        case "job":
+            if let jobId = route.jobId { jobStore.pendingDeepLinkJobId = jobId }
+        case "payments", "reviews", "account":
+            selectedTab = .profile
+        default:
+            break
         }
     }
 }
