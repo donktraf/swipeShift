@@ -7,7 +7,7 @@ const { requireAuth } = require("./auth");
 const { requireVerifiedEmail } = require("./middlewares/requireVerifiedEmail");
 const { haversineDistance, kmToMiles, milesToKm } = require("./utils/haversine");
 const { geocodeLocation }  = require("./utils/geocode");
-const { buildJobData, validateJobBody, checkDraftAccess } = require("./utils/jobData");
+const { buildJobData, validateJobBody, checkDraftAccess, hasAcceptedTerms, TERMS_REQUIRED_ERROR, resolveCreateStatus, evaluateStatusChange, shouldAutoAccept } = require("./utils/jobData");
 const { isBlockedBetween } = require("./utils/safety");
 const { normalizeCancellationReason } = require("./utils/applicationStatus");
 const { companyJobsWhere, countCompletedJobs } = require("./utils/companyStats");
@@ -179,7 +179,8 @@ router.get("/", requireAuth, requireVerifiedEmail, async (req, res) => {
           ...baseWhere,
           startTime: { gte: now, lte: cutoff },
         },
-        orderBy: { startTime: "asc" },
+        // Dringende Jobs zuerst (alphabetisch "urgent" > "normal", daher desc)
+        orderBy: [{ urgency: "desc" }, { startTime: "asc" }],
       });
 
     } else if (type === "popular") {
@@ -278,7 +279,9 @@ router.get("/nearby", requireAuth, requireVerifiedEmail, async (req, res) => {
 router.post("/", requireAuth, requireVerifiedEmail, async (req, res) => {
   try {
     const { title, category, location } = req.body;
-    const status = req.body.status ?? "published";
+    const resolved = resolveCreateStatus(req.body.status);
+    if (resolved.error) return res.status(400).json({ error: resolved.error });
+    const status = resolved.status;
 
     if (!title || !category) {
       return res.status(400).json({ error: "title and category are required." });
@@ -287,7 +290,13 @@ router.post("/", requireAuth, requireVerifiedEmail, async (req, res) => {
     const invalid = validateJobBody(req.body);
     if (invalid) return res.status(400).json({ error: invalid });
 
+    // Veroeffentlichen nur mit Zustimmung zu den Employer-AGB (Drafts nicht)
+    if (status === "published" && !hasAcceptedTerms(req.body)) {
+      return res.status(400).json(TERMS_REQUIRED_ERROR);
+    }
+
     const data = buildJobData(req.body);
+    if (status === "published") data.termsAcceptedAt = new Date();
 
     // Koordinaten: direkt aus dem Request nutzen (vom iOS Location-Picker),
     // sonst Geocoding als Fallback (z.B. bei API-Calls ohne Picker)
@@ -326,7 +335,7 @@ router.post("/:id/apply", requireAuth, requireVerifiedEmail, async (req, res) =>
 
     const job = await prisma.job.findUnique({
       where: { id: jobId },
-      select: { id: true, title: true, employerId: true, status: true, openSpots: true, startTime: true, endTime: true },
+      select: { id: true, title: true, employerId: true, status: true, openSpots: true, startTime: true, endTime: true, instantMatch: true, minAge: true, workAuthorizationRequired: true },
     });
     if (!job) return res.status(404).json({ error: "Job not found" });
 
@@ -380,13 +389,29 @@ router.post("/:id/apply", requireAuth, requireVerifiedEmail, async (req, res) =>
       if (conflict) return res.status(409).json({ error: "SCHEDULING_CONFLICT" });
     }
 
-    // Apply + Conversation in einer Transaktion
-    const result = await prisma.$transaction(async (tx) => {
-      const apply = await tx.apply.upsert({
-        where:  { userId_jobId: { userId, jobId } },
-        create: { userId, jobId },
-        update: {},
-      });
+    // Apply + Conversation in einer Transaktion.
+    // Instant Match: Zaehlen der angenommenen Bewerbungen + Insert muessen atomar sein, sonst koennten
+    // zwei parallele Bewerbungen den letzten freien Platz beide bekommen. Daher Isolation Serializable
+    // (nur bei instantMatch) — bei Konflikt wirft Postgres/Prisma P2034, dann wird die Transaktion
+    // wiederholt (max. 3 Versuche); der Retry sieht den neuen Count und faellt ggf. auf "pending" zurueck.
+    const runApply = () => prisma.$transaction(async (tx) => {
+      let apply = await tx.apply.findUnique({ where: { userId_jobId: { userId, jobId } } });
+      const isNewApply = !apply;
+      if (!apply) {
+        let autoAccept = false;
+        if (job.instantMatch) {
+          const accepted = await tx.apply.count({ where: { jobId, status: "accepted" } });
+          const worker = await tx.worker.findUnique({
+            where: { userId }, select: { dateOfBirth: true, workAuthorization: true },
+          });
+          autoAccept = shouldAutoAccept({ job, worker, acceptedCount: accepted });
+        }
+        apply = await tx.apply.create({
+          data: autoAccept
+            ? { userId, jobId, status: "accepted", autoAccepted: true } // respondedAt bewusst nicht gesetzt
+            : { userId, jobId },
+        });
+      }
 
       // Conversation nur anlegen wenn noch keine existiert
       const existing = await tx.conversation.findUnique({
@@ -405,21 +430,43 @@ router.post("/:id/apply", requireAuth, requireVerifiedEmail, async (req, res) =>
         },
       });
 
-      // System-Message: Bewerbung eingegangen
-      await tx.message.create({
+      // System-Message nur bei neuer Bewerbung (kein Duplikat bei erneutem Apply)
+      if (isNewApply) await tx.message.create({
         data: {
           conversationId: conversation.id,
           senderId:       userId,
-          text:           `Your application for "${job.title}" has been submitted. The employer will review your profile and get back to you.`,
+          text:           apply.autoAccepted && apply.status === "accepted"
+            ? `You're booked for "${job.title}"! This job uses Instant Match, so your application was accepted automatically.`
+            : `Your application for "${job.title}" has been submitted. The employer will review your profile and get back to you.`,
           isSystem:       true,
           isRead:         true,
         },
       });
 
-      return { apply, conversation, isNew: true };
-    });
+      return { apply, conversation, isNew: isNewApply };
+    }, job.instantMatch ? { isolationLevel: "Serializable" } : undefined);
 
-    return res.json({ ok: true, conversationId: result.conversation.id });
+    let result;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        result = await runApply();
+        break;
+      } catch (err) {
+        // P2034 = Serialisierungskonflikt/Deadlock; P2002 = parallele Doppel-Bewerbung desselben Users
+        if (err.code === "P2034" || err.code === "P2002") {
+          if (attempt < 3) {
+            await new Promise((r) => setTimeout(r, 20 + Math.random() * 30)); // kleiner Jitter-Backoff
+            continue;
+          }
+          if (err.code === "P2034") {
+            return res.status(409).json({ error: "Too many applications at once. Please try again.", code: "TRY_AGAIN" });
+          }
+        }
+        throw err;
+      }
+    }
+
+    return res.json({ ok: true, conversationId: result.conversation.id, autoAccepted: result.apply.autoAccepted === true });
   } catch (err) {
     console.error("POST /jobs/:id/apply error:", err);
     return res.status(500).json({ error: "Internal server error" });
@@ -494,14 +541,17 @@ router.get("/mine", requireAuth, requireVerifiedEmail, async (req, res) => {
       where: { employerId },
       orderBy: { createdAt: "desc" },
       include: {
+        // Instant-Match-Bewerbungen separat: sie warten nicht auf eine Antwort des Employers
         _count: { select: { applies: true } },
+        applies: { where: { autoAccepted: true }, select: { id: true } },
       },
     });
 
-    // applicantCount mitsenden
-    const result = jobs.map(({ _count, ...job }) => ({
+    // applicantCount = manuelle Bewerbungen, instantMatchCount = automatisch angenommene
+    const result = jobs.map(({ _count, applies, ...job }) => ({
       ...job,
-      applicantCount: _count.applies,
+      applicantCount: _count.applies - applies.length,
+      instantMatchCount: applies.length,
     }));
 
     return res.json({ jobs: result });
@@ -520,19 +570,23 @@ router.patch("/:id/status", requireAuth, requireVerifiedEmail, async (req, res) 
     const jobId      = req.params.id;
     const { status, reason } = req.body;
 
-    const allowed = ["published", "draft", "cancelled", "completed", "inProgress"];
-    if (!allowed.includes(status)) {
-      return res.status(400).json({ error: `Invalid status. Allowed: ${allowed.join(", ")}` });
-    }
-
     const job = await prisma.job.findUnique({ where: { id: jobId } });
     if (!job)                        return res.status(404).json({ error: "Job not found" });
     if (job.employerId !== employerId) return res.status(403).json({ error: "Forbidden" });
 
+    // Statuswechsel + Terms-Pflicht (jeder Wechsel nach "published", z.B. auch cancelled → published)
+    const decision = evaluateStatusChange(job.status, status, req.body);
+    if (!decision.ok) return res.status(decision.status).json(decision.body);
+    const publishing = decision.publishing;
+
     const updated = await prisma.job.update({
       where: { id: jobId },
       // Grund nur beim Stornieren speichern; bei jedem anderen Status zuruecksetzen
-      data:  { status, cancellationReason: status === "cancelled" ? normalizeCancellationReason(reason) : null },
+      data:  {
+        status,
+        cancellationReason: status === "cancelled" ? normalizeCancellationReason(reason) : null,
+        ...(publishing ? { termsAcceptedAt: new Date() } : {}),
+      },
     });
 
     console.log(`PATCH /jobs/${jobId}/status → ${status}`);
@@ -572,6 +626,9 @@ router.put("/:id", requireAuth, requireVerifiedEmail, async (req, res) => {
     }
     const invalid = validateJobBody(req.body);
     if (invalid) return res.status(400).json({ error: invalid });
+    if (status === "published" && !hasAcceptedTerms(req.body)) {
+      return res.status(400).json(TERMS_REQUIRED_ERROR);
+    }
 
     const existing = await prisma.job.findUnique({ where: { id: req.params.id } });
     const denied = checkDraftAccess(existing, req.auth.sub);
@@ -583,6 +640,7 @@ router.put("/:id", requireAuth, requireVerifiedEmail, async (req, res) => {
     const data = buildJobData(req.body);
     // company nur uebernehmen, wenn mitgeschickt
     if (!req.body.company) delete data.company;
+    if (status === "published") data.termsAcceptedAt = new Date();
 
     // Geocoding nur, wenn der Ort geaendert wurde und der Client keine Koordinaten schickt
     if (data.lat == null) {
@@ -718,6 +776,7 @@ router.get("/:id/applicants", requireAuth, requireVerifiedEmail, async (req, res
         applyId:         a.id,
         userId:          a.userId,
         status:          a.status,
+        autoAccepted:    a.autoAccepted === true,
         appliedAt:       a.createdAt,
         workerName:      name,
         profilePhotoUrl: u?.worker?.profilePhotoUrl ?? null,

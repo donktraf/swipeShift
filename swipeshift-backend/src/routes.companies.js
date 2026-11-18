@@ -66,7 +66,7 @@ router.get("/:name", async (req, res) => {
     // Antwortverhalten der Firma (nur aggregierte Zahlen, keine Personendaten)
     const applies = await prisma.apply.findMany({
       where:  { jobId: { in: jobs.map(j => j.id) } },
-      select: { status: true, createdAt: true, respondedAt: true },
+      select: { status: true, createdAt: true, respondedAt: true, autoAccepted: true },
     });
     const responseStats = computeResponseStats(applies);
 

@@ -275,6 +275,27 @@ model Job {
   cancellationReason String?
   isVerified      Boolean  @default(false)
 
+  // Optionale Zusatzfelder (Add Job): Anforderungen, Konditionen, Hinweise
+  requiredSkills        String[]
+  physicalRequirements  String[]
+  certifications        String[]
+  educationLevel        String?
+  workAuthorizationRequired Boolean @default(false)
+  urgency               String   @default("normal")  // normal | urgent
+  locationType          String   @default("single")  // single | multiple
+  breakIncluded         Boolean  @default(false)
+  breakMinutes          Int?                         // 15/30/45/60, nur bei breakIncluded
+  sameDayPay            Boolean  @default(false)
+  tipsIncluded          Boolean  @default(false)
+  repeatWork            Boolean  @default(false)
+  bonusAvailable        Boolean  @default(false)
+  bonusDescription      String?
+  cancellationPolicy    String?                      // flexible | 24h | 48h | strict
+  cancellationNotes     String?
+  jobNotes              String?  @db.Text
+  instantMatch          Boolean  @default(false)
+  termsAcceptedAt       DateTime?
+
   // Categorisation
   tags      String[]
   logoEmoji String   @default("🏢")
@@ -301,6 +322,8 @@ model Apply {
   jobId     String
   status    String   @default("pending") // pending, accepted, declined
   isPaid    Boolean  @default(false)
+  // true = durch Instant Match automatisch angenommen (kein respondedAt, zaehlt nicht in Response-Stats)
+  autoAccepted Boolean @default(false)
   createdAt DateTime @default(now())
   // Erste Antwort des Employers (accept/decline) → Response Rate + Response Time im Company-Profil
   respondedAt DateTime?

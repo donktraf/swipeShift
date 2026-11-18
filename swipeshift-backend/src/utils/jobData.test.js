@@ -1,7 +1,8 @@
 // src/utils/jobData.test.js
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { formatAmount, formatPayText, buildJobData, validateJobBody, checkDraftAccess } = require("./jobData");
+const { formatAmount, formatPayText, buildJobData, validateJobBody, checkDraftAccess, hasAcceptedTerms, TERMS_REQUIRED_ERROR, resolveCreateStatus, evaluateStatusChange, shouldAutoAccept } = require("./jobData");
+const { computeResponseStats } = require("./responseStats");
 
 test("buildJobData: Defaults bei minimalem Body", () => {
   const d = buildJobData({ title: "A", category: "Events" });
@@ -175,4 +176,118 @@ test("formatAmount: ganz ohne, sonst 2 Nachkommastellen, Cent-Rundung", () => {
   assert.equal(formatAmount(1250.75), "$1250.75");
   assert.equal(formatAmount("12.999"), "$13");
   assert.equal(formatAmount(0.005), "$0.01");
+});
+
+test("buildJobData: Zusatzfelder Defaults", () => {
+  const d = buildJobData({ title: "A" });
+  assert.deepEqual(d.requiredSkills, []);
+  assert.deepEqual(d.physicalRequirements, []);
+  assert.deepEqual(d.certifications, []);
+  assert.equal(d.educationLevel, null);
+  assert.equal(d.urgency, "normal");
+  assert.equal(d.locationType, "single");
+  assert.equal(d.breakIncluded, false);
+  assert.equal(d.breakMinutes, null);
+  assert.equal(d.bonusDescription, null);
+  assert.equal(d.cancellationPolicy, null);
+  assert.equal(d.instantMatch, false);
+  assert.equal(d.workAuthorizationRequired, false);
+});
+
+test("buildJobData: Zusatzfelder werden uebernommen und abhaengige Felder bereinigt", () => {
+  const d = buildJobData({
+    requiredSkills: ["Teamwork", "Teamwork"], certifications: ["Forklift License"],
+    educationLevel: "College Degree", urgency: "urgent", locationType: "multiple",
+    breakIncluded: true, breakMinutes: "30", bonusAvailable: true, bonusDescription: "  $50 bonus  ",
+    cancellationPolicy: "24h", jobNotes: "Meet at gate", instantMatch: true, sameDayPay: true,
+  });
+  assert.deepEqual(d.requiredSkills, ["Teamwork"]);
+  assert.equal(d.breakMinutes, 30);
+  assert.equal(d.bonusDescription, "$50 bonus");
+  assert.equal(d.urgency, "urgent");
+  assert.equal(d.locationType, "multiple");
+  assert.equal(d.instantMatch, true);
+  assert.equal(d.sameDayPay, true);
+
+  const off = buildJobData({ breakIncluded: false, breakMinutes: 30, bonusAvailable: false, bonusDescription: "x" });
+  assert.equal(off.breakMinutes, null);
+  assert.equal(off.bonusDescription, null);
+});
+
+test("validateJobBody: Zusatzfelder", () => {
+  assert.equal(validateJobBody({ requiredSkills: ["Teamwork"], urgency: "urgent", breakMinutes: 15 }), null);
+  assert.match(validateJobBody({ requiredSkills: "Teamwork" }), /array/);
+  assert.match(validateJobBody({ certifications: ["Pilot"] }), /unsupported/);
+  assert.match(validateJobBody({ urgency: "asap" }), /urgency/);
+  assert.match(validateJobBody({ locationType: "x" }), /locationType/);
+  assert.match(validateJobBody({ educationLevel: "PhD" }), /educationLevel/);
+  assert.match(validateJobBody({ cancellationPolicy: "never" }), /cancellationPolicy/);
+  assert.match(validateJobBody({ breakMinutes: 20 }), /breakMinutes/);
+  assert.match(validateJobBody({ instantMatch: "true" }), /boolean/);
+  assert.match(validateJobBody({ jobNotes: "x".repeat(501) }), /500/);
+  assert.match(validateJobBody({ cancellationNotes: "x".repeat(301) }), /300/);
+  assert.match(validateJobBody({ bonusDescription: "x".repeat(201) }), /200/);
+  assert.equal(validateJobBody({ jobNotes: "x".repeat(500) }), null);
+});
+
+test("hasAcceptedTerms: nur striktes true", () => {
+  assert.equal(hasAcceptedTerms({ termsAccepted: true }), true);
+  for (const v of [undefined, false, "true", 1]) assert.equal(hasAcceptedTerms({ termsAccepted: v }), false);
+  assert.equal(hasAcceptedTerms(), false);
+  assert.equal(TERMS_REQUIRED_ERROR.code, "TERMS_REQUIRED");
+});
+
+test("computeResponseStats: autoAccepted wird ignoriert", () => {
+  const old = new Date(Date.now() - 100 * 3600 * 1000);
+  const real = [1, 2, 3].map(() => ({ status: "accepted", createdAt: old, respondedAt: new Date(old.getTime() + 3600 * 1000) }));
+  const auto = Array.from({ length: 10 }, () => ({ status: "accepted", createdAt: old, respondedAt: null, autoAccepted: true }));
+  assert.deepEqual(computeResponseStats([...real, ...auto]), computeResponseStats(real));
+  assert.equal(computeResponseStats([...real, ...auto]).responseSampleSize, 3);
+  assert.equal(computeResponseStats(auto).responseRate, null);
+});
+
+test("resolveCreateStatus: nur draft/published", () => {
+  assert.deepEqual(resolveCreateStatus(undefined), { status: "published" });
+  assert.deepEqual(resolveCreateStatus("draft"), { status: "draft" });
+  for (const bad of ["completed", "inProgress", "cancelled", "", 5]) assert.ok(resolveCreateStatus(bad).error);
+});
+
+test("evaluateStatusChange: Publish braucht Terms bei jedem Wechsel nach published", () => {
+  for (const from of ["draft", "cancelled", "completed", "inProgress"]) {
+    const denied = evaluateStatusChange(from, "published", {});
+    if (from === "draft" || from === "cancelled" || from === "completed" || from === "inProgress") {
+      assert.equal(denied.ok, false, from);
+      assert.equal(denied.status, 400);
+      assert.equal(denied.body.code, "TERMS_REQUIRED");
+    }
+    assert.deepEqual(evaluateStatusChange(from, "published", { termsAccepted: true }), { ok: true, publishing: true });
+  }
+  // published → published ist kein Publish-Wechsel
+  assert.deepEqual(evaluateStatusChange("published", "published", {}), { ok: true, publishing: false });
+});
+
+test("evaluateStatusChange: Draft nur zu published/cancelled, ungueltiger Status", () => {
+  assert.equal(evaluateStatusChange("draft", "completed").status, 409);
+  assert.equal(evaluateStatusChange("draft", "inProgress").body.code, "INVALID_TRANSITION");
+  assert.deepEqual(evaluateStatusChange("draft", "cancelled"), { ok: true, publishing: false });
+  assert.equal(evaluateStatusChange("published", "bogus").status, 400);
+  assert.deepEqual(evaluateStatusChange("published", "cancelled"), { ok: true, publishing: false });
+});
+
+test("shouldAutoAccept: Instant Match, Plaetze und harte Anforderungen", () => {
+  const now = new Date("2026-11-18T00:00:00Z");
+  const worker = { dateOfBirth: new Date("2000-01-01"), workAuthorization: true };
+  const job = { instantMatch: true, openSpots: 2, minAge: 18, workAuthorizationRequired: true };
+  assert.equal(shouldAutoAccept({ job, worker, acceptedCount: 1, now }), true);
+  assert.equal(shouldAutoAccept({ job, worker, acceptedCount: 2, now }), false);
+  assert.equal(shouldAutoAccept({ job: { ...job, instantMatch: false }, worker, acceptedCount: 0, now }), false);
+  // zu jung / Geburtsdatum fehlt
+  assert.equal(shouldAutoAccept({ job, worker: { ...worker, dateOfBirth: new Date("2012-01-01") }, acceptedCount: 0, now }), false);
+  assert.equal(shouldAutoAccept({ job, worker: { ...worker, dateOfBirth: null }, acceptedCount: 0, now }), false);
+  assert.equal(shouldAutoAccept({ job, worker: null, acceptedCount: 0, now }), false);
+  // ohne minAge ist das Alter egal
+  assert.equal(shouldAutoAccept({ job: { ...job, minAge: null }, worker: { ...worker, dateOfBirth: null }, acceptedCount: 0, now }), true);
+  // Arbeitserlaubnis
+  assert.equal(shouldAutoAccept({ job, worker: { ...worker, workAuthorization: false }, acceptedCount: 0, now }), false);
+  assert.equal(shouldAutoAccept({ job: { ...job, workAuthorizationRequired: false }, worker: { ...worker, workAuthorization: false }, acceptedCount: 0, now }), true);
 });

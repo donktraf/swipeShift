@@ -25,8 +25,10 @@ function median(values) {
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
-// applies: [{ status, createdAt, respondedAt }]
-function computeResponseStats(applies, now = new Date()) {
+// applies: [{ status, createdAt, respondedAt, autoAccepted? }]
+// Instant-Match-Bewerbungen (autoAccepted) werden ignoriert: sie spiegeln keine Reaktion des Employers wider.
+function computeResponseStats(allApplies, now = new Date()) {
+  const applies = allApplies.filter(a => !a.autoAccepted);
   const responded = applies.filter(isResponded);
   const unanswered = applies.filter(a =>
     !isResponded(a) && a.status === "pending" && now - new Date(a.createdAt) > GRACE_PERIOD_MS

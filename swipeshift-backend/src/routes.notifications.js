@@ -76,6 +76,7 @@ router.get("/", requireAuth, async (req, res) => {
         where: {
           job: { employerId: userId },
           status: "pending",
+          autoAccepted: false, // Instant-Match-Bewerbungen brauchen keine Antwort
         },
         include: {
           user: { select: { firstName: true, lastName: true } },

@@ -11,6 +11,7 @@ const { validateDraftData, validateReviewSubmission, reviewOverall } = require("
 const { validateEmployerProfileFields, cleanExperience, cleanWhitelist, AVAILABLE_TIMES, SHIFT_TYPES } = require("./utils/profileFields");
 const { Prisma } = require("@prisma/client");
 const { loadApplicantSummaries } = require("./applicantSummaries");
+const { countEmployerApplies } = require("./utils/applyCounts");
 const { averageRating } = require("./utils/applicantSummary");
 const { truncateText } = require("./utils/companyStats");
 const { ageFromBirthDate, availableDays, summarizeReviews, summarizeCompletedJobs, cleanSelfRatedSkills, stringList } = require("./utils/workerProfile");
@@ -67,6 +68,7 @@ router.get("/applicants", requireAuth, requireVerifiedEmail, async (req, res) =>
       userId:        a.userId,
       appliedAt:     a.createdAt,
       status:        a.status,
+      autoAccepted:  a.autoAccepted === true,
       // Conversation entsteht schon beim Bewerben; die App zeigt den Chat-Button erst nach Annahme
       conversationId: a.conversation?.id ?? null,
       summary:       summaries.get(a.userId) ?? null,
@@ -209,7 +211,7 @@ router.post("/applicants/:applyId/accept", requireAuth, requireVerifiedEmail, as
     await prisma.apply.update({
       where: { id: applyId },
       // respondedAt nur bei der ERSTEN Antwort setzen (Response Time = Zeit bis zur ersten Reaktion)
-      data:  { status: "accepted", ...(apply.respondedAt ? {} : { respondedAt: new Date() }) },
+      data:  { status: "accepted", autoAccepted: false, ...(apply.respondedAt ? {} : { respondedAt: new Date() }) },
     });
     console.log(`ACCEPT apply ${applyId} by employer ${employerId}`);
     return res.json({ ok: true, applyId, action: "accepted" });
@@ -237,7 +239,7 @@ router.post("/applicants/:applyId/decline", requireAuth, requireVerifiedEmail, a
 
     await prisma.apply.update({
       where: { id: applyId },
-      data:  { status: "declined", ...(apply.respondedAt ? {} : { respondedAt: new Date() }) },
+      data:  { status: "declined", autoAccepted: false, ...(apply.respondedAt ? {} : { respondedAt: new Date() }) },
     });
     console.log(`DECLINE apply ${applyId} by employer ${employerId}`);
     return res.json({ ok: true, applyId, action: "declined" });
@@ -273,12 +275,13 @@ router.get("/stats", requireAuth, requireVerifiedEmail, async (req, res) => {
     const allApplies = myJobIds.length
       ? await prisma.apply.findMany({
           where:  { jobId: { in: myJobIds } },
-          select: { id: true, createdAt: true },
+          select: { id: true, createdAt: true, status: true, autoAccepted: true },
         })
       : [];
 
-    const newApplicants    = allApplies.length;
-    const applicationsWeek = allApplies.filter((a) => a.createdAt >= weekAgo).length;
+    // Auto-angenommene (Instant Match) zaehlen nicht als "zu beantworten" (siehe utils/applyCounts.js)
+    const { newApplicants, applicationsThisWeek: applicationsWeek, instantMatchesThisWeek } =
+      countEmployerApplies(allApplies, now);
 
     const completedThisMonth = myJobs.filter(
       (j) => j.status === "completed" && j.startTime && new Date(j.startTime) >= monthStart
@@ -299,6 +302,7 @@ router.get("/stats", requireAuth, requireVerifiedEmail, async (req, res) => {
       newApplicants,
       monthlySpend,
       applicationsThisWeek: applicationsWeek,
+      instantMatchesThisWeek,
       jobsFilledThisWeek:   jobsFilledWeek,
       topCategory,
     });
@@ -437,7 +441,7 @@ router.post("/applicants/:applyId/unassign", requireAuth, requireVerifiedEmail, 
     if (!apply)                              return res.status(404).json({ error: "Application not found" });
     if (apply.job.employerId !== employerId) return res.status(403).json({ error: "Forbidden" });
 
-    await prisma.apply.update({ where: { id: applyId }, data: { status: "pending" } });
+    await prisma.apply.update({ where: { id: applyId }, data: { status: "pending", autoAccepted: false } });
     return res.json({ ok: true, applyId, action: "unassigned" });
   } catch (err) {
     console.error("POST /employer/applicants/:id/unassign error:", err);
@@ -464,6 +468,7 @@ router.get("/assigned-workers", requireAuth, requireVerifiedEmail, async (req, r
           select: {
             id:     true,
             userId: true,
+            autoAccepted: true,
             user: {
               select: { id: true, firstName: true, lastName: true },
             },
@@ -483,6 +488,7 @@ router.get("/assigned-workers", requireAuth, requireVerifiedEmail, async (req, r
       assignedWorkers: job.applies.map((a) => ({
         applyId:     a.id,
         userId:      a.userId,
+        autoAccepted: a.autoAccepted === true,
         name:        `${a.user?.firstName ?? ""} ${a.user?.lastName ?? ""}`.trim(),
         photoEmoji:  "👤",
         rating:      0.0,
