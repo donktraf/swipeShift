@@ -112,6 +112,8 @@ struct DeviceSessionsResponseDTO: Decodable {
 struct APIErrorBody: Decodable {
     let error: String?
     let code: String?
+    /// Nur bei INCOMPLETE_JOB: fehlende Pflichtfelder
+    let missing: [String]?
 }
 
 extension Notification.Name {

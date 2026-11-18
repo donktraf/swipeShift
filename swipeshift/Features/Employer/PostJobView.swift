@@ -156,7 +156,9 @@ struct PostJobView: View {
     private var canPost: Bool {
         !title.trimmingCharacters(in: .whitespaces).isEmpty &&
         !selectedCategory.isEmpty &&
-        !shifts.isEmpty
+        !locationText.trimmingCharacters(in: .whitespaces).isEmpty &&
+        !shifts.isEmpty &&
+        (Double(hourlyRateText.replacingOccurrences(of: ",", with: ".")) ?? 0) > 0   // Backend verlangt Lohn > 0 zum Veroeffentlichen
     }
 
     var body: some View {

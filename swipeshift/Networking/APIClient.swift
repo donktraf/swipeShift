@@ -1180,6 +1180,7 @@ struct APIError: LocalizedError {
     let status: Int
     let message: String
     let code: String?
+    var missing: [String]? = nil
     var errorDescription: String? { message }
 }
 
@@ -1195,7 +1196,7 @@ func validate(response: URLResponse, data: Data) throws {
 
         // Lesbare Backend-Meldung ({ error }, optional mit code) durchreichen statt rohem JSON
         if let message = body?.error, !message.isEmpty {
-            throw APIError(status: http.statusCode, message: message, code: body?.code)
+            throw APIError(status: http.statusCode, message: message, code: body?.code, missing: body?.missing)
         }
 
         let raw = String(data: data, encoding: .utf8) ?? "<no body>"

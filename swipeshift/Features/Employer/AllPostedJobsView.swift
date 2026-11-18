@@ -21,6 +21,8 @@ struct EmployerJob: Identifiable, Decodable, Hashable {
     let applicantCount: Int
     /// Automatisch angenommene Bewerbungen (Instant Match), nicht in applicantCount enthalten
     var instantMatchCount: Int? = nil
+    /// Alle Bewerbungen (steuert "View Applicants"); applicantCount zaehlt nur unbeantwortete
+    var totalApplicationCount: Int? = nil
     let createdAt: String
     let updatedAt: String?
 
@@ -89,6 +91,8 @@ struct AllPostedJobsView: View {
     @State private var jobToPublish: EmployerJob? = nil
     @State private var jobToDelete: EmployerJob? = nil
     @State private var jobToEdit: EmployerJob? = nil
+    /// Wird nach dem Schliessen des Publish-Sheets zu jobToEdit (zwei Sheets nacheinander)
+    @State private var pendingEdit: EmployerJob? = nil
     @State private var jobForApplicants: EmployerJob? = nil
     @State private var actionError: String? = nil
 
@@ -215,12 +219,21 @@ struct AllPostedJobsView: View {
             Text("The job will be cancelled. Applicants and assigned workers will see the cancellation and your reason (optional) in their calendar.")
         }
         // Publish confirmation (inkl. Pflicht-Zustimmung zu den Employer-AGB)
-        .sheet(item: $jobToPublish) { job in
+        .sheet(item: $jobToPublish, onDismiss: {
+            if let job = pendingEdit { pendingEdit = nil; jobToEdit = job }
+        }) { job in
             PublishDraftSheet(
                 jobTitle: job.title,
-                onPublish: {
+                publish: {
+                    try await APIClient.shared.updateJobStatus(jobId: job.id, status: "published", termsAccepted: true)
+                },
+                onPublished: {
                     jobToPublish = nil
-                    Task { await updateStatus(job, to: "published", termsAccepted: true) }
+                    Task { await load() }
+                },
+                onEditDraft: {
+                    pendingEdit = job
+                    jobToPublish = nil
                 },
                 onCancel: { jobToPublish = nil }
             )
@@ -393,7 +406,7 @@ private struct PostedJobCard: View {
 
             // Stats-Zeile
             HStack(spacing: 0) {
-                statCell(label: "Applicants", value: "\(job.applicantCount)", icon: "person.2.fill")
+                statCell(label: "Applicants", value: applicantsLabel, icon: "person.2.fill")
                 if let instant = job.instantMatchCount, instant > 0 {
                     Divider().frame(height: 30)
                     statCell(label: "Instant", value: "\(instant)", icon: "bolt.fill")
@@ -416,7 +429,7 @@ private struct PostedJobCard: View {
                         actionButton(label: "Publish", color: SS.primary, action: onPublish)
                         actionButton(label: "Delete", color: .red, action: onDelete)
                     }
-                    if job.status == "published" && (job.applicantCount + (job.instantMatchCount ?? 0)) > 0 {
+                    if job.status == "published" && (job.totalApplicationCount ?? (job.applicantCount + (job.instantMatchCount ?? 0))) > 0 {
                         actionButton(label: "View Applicants", color: SS.primary, action: onViewApplicants)
                     }
                     if job.status != "cancelled" && job.status != "completed" && job.status != "draft" {
@@ -433,6 +446,13 @@ private struct PostedJobCard: View {
         .background(Color(uiColor: .systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .shadow(color: .black.opacity(0.05), radius: 6, x: 0, y: 2)
+    }
+
+    /// Veroeffentlicht: unbeantwortete Bewerbungen ("3 new"); sonst Gesamtzahl ohne "new" ("–" bei 0)
+    private var applicantsLabel: String {
+        if job.status == "published" { return "\(job.applicantCount) new" }
+        let total = job.totalApplicationCount ?? job.applicantCount
+        return total > 0 ? "\(total)" : "–"
     }
 
     private func statCell(label: String, value: String, icon: String) -> some View {
@@ -470,12 +490,23 @@ private struct PostedJobCard: View {
 // MARK: - PublishDraftSheet
 
 /// Bestaetigung zum Veroeffentlichen eines Entwurfs; "Publish" erst nach Zustimmung zu den Employer-AGB.
+/// Das Sheet fuehrt die Anfrage selbst aus, damit Fehler (z.B. unvollstaendiger Entwurf) hier erscheinen.
 private struct PublishDraftSheet: View {
     let jobTitle: String
-    let onPublish: () -> Void
+    let publish: () async throws -> Void
+    let onPublished: () -> Void
+    let onEditDraft: () -> Void
     let onCancel: () -> Void
 
     @State private var termsAccepted = false
+    @State private var isPublishing = false
+    @State private var errorText: String? = nil
+    @State private var incomplete = false
+
+    private static let fieldLabels: [String: String] = [
+        "title": "title", "category": "category", "location": "location",
+        "shift": "a shift with start and end time", "payAmount": "hourly rate", "openSpots": "number of workers",
+    ]
 
     var body: some View {
         VStack(spacing: 16) {
@@ -497,15 +528,40 @@ private struct PublishDraftSheet: View {
             TermsConsentRow(isAccepted: $termsAccepted)
                 .padding(.horizontal, 16)
 
+            if let errorText {
+                Text(errorText)
+                    .font(.system(size: 13))
+                    .foregroundColor(.red)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+            }
+
             VStack(spacing: 10) {
-                Button("Publish") { onPublish() }
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(termsAccepted ? SS.primary : Color.gray.opacity(0.35))
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-                    .disabled(!termsAccepted)
+                if incomplete {
+                    Button("Edit draft") { onEditDraft() }
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(SS.primary)
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                } else {
+                    Button {
+                        Task { await run() }
+                    } label: {
+                        Group {
+                            if isPublishing { ProgressView().tint(.white) } else { Text("Publish") }
+                        }
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(termsAccepted ? SS.primary : Color.gray.opacity(0.35))
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!termsAccepted || isPublishing)
+                }
                 Button("Cancel") { onCancel() }
                     .font(.system(size: 15))
                     .foregroundColor(.secondary)
@@ -514,6 +570,23 @@ private struct PublishDraftSheet: View {
             .padding(.bottom, 24)
         }
         .background(Color(uiColor: .systemGroupedBackground))
-        .presentationDetents([.fraction(0.5), .large])
+        .presentationDetents([.fraction(0.55), .large])
+    }
+
+    @MainActor
+    private func run() async {
+        isPublishing = true
+        errorText = nil
+        defer { isPublishing = false }
+        do {
+            try await publish()
+            onPublished()
+        } catch let apiError as APIError where apiError.code == "INCOMPLETE_JOB" {
+            let names = (apiError.missing ?? []).map { Self.fieldLabels[$0] ?? $0 }
+            errorText = names.isEmpty ? apiError.message : "This draft is missing: \(names.joined(separator: ", "))."
+            incomplete = true
+        } catch {
+            errorText = error.localizedDescription
+        }
     }
 }
