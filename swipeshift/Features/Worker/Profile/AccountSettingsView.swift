@@ -56,6 +56,7 @@ struct AccountSecurityView: View {
     @State private var showMethodChoice   = false
     @State private var showTotpSetup      = false
     @State private var showRegenerate     = false
+    @State private var showSwitchToEmail  = false
     @State private var backupRemaining: Int? = nil
 
     private var isSocialUser: Bool {
@@ -131,6 +132,15 @@ struct AccountSecurityView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
+                    if twoFactorEnabled {
+                        Divider().padding(.leading, 52)
+                        if twoFactorMethod == .totp {
+                            SettingsActionRow(icon: "envelope.badge.fill", label: "Switch to email codes") { showSwitchToEmail = true }
+                        } else {
+                            SettingsActionRow(icon: "lock.shield.fill", label: "Switch to authenticator app") { showTotpSetup = true }
+                        }
+                    }
+
                     if twoFactorEnabled && twoFactorMethod == .totp {
                         Divider().padding(.leading, 52)
                         HStack(spacing: 14) {
@@ -198,6 +208,18 @@ struct AccountSecurityView: View {
                     }
                 },
                 onCancel: { showTotpSetup = false }
+            )
+        }
+        .sheet(isPresented: $showSwitchToEmail) {
+            SwitchToEmailView(
+                onFinished: {
+                    showSwitchToEmail = false
+                    Task {
+                        await userStore.refreshMe()
+                        await loadBackupRemaining()
+                    }
+                },
+                onCancel: { showSwitchToEmail = false }
             )
         }
         .sheet(isPresented: $showRegenerate) {

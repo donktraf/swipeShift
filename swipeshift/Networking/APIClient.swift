@@ -1202,6 +1202,21 @@ extension APIClient {
         return try JSONDecoder().decode(TotpConfirmDTO.self, from: data).backupCodes
     }
 
+    /// POST /auth/2fa/switch-to-email/start — Authenticator-/Backup-Code → Mail-Code (an diese Sitzung gebunden)
+    func startSwitchToEmail(code: String) async throws -> TwoFactorChallenge {
+        let req = try securityRequest("/auth/2fa/switch-to-email/start", body: ["code": code])
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+        return try JSONDecoder().decode(TwoFactorCodeSentDTO.self, from: data).asChallenge
+    }
+
+    /// POST /auth/2fa/switch-to-email/confirm — Mail-Code → Methode email
+    func confirmSwitchToEmail(challengeId: String, code: String) async throws {
+        let req = try securityRequest("/auth/2fa/switch-to-email/confirm", body: ["challengeId": challengeId, "code": code])
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+    }
+
     /// POST /auth/2fa/resend — neuer Login-Code (neue challengeId)
     func resendTwoFactorLoginCode(challengeId: String) async throws -> TwoFactorChallenge {
         var req = try securityRequest("/auth/2fa/resend", body: ["challengeId": challengeId])
