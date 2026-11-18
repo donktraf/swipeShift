@@ -29,10 +29,12 @@ const {
   codeMatches, isCodeUsable, TOTP_CHALLENGE_MARKER, MAX_ATTEMPTS,
   isLockActive, nextLockState, lockOptsFor, minutesUntil, shouldSendLockMail, LOCK_MAIL_INTERVAL_MS,
   GLOBAL_LOCK_IP, IP_LOCK_OPTS, GLOBAL_LOCK_OPTS,
-  currentMethod, challengeMatchesUser,
+  currentMethod, challengeMatchesUser, maskEmail,
 } = require("./utils/twoFactor");
 const totp = require("./utils/totp");
 const { normalizeIp } = require("./utils/clientIp");
+const bcrypt = require("bcrypt");
+const { availableMethods, reauthValidUntil } = require("./utils/reauth");
 
 const router = express.Router();
 
@@ -136,8 +138,10 @@ function ipOf(req) {
 }
 
 // Aktive Sperre fuer dieses User+IP-Paar ODER nutzerweit; liefert die laengste oder null
-async function getActiveLock(userId, ip) {
-  const rows = await prisma.twoFactorLock.findMany({ where: { userId, ip: { in: [ip, GLOBAL_LOCK_IP] } } });
+// scope "" = 2FA-Login/-Aenderungen, REAUTH_SCOPE = eigene Zaehler/Sperren fuer die Re-Auth (Zeilen "reauth:<ip>" / "reauth:*")
+const REAUTH_SCOPE = "reauth:";
+async function getActiveLock(userId, ip, scope = "") {
+  const rows = await prisma.twoFactorLock.findMany({ where: { userId, ip: { in: [scope + ip, scope + GLOBAL_LOCK_IP] } } });
   const active = rows.filter((r) => isLockActive(r));
   if (!active.length) return null;
   return active.reduce((a, b) => (new Date(a.lockedUntil) > new Date(b.lockedUntil) ? a : b));
@@ -193,17 +197,17 @@ async function cleanupLocks(userId) {
     where: {
       userId,
       OR: [
-        { ip: { not: GLOBAL_LOCK_IP }, firstFailedAt: { lt: new Date(now - IP_LOCK_OPTS.windowMs) }, OR: idle },
-        { ip: GLOBAL_LOCK_IP, firstFailedAt: { lt: new Date(now - GLOBAL_LOCK_OPTS.windowMs) }, OR: idle },
+        { NOT: { ip: { endsWith: GLOBAL_LOCK_IP } }, firstFailedAt: { lt: new Date(now - IP_LOCK_OPTS.windowMs) }, OR: idle },
+        { ip: { endsWith: GLOBAL_LOCK_IP }, firstFailedAt: { lt: new Date(now - GLOBAL_LOCK_OPTS.windowMs) }, OR: idle },
       ],
     },
   });
 }
 
 // Zaehlt einen Fehlversuch (IP-Zeile + nutzerweit). Rueckgabe false = nicht sicher gezaehlt → Aufrufer lehnt ab.
-async function registerFailure(userId, ip) {
-  const okIp = await bumpLockRow(userId, ip);
-  const okGlobal = await bumpLockRow(userId, GLOBAL_LOCK_IP);
+async function registerFailure(userId, ip, scope = "") {
+  const okIp = await bumpLockRow(userId, scope + ip);
+  const okGlobal = await bumpLockRow(userId, scope + GLOBAL_LOCK_IP);
   cleanupLocks(userId).catch((e) => console.error("2FA lock cleanup failed:", e.message));
   if (!okIp || !okGlobal) {
     console.error(`2FA_LOCK_CONTENTION userId=${userId} ip=${ip} — rejecting (fail-closed)`);
@@ -239,8 +243,8 @@ async function notifyLock(userId, ip) {
 }
 
 // Ein korrekter Code loescht nur die Zeile der eigenen IP; die nutzerweite Zeile verfaellt ueber ihr Fenster
-async function clearFailures(userId, ip) {
-  await prisma.twoFactorLock.deleteMany({ where: { userId, ip } });
+async function clearFailures(userId, ip, scope = "") {
+  await prisma.twoFactorLock.deleteMany({ where: { userId, ip: scope + ip } });
 }
 
 // Alle offenen Codes/Challenges eines Users ungueltig machen (bei Aktivieren/Deaktivieren/Wechsel)
@@ -488,6 +492,7 @@ router.post("/2fa/confirm", requireAuth, codeLimiter, async (req, res) => {
       });
       if (!enabled) await tx.twoFactorBackupCode.deleteMany({ where: { userId: req.auth.sub } });
       await invalidateOpenCodes(req.auth.sub, tx);
+      await tx.userSession.updateMany({ where: { userId: req.auth.sub }, data: { reauthAt: null } }); // Step-up verfaellt
     });
     return res.json({ ok: true, enabled, method: enabled ? "email" : null });
   } catch (err) {
@@ -649,6 +654,7 @@ router.post("/2fa/totp/confirm", requireAuth, codeLimiter, async (req, res) => {
       });
       // Methodenwechsel/Aktivierung: alle offenen Codes ungueltig
       await invalidateOpenCodes(user.id, tx);
+      await tx.userSession.updateMany({ where: { userId: user.id }, data: { reauthAt: null } }); // Step-up verfaellt
       return codes;
     });
     if (!backupCodes)
@@ -689,10 +695,146 @@ router.post("/2fa/totp/backup-codes", requireAuth, codeLimiter, async (req, res)
       prisma.twoFactorBackupCode.createMany({
         data: codes.map((c) => ({ userId: user.id, codeHash: totp.hashBackupCode(c, pepper) })),
       }),
+      prisma.userSession.updateMany({ where: { userId: user.id }, data: { reauthAt: null } }), // Step-up verfaellt
     ]);
     return res.json({ ok: true, backupCodes: codes });
   } catch (err) {
     console.error("POST /auth/2fa/totp/backup-codes error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ───────────────────────── Step-up Re-Auth (Auszahlungsdaten) ─────────────────────────
+// Nachweis haengt an der aktuellen UserSession (reauthAt), gueltig 10 min (utils/reauth.js).
+// Fehlversuche zaehlen in dieselbe Sperre wie 2FA (registerFailure / TwoFactorLock).
+
+const REAUTH_USER_SELECT = { id: true, email: true, passwordHash: true, twoFactorEnabled: true, twoFactorMethod: true };
+
+function reauthLocked(res, lock) {
+  const m = lock ? minutesUntil(lock.lockedUntil) : 1;
+  return res.status(429).json({
+    error: `Too many wrong attempts. Try again in ${m} minute${m === 1 ? "" : "s"}.`,
+    code: "TOO_MANY_ATTEMPTS",
+    retryAfterMinutes: m,
+  });
+}
+
+const methodsLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many requests, try again later.", code: "RATE_LIMITED" },
+});
+
+router.get("/me/reauth/methods", requireAuth, methodsLimiter, async (req, res) => {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.auth.sub }, select: REAUTH_USER_SELECT });
+    if (!user) return res.status(404).json({ error: "User not found" });
+    return res.json({ methods: availableMethods(user), emailHint: maskEmail(user.email) });
+  } catch (err) {
+    console.error("GET /auth/me/reauth/methods error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.post("/me/reauth/email-code", requireAuth, sendLimiter, async (req, res) => {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.auth.sub } });
+    if (!user) return res.status(404).json({ error: "User not found" });
+    const lock = await getActiveLock(user.id, ipOf(req), REAUTH_SCOPE);
+    if (lock) return reauthLocked(res, lock);
+    if (!availableMethods(user).includes("email"))
+      return res.status(400).json({ error: "This method isn't available for your account.", code: "METHOD_UNAVAILABLE" });
+    return res.json(await issueTwoFactorCode(user, "reauth"));
+  } catch (err) {
+    console.error("POST /auth/me/reauth/email-code error:", err);
+    return res.status(500).json({ error: "Could not send the code. Please try again." });
+  }
+});
+
+// Prueft den E-Mail-Code (purpose reauth) des Users. Rueckgabe: "ok" | "CODE_INVALID" | "CODE_EXPIRED" | "LOCKED"
+async function verifyReauthEmailCode(userId, code, ip) {
+  const record = await prisma.twoFactorCode.findFirst({
+    where: { userId, purpose: "reauth", consumedAt: null },
+    orderBy: { createdAt: "desc" },
+  });
+  if (record && !record.consumedAt && record.attempts >= MAX_ATTEMPTS && new Date(record.expiresAt).getTime() > Date.now())
+    return "CODE_ATTEMPTS_EXCEEDED";
+  if (!record || !isCodeUsable(record)) return "CODE_EXPIRED";
+  const claim = await prisma.twoFactorCode.updateMany({
+    where: { id: record.id, consumedAt: null, attempts: { lt: MAX_ATTEMPTS }, expiresAt: { gt: new Date() } },
+    data: { attempts: { increment: 1 } },
+  });
+  if (claim.count !== 1) return "CODE_ATTEMPTS_EXCEEDED";
+  if (!codeMatches(code, record.codeHash, JWT_SECRET)) {
+    return (await registerFailure(userId, ip, REAUTH_SCOPE)) ? "CODE_INVALID" : "LOCKED";
+  }
+  const { count } = await prisma.twoFactorCode.updateMany({
+    where: { id: record.id, consumedAt: null },
+    data: { consumedAt: new Date() },
+  });
+  return count === 1 ? "ok" : "CODE_EXPIRED";
+}
+
+router.post("/me/reauth", requireAuth, codeLimiter, async (req, res) => {
+  const parsed = z.object({
+    method: z.enum(["totp", "password", "email"]),
+    password: z.string().min(1).max(200).optional(),
+    code: z.string().min(1).max(32).optional(),
+  }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid input", code: "INVALID_INPUT" });
+  const { method, password, code } = parsed.data;
+  if (method === "password" ? !password : !code)
+    return res.status(400).json({ error: "Invalid input", code: "INVALID_INPUT" });
+
+  try {
+    const userId = req.auth.sub;
+    const ip = ipOf(req);
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: REAUTH_USER_SELECT });
+    if (!user) return res.status(404).json({ error: "User not found" });
+    if (!availableMethods(user).includes(method))
+      return res.status(400).json({ error: "This method isn't available for your account.", code: "METHOD_UNAVAILABLE" });
+
+    const lock = await getActiveLock(userId, ip, REAUTH_SCOPE);
+    if (lock) return reauthLocked(res, lock);
+
+    let ok = false;
+    if (method === "totp") {
+      const r = await verifyTotpFactor(userId, code);
+      ok = r.ok;
+      if (!ok && r.decryptFailed) return res.status(500).json({ error: "Could not verify the code. Please try again." });
+    } else if (method === "password") {
+      ok = await bcrypt.compare(password, user.passwordHash);
+    } else {
+      const r = await verifyReauthEmailCode(userId, code, ip);
+      if (r === "LOCKED") return reauthLocked(res, null);
+      if (r === "CODE_ATTEMPTS_EXCEEDED")
+        return res.status(400).json({ error: "Too many attempts. Request a new code.", code: "CODE_ATTEMPTS_EXCEEDED" });
+      if (r === "CODE_EXPIRED")
+        return res.status(400).json({ error: "This code has expired. Request a new one.", code: "CODE_EXPIRED" });
+      ok = r === "ok";
+      if (!ok) return res.status(400).json({ error: "That code isn't right. Check your email and try again.", code: "CODE_INVALID" });
+    }
+
+    if (!ok) {
+      if (!(await registerFailure(userId, ip, REAUTH_SCOPE))) return reauthLocked(res, null);
+      const wrong = method === "password"
+        ? { error: "That password isn't right.", code: "PASSWORD_INVALID" }
+        : { error: "That code isn't right. Check your authenticator app (or use a backup code) and try again.", code: "CODE_INVALID" };
+      return res.status(400).json(wrong);
+    }
+
+    await clearFailures(userId, ip, REAUTH_SCOPE);
+    const now = new Date();
+    const { count } = await prisma.userSession.updateMany({
+      where: { id: req.auth.sid, userId, revokedAt: null, expiresAt: { gt: now } },
+      data: { reauthAt: now },
+    });
+    if (count !== 1) return res.status(401).json({ error: "Your session has ended. Please sign in again.", code: "SESSION_REVOKED" });
+    return res.json({ validUntil: reauthValidUntil(now).toISOString() });
+  } catch (err) {
+    console.error("POST /auth/me/reauth error:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
 });

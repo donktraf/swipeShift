@@ -45,8 +45,9 @@ function nextLockState(state, now = Date.now(), { limit, windowMs, lockMs } = IP
   return { failedCount, firstFailedAt: state.firstFailedAt, lockedUntil: null, justLocked: false };
 }
 
+// Nutzerweite Zeilen enden auf "*" ("*" bzw. "reauth:*"); echte IPs enthalten nie ein "*"
 function lockOptsFor(ip) {
-  return ip === GLOBAL_LOCK_IP ? GLOBAL_LOCK_OPTS : IP_LOCK_OPTS;
+  return String(ip).endsWith(GLOBAL_LOCK_IP) ? GLOBAL_LOCK_OPTS : IP_LOCK_OPTS;
 }
 
 // Abgelaufene Zeile (Fenster vorbei, nicht gesperrt) → darf aufgeraeumt werden

@@ -93,6 +93,7 @@ model UserSession {
   lastActiveAt DateTime  @default(now())
   expiresAt    DateTime
   revokedAt    DateTime?
+  reauthAt     DateTime? // letzter Step-up (Re-Auth) dieser Sitzung, gueltig 10 min (utils/reauth.js)
 
   @@index([userId])
 }
@@ -117,6 +118,7 @@ enum TwoFactorPurpose {
   enable
   disable
   totp_enable // Mail-Code als Re-Auth vor der TOTP-Einrichtung
+  reauth      // Mail-Code als Step-up vor dem Aendern von Auszahlungsdaten
 }
 
 // Einmal-Code (6-stellig, gehasht) fuer Login-Challenge bzw. 2FA an-/ausschalten.

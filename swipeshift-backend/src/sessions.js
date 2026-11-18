@@ -59,6 +59,10 @@ const PURPOSE_COPY = {
     subject: "Set up an authenticator app",
     line: "Use this code to confirm it's you before setting up an authenticator app for your SwipeShift account.",
   },
+  reauth: {
+    subject: "Confirm it's you",
+    line: "Use this code to confirm it's you before changing your payout details on SwipeShift.",
+  },
   disable: {
     subject: "Turn off two-factor authentication",
     line: "Use this code to turn off two-factor authentication for your SwipeShift account.",

@@ -443,6 +443,7 @@ router.post("/reset-password", mailLimiter, async (req, res) => {
       where: { id: user.id },
       data: { passwordHash },
     }),
+    prisma.userSession.updateMany({ where: { userId: user.id }, data: { reauthAt: null } }), // Step-up verfaellt
     prisma.passwordResetToken.update({
       where: { id: record.id },
       data: { usedAt: new Date() },
@@ -710,6 +711,7 @@ router.post("/change-password", requireAuth, async (req, res) => {
   // Neues Passwort → alle anderen Geraete abmelden (aktuelles bleibt eingeloggt)
   await prisma.$transaction([
     prisma.user.update({ where: { id: userId }, data: { passwordHash: hash } }),
+    prisma.userSession.updateMany({ where: { userId }, data: { reauthAt: null } }), // Step-up verfaellt
     prisma.userSession.updateMany({
       where: { userId, revokedAt: null, id: { not: req.auth.sid } },
       data: { revokedAt: new Date() },
@@ -778,7 +780,10 @@ router.post("/set-password", requireAuth, async (req, res) => {
   }
 
   const newHash = await bcrypt.hash(parsed.data.newPassword, 12);
-  await prisma.user.update({ where: { id: userId }, data: { passwordHash: newHash } });
+  await prisma.$transaction([
+    prisma.user.update({ where: { id: userId }, data: { passwordHash: newHash } }),
+    prisma.userSession.updateMany({ where: { userId }, data: { reauthAt: null } }), // Step-up verfaellt
+  ]);
 
   return res.json({ ok: true });
 });

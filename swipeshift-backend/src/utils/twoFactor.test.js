@@ -56,3 +56,11 @@ test("deviceInfoFromRequest liest + kuerzt Header, nimmt erste X-Forwarded-For-I
   assert.equal(long.deviceModel, null);
   assert.equal(long.ipAddress, "127.0.0.1");
 });
+
+test("lockOptsFor/isLockRowExpired: auch Re-Auth-Scope (reauth:*) ist nutzerweit", () => {
+  const tf = require("./twoFactor");
+  assert.equal(tf.lockOptsFor("*"), tf.GLOBAL_LOCK_OPTS);
+  assert.equal(tf.lockOptsFor("reauth:*"), tf.GLOBAL_LOCK_OPTS);
+  assert.equal(tf.lockOptsFor("reauth:1.2.3.4"), tf.IP_LOCK_OPTS);
+  assert.equal(tf.lockOptsFor("1.2.3.4"), tf.IP_LOCK_OPTS);
+});
