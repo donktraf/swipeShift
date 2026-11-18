@@ -97,53 +97,11 @@ function otpauthUri(secretBase32, accountEmail) {
 }
 
 // ───────────── Verschluesselung (AES-256-GCM, Key-ID, AAD = userId) ─────────────
+// Implementierung in secretBox.js (geteilt mit den Bankdaten); Format/AAD fuer TOTP unveraendert.
 
-let warnedDevKey = false;
+const box = require("./secretBox");
+const { parseKey, kidOf, getKeyring, payloadKid, needsReencrypt } = box;
 const DEV_ENVS = new Set(["development", "test"]);
-
-function kidOf(key) {
-  return crypto.createHash("sha256").update(key).digest("hex").slice(0, 8);
-}
-
-function toEntry(key) {
-  return { kid: kidOf(key), key };
-}
-
-// 32-Byte-Key aus 64 Hex-Zeichen oder Base64 (genau 32 Byte). Nur ausserhalb von Produktion/Staging
-// (NODE_ENV development/test) ist zusaetzlich eine beliebige Passphrase erlaubt (→ SHA-256).
-function parseKey(raw, { allowPassphrase = false, name = "TOTP_ENCRYPTION_KEY" } = {}) {
-  if (/^[0-9a-fA-F]{64}$/.test(raw)) return Buffer.from(raw, "hex");
-  const b = Buffer.from(raw, "base64");
-  if (b.length === 32 && b.toString("base64") === raw) return b;
-  if (allowPassphrase) return crypto.createHash("sha256").update(raw).digest();
-  throw new Error(`${name} must be 32 bytes: 64 hex characters or base64 (e.g. \`openssl rand -hex 32\`).`);
-}
-
-// Keyring: { current: {kid,key}, previous: {kid,key}|null }.
-// Ohne Key: Dev-Fallback (aus JWT_SECRET) NUR bei NODE_ENV=development|test, sonst Fehler.
-// TOTP_ENCRYPTION_KEY_PREVIOUS erlaubt Entschluesseln waehrend einer Key-Rotation.
-function getKeyring(env = process.env) {
-  const dev = DEV_ENVS.has(env.NODE_ENV);
-  const raw = env.TOTP_ENCRYPTION_KEY;
-  let current;
-  if (!raw) {
-    if (!dev) {
-      throw new Error("TOTP_ENCRYPTION_KEY is required unless NODE_ENV is development or test (32 bytes, e.g. `openssl rand -hex 32`).");
-    }
-    if (!warnedDevKey) {
-      warnedDevKey = true;
-      console.warn("[totp] TOTP_ENCRYPTION_KEY is not set — using a development key derived from JWT_SECRET. Do NOT use this outside development.");
-    }
-    current = crypto.createHash("sha256").update("totp-dev-key:" + (env.JWT_SECRET || "dev_secret_change_me")).digest();
-  } else {
-    current = parseKey(raw, { allowPassphrase: dev });
-  }
-  const prevRaw = env.TOTP_ENCRYPTION_KEY_PREVIOUS;
-  const previous = prevRaw
-    ? parseKey(prevRaw, { allowPassphrase: dev, name: "TOTP_ENCRYPTION_KEY_PREVIOUS" })
-    : null;
-  return { current: toEntry(current), previous: previous ? toEntry(previous) : null };
-}
 
 // Beim Start aufrufen: bricht bei fehlendem/ungueltigem Key ab.
 function assertTotpConfig(env = process.env) {
@@ -153,39 +111,16 @@ function assertTotpConfig(env = process.env) {
 
 // Format: v1.<kid>.<iv b64>.<tag b64>.<ciphertext b64>; AAD = userId (Secret ist an den User gebunden)
 function encryptSecret(plain, userId, keyring = getKeyring()) {
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv("aes-256-gcm", keyring.current.key, iv, { authTagLength: 16 });
-  cipher.setAAD(Buffer.from(String(userId), "utf8"));
-  const enc = Buffer.concat([cipher.update(String(plain), "utf8"), cipher.final()]);
-  return ["v1", keyring.current.kid, iv.toString("base64"), cipher.getAuthTag().toString("base64"), enc.toString("base64")].join(".");
-}
-
-function payloadKid(payload) {
-  const parts = String(payload || "").split(".");
-  return parts[0] === "v1" && parts.length === 5 ? parts[1] : null;
+  return box.encryptWithAad(plain, String(userId), keyring);
 }
 
 function decryptSecret(payload, userId, keyring = getKeyring()) {
-  const [v, kid, iv, tag, data] = String(payload || "").split(".");
-  if (v !== "v1" || !kid || !iv || !tag || !data) throw new Error("Invalid encrypted payload");
-  const entry = [keyring.current, keyring.previous].find((e) => e && e.kid === kid);
-  if (!entry) throw new Error(`Unknown key id ${kid}`);
-  const decipher = crypto.createDecipheriv("aes-256-gcm", entry.key, Buffer.from(iv, "base64"), { authTagLength: 16 });
-  decipher.setAAD(Buffer.from(String(userId), "utf8"));
-  decipher.setAuthTag(Buffer.from(tag, "base64"));
-  return Buffer.concat([decipher.update(Buffer.from(data, "base64")), decipher.final()]).toString("utf8");
+  return box.decryptWithAad(payload, String(userId), keyring);
 }
 
 // Fuer das Rotations-Skript: Payload mit dem aktuellen Key neu verschluesseln; null = schon aktuell
 function reencryptPayload(payload, userId, keyring = getKeyring()) {
-  if (!needsReencrypt(payload, keyring)) return null;
-  return encryptSecret(decryptSecret(payload, userId, keyring), userId, keyring);
-}
-
-// true, wenn der Payload noch mit einem aelteren Key verschluesselt ist (→ neu verschluesseln)
-function needsReencrypt(payload, keyring = getKeyring()) {
-  const kid = payloadKid(payload);
-  return !!kid && kid !== keyring.current.kid;
+  return box.reencryptWithAad(payload, String(userId), keyring);
 }
 
 // Pending-Secret laeuft nach 15 Minuten ab

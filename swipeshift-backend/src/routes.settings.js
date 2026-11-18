@@ -1,7 +1,7 @@
 // src/routes.settings.js
 // Konto-Einstellungen. Gemountet unter /auth.
 //
-//   GET   /auth/me/settings   { settings, paused }   (IBAN maskiert)
+//   GET   /auth/me/settings   { settings, paused }   (Kontonummer nur als accountLast4)
 //   PATCH /auth/me/settings   Teil-Aenderung, siehe src/utils/settings.js
 //   POST  /auth/me/pause      { paused: true|false }
 
@@ -10,7 +10,9 @@ const { z } = require("zod");
 const { prisma } = require("./prisma.js");
 const { requireAuth } = require("./auth");
 const events = require("./notifyEvents");
+const { sendMail } = require("./mailer");
 const { applyPatch, publicSettings } = require("./utils/settings");
+const { payoutChangeMail } = require("./utils/payoutMail");
 
 const router = express.Router();
 
@@ -28,18 +30,26 @@ router.get("/me/settings", requireAuth, async (req, res) => {
   }
 });
 
+// TODO: Read-Modify-Write auf User.settings ist nicht atomar — zwei gleichzeitige PATCHes
+// koennen sich gegenseitig ueberschreiben (Last write wins). Optimistic Locking/jsonb_set erwaegen.
 router.patch("/me/settings", requireAuth, async (req, res) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.auth.sub },
-      select: { settings: true },
+      select: { settings: true, email: true },
     });
     if (!user) return res.status(404).json({ error: "User not found" });
 
-    const { settings, error } = applyPatch(user.settings, req.body);
+    const { settings, error, payoutDetailsChanged, payoutChanges } = applyPatch(user.settings, req.body, { userId: req.auth.sub });
     if (error) return res.status(400).json({ error, code: "INVALID_SETTINGS" });
 
     await prisma.user.update({ where: { id: req.auth.sub }, data: { settings } });
+    // Sicherheitsmail bei geaenderten Auszahlungsdaten (immer, nicht blockierend).
+    // TODO: Re-Auth (Passwort/2FA) vor dem Aendern von Auszahlungsdaten verlangen.
+    if (payoutDetailsChanged) {
+      sendMail({ to: user.email, ...payoutChangeMail(settings, payoutChanges) })
+        .catch((err) => console.error("Payout change mail failed:", err.message));
+    }
     return res.json({ settings: publicSettings(settings) });
   } catch (err) {
     console.error("PATCH /auth/me/settings error:", err);

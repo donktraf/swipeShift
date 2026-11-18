@@ -1,14 +1,8 @@
 // src/utils/settings.test.js
+const { decryptAccountNumber } = require("./bankDetails");
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { isValidIban, withDefaults, applyPatch, publicSettings, DEFAULT_SETTINGS } = require("./settings");
-
-test("isValidIban: echte Pruefziffer, Leerzeichen egal", () => {
-  assert.equal(isValidIban("DE89 3704 0044 0532 0130 00"), true);
-  assert.equal(isValidIban("de89370400440532013000"), true);
-  assert.equal(isValidIban("DE89 3704 0044 0532 0130 01"), false);
-  assert.equal(isValidIban("1234"), false);
-});
+const { withDefaults, applyPatch, publicSettings, DEFAULT_SETTINGS } = require("./settings");
 
 test("withDefaults fuellt fehlende/kaputte Werte auf", () => {
   assert.deepEqual(withDefaults(null), JSON.parse(JSON.stringify(DEFAULT_SETTINGS)));
@@ -28,13 +22,48 @@ test("applyPatch: Teil-Aenderungen werden zusammengefuehrt", () => {
   assert.deepEqual(settings.quietHours, { enabled: true, from: "23:30", to: "07:00" });
 });
 
-test("applyPatch: IBAN wird geprueft, normalisiert, null loescht", () => {
-  assert.match(applyPatch(null, { payout: { iban: "DE00 1234" } }).error, /payout\.iban/);
-  const a = applyPatch(null, { payout: { method: "bank", iban: "de89 3704 0044 0532 0130 00" } }).settings;
-  assert.equal(a.payout.iban, "DE89370400440532013000");
-  const b = applyPatch(a, { payout: { frequency: "monthly" } }).settings;
-  assert.equal(b.payout.iban, "DE89370400440532013000"); // weggelassen = unveraendert
-  assert.equal(applyPatch(b, { payout: { iban: null } }).settings.payout.iban, null);
+const ctx = { userId: "u1" };
+const BANK = { accountHolderName: " Jane Doe ", routingNumber: "0210-0002 1", accountNumber: "0012 3456-7890", accountType: "checking" };
+
+test("applyPatch: Bankdaten werden geprueft, normalisiert, Kontonummer verschluesselt", () => {
+  assert.match(applyPatch(null, { payout: { bank: { ...BANK, routingNumber: "123456789" } } }, ctx).error, /payout\.bank\.routingNumber/);
+  assert.match(applyPatch(null, { payout: { bank: { ...BANK, accountNumber: "123" } } }, ctx).error, /accountNumber/);
+  assert.match(applyPatch(null, { payout: { bank: { ...BANK, accountNumber: "12ab5678" } } }, ctx).error, /accountNumber/);
+  assert.match(applyPatch(null, { payout: { bank: { ...BANK, accountType: "iban" } } }, ctx).error, /accountType/);
+  assert.match(applyPatch(null, { payout: { bank: { accountHolderName: "Jane" } } }, ctx).error, /Required/); // unvollstaendig
+  const r = applyPatch(null, { payout: { method: "bank", bank: BANK } }, ctx);
+  const bank = r.settings.payout.bank;
+  assert.equal(r.payoutDetailsChanged, true);
+  assert.equal(bank.accountHolderName, "Jane Doe");
+  assert.equal(bank.routingNumber, "021000021");
+  assert.equal(bank.accountLast4, "7890");
+  assert.equal(bank.accountType, "checking");
+  assert.ok(!JSON.stringify(bank).includes("1234567890"));
+  assert.equal(decryptAccountNumber(bank.accountEnc, "u1"), "00123456789" + "0");
+});
+
+test("applyPatch: Bank-Teil-Aenderung behaelt Kontonummer, null loescht, gleiche Eingabe ist keine Aenderung", () => {
+  const a = applyPatch(null, { payout: { bank: BANK } }, ctx).settings;
+  const b = applyPatch(a, { payout: { bank: { accountType: "savings", accountHolderName: "J. Doe" } } }, ctx);
+  assert.equal(b.settings.payout.bank.accountEnc, a.payout.bank.accountEnc);
+  assert.equal(b.settings.payout.bank.accountType, "savings");
+  assert.equal(b.payoutDetailsChanged, true);
+  assert.equal(applyPatch(a, { payout: { frequency: "monthly" } }, ctx).payoutDetailsChanged, false);
+  assert.equal(applyPatch(a, { payout: { bank: { accountNumber: "00123456789 0" } } }, ctx).payoutDetailsChanged, false);
+  assert.equal(applyPatch(a, { payout: { bank: { accountNumber: "99999" } } }, ctx).settings.payout.bank.accountLast4, "9999");
+  assert.equal(applyPatch(a, { payout: { bank: null } }, ctx).settings.payout.bank, null);
+});
+
+test("applyPatch: PayPal-Aenderung zaehlt als geaenderte Auszahlungsdaten", () => {
+  assert.equal(applyPatch(null, { payout: { paypalEmail: "A@b.de" } }, ctx).payoutDetailsChanged, true);
+});
+
+test("Alte IBAN wird ignoriert und beim Schreiben entfernt", () => {
+  const stored = { payout: { method: "bank", iban: "DE89370400440532013000" } };
+  assert.equal(withDefaults(stored).payout.iban, undefined);
+  assert.equal(applyPatch(stored, { payout: { frequency: "monthly" } }, ctx).settings.payout.iban, undefined);
+  // Feld gibt es nicht mehr: wird von der Validierung verworfen, nie gespeichert
+  assert.equal(applyPatch(null, { payout: { iban: "DE89370400440532013000" } }, ctx).settings.payout.iban, undefined);
 });
 
 test("applyPatch: unbekannte Felder und falsche Zeiten abgelehnt", () => {
@@ -43,9 +72,19 @@ test("applyPatch: unbekannte Felder und falsche Zeiten abgelehnt", () => {
   assert.ok(applyPatch(null, { payout: { paypalEmail: "kein-mail" } }).error);
 });
 
-test("publicSettings gibt die IBAN nie komplett heraus", () => {
-  const out = publicSettings({ payout: { iban: "DE89370400440532013000" } });
-  assert.equal(out.payout.iban, undefined);
-  assert.equal(out.payout.hasIban, true);
-  assert.equal(out.payout.ibanMasked, "DE•• •••• 3000");
+test("publicSettings gibt die Kontonummer nie heraus, nur accountLast4", () => {
+  const stored = applyPatch(null, { payout: { bank: BANK } }, ctx).settings;
+  const out = publicSettings(stored);
+  assert.deepEqual(out.payout.bank, { accountHolderName: "Jane Doe", routingNumber: "021000021", accountType: "checking", accountLast4: "7890" });
+  assert.ok(!JSON.stringify(out).includes("accountEnc"));
+  assert.equal(publicSettings(null).payout.bank, null);
+});
+
+test("Methodenwechsel zaehlt als Aenderung, Frequenz allein nicht", () => {
+  const a = applyPatch(null, { payout: { method: "bank" } }, ctx);
+  assert.equal(a.payoutDetailsChanged, false);
+  const b = applyPatch(a.settings, { payout: { method: "paypal" } }, ctx);
+  assert.equal(b.payoutDetailsChanged, true);
+  assert.equal(b.payoutChanges.method, true);
+  assert.equal(applyPatch(b.settings, { payout: { frequency: "monthly" } }, ctx).payoutDetailsChanged, false);
 });

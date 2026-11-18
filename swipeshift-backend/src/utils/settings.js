@@ -1,15 +1,17 @@
 // src/utils/settings.js
 // Reine, DB-freie Logik fuer User.settings (JSON): Standardwerte, Validierung,
-// Zusammenfuehren mit Aenderungen und sichere Ausgabe (IBAN maskiert).
+// Zusammenfuehren mit Aenderungen und sichere Ausgabe (Kontonummer nie im Klartext).
 //
 // Form:
 // {
 //   notifications: { jobActivity: {push, email}, payments: {...}, messages: {...}, account: {...} },
 //   quietHours:    { enabled, from: "HH:MM", to: "HH:MM" },
-//   payout:        { method: "bank"|"paypal", iban, paypalEmail, frequency: "instant"|"weekly"|"monthly" }
+//   payout:        { method: "bank"|"paypal", bank, paypalEmail, frequency: "instant"|"weekly"|"monthly" }
+//   payout.bank:   null | { accountHolderName, routingNumber, accountType, accountEnc (verschluesselt), accountLast4 }
 // }
 
 const { z } = require("zod");
+const bankDetails = require("./bankDetails");
 
 const NOTIFICATION_CATEGORIES = ["jobActivity", "payments", "messages", "account"];
 
@@ -21,34 +23,24 @@ const DEFAULT_SETTINGS = Object.freeze({
     account:     { push: false, email: true },
   },
   quietHours: { enabled: false, from: "22:00", to: "07:00" },
-  payout: { method: "bank", iban: null, paypalEmail: null, frequency: "weekly" },
+  payout: { method: "bank", bank: null, paypalEmail: null, frequency: "weekly" },
 });
 
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Use HH:MM");
 const channel = z.object({ push: z.boolean(), email: z.boolean() }).partial();
-
-// IBAN: Leerzeichen raus, Grossbuchstaben, 15–34 Zeichen, Laendercode + Pruefziffern
-function normalizeIban(value) {
-  return String(value).replace(/\s+/g, "").toUpperCase();
-}
-function isValidIban(value) {
-  const iban = normalizeIban(value);
-  if (!/^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/.test(iban)) return false;
-  // Mod-97-Pruefung (ISO 13616)
-  const rearranged = iban.slice(4) + iban.slice(0, 4);
-  const digits = rearranged.replace(/[A-Z]/g, (c) => String(c.charCodeAt(0) - 55));
-  let rest = 0;
-  for (const ch of digits) rest = (rest * 10 + Number(ch)) % 97;
-  return rest === 1;
-}
 
 const patchSchema = z.object({
   notifications: z.object(Object.fromEntries(NOTIFICATION_CATEGORIES.map((c) => [c, channel]))).partial().optional(),
   quietHours: z.object({ enabled: z.boolean(), from: time, to: time }).partial().optional(),
   payout: z.object({
     method: z.enum(["bank", "paypal"]),
-    // null = loeschen, weglassen = unveraendert
-    iban: z.string().max(40).nullable().refine((v) => v === null || v.trim() === "" || isValidIban(v), "Invalid IBAN"),
+    // null = loeschen, weglassen = unveraendert; Teil-Objekt: nur die gesendeten Felder aendern
+    bank: z.object({
+      accountHolderName: z.string().max(200).refine(bankDetails.isValidHolderName, "Invalid account holder name"),
+      routingNumber: z.string().max(30).refine(bankDetails.isValidRoutingNumber, "Invalid routing number"),
+      accountNumber: z.string().max(40).refine(bankDetails.isValidAccountNumber, "Invalid account number"),
+      accountType: z.enum(bankDetails.ACCOUNT_TYPES),
+    }).partial().strict().nullable(),
     paypalEmail: z.string().max(254).nullable().refine((v) => v === null || v.trim() === "" || z.string().email().safeParse(v.trim()).success, "Invalid email"),
     frequency: z.enum(["instant", "weekly", "monthly"]),
   }).partial().optional(),
@@ -76,7 +68,8 @@ function withDefaults(stored) {
   }
   if (s.payout && typeof s.payout === "object") {
     if (["bank", "paypal"].includes(s.payout.method)) out.payout.method = s.payout.method;
-    if (typeof s.payout.iban === "string" && s.payout.iban) out.payout.iban = s.payout.iban;
+    // Alte IBAN (s.payout.iban) wird bewusst ignoriert → beim naechsten Schreiben entfernt
+    out.payout.bank = bankDetails.sanitizeStoredBank(s.payout.bank);
     if (typeof s.payout.paypalEmail === "string" && s.payout.paypalEmail) out.payout.paypalEmail = s.payout.paypalEmail;
     if (["instant", "weekly", "monthly"].includes(s.payout.frequency)) out.payout.frequency = s.payout.frequency;
   }
@@ -84,8 +77,9 @@ function withDefaults(stored) {
 }
 
 // Aenderung validieren und auf die gespeicherten Settings anwenden.
-// Rueckgabe: { settings } oder { error }
-function applyPatch(stored, patch) {
+// ctx = { userId, keyring? } — noetig, wenn eine Kontonummer gesendet wird (Verschluesselung).
+// Rueckgabe: { settings, payoutDetailsChanged } oder { error }
+function applyPatch(stored, patch, ctx = {}) {
   const parsed = patchSchema.safeParse(patch ?? {});
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
@@ -93,6 +87,8 @@ function applyPatch(stored, patch) {
   }
   const p = parsed.data;
   const next = withDefaults(stored);
+  const before = clone(next.payout);
+  let accountNumberChanged = false;
 
   for (const cat of NOTIFICATION_CATEGORIES) {
     const v = p.notifications?.[cat];
@@ -102,39 +98,78 @@ function applyPatch(stored, patch) {
   if (p.payout) {
     if (p.payout.method !== undefined) next.payout.method = p.payout.method;
     if (p.payout.frequency !== undefined) next.payout.frequency = p.payout.frequency;
-    if (p.payout.iban !== undefined) {
-      next.payout.iban = p.payout.iban && p.payout.iban.trim() ? normalizeIban(p.payout.iban) : null;
+    if (p.payout.bank !== undefined) {
+      if (p.payout.bank === null) {
+        next.payout.bank = null;
+      } else {
+        const r = mergeBank(next.payout.bank, p.payout.bank, ctx);
+        if (r.error) return { error: r.error };
+        next.payout.bank = r.bank;
+        accountNumberChanged = r.accountNumberChanged;
+      }
     }
     if (p.payout.paypalEmail !== undefined) {
       next.payout.paypalEmail = p.payout.paypalEmail && p.payout.paypalEmail.trim()
         ? p.payout.paypalEmail.trim().toLowerCase() : null;
     }
   }
-  return { settings: next };
+  const bankChanged = accountNumberChanged
+    || JSON.stringify(withoutEnc(before.bank)) !== JSON.stringify(withoutEnc(next.payout.bank));
+  const paypalChanged = before.paypalEmail !== next.payout.paypalEmail;
+  const methodChanged = before.method !== next.payout.method;
+  // Haeufigkeit allein loest keine Sicherheitsmail aus
+  const payoutDetailsChanged = bankChanged || paypalChanged || methodChanged;
+  return { settings: next, payoutDetailsChanged, payoutChanges: { bank: bankChanged, paypal: paypalChanged, method: methodChanged } };
 }
 
-// Fuer die App: IBAN nie komplett zurueckgeben
-function maskIban(iban) {
-  if (!iban) return null;
-  const clean = normalizeIban(iban);
-  return `${clean.slice(0, 2)}•• •••• ${clean.slice(-4)}`;
+function withoutEnc(bank) {
+  if (!bank) return null;
+  const { accountEnc, ...rest } = bank;
+  return rest;
 }
 
+// Teil-Aenderung der Bankdaten auf bestehende anwenden; Ergebnis muss vollstaendig sein
+function mergeBank(existing, patch, ctx) {
+  const next = { ...(existing || {}) };
+  let accountNumberChanged = false;
+  if (patch.accountHolderName !== undefined) next.accountHolderName = patch.accountHolderName.trim();
+  if (patch.routingNumber !== undefined) next.routingNumber = bankDetails.normalizeDigits(patch.routingNumber);
+  if (patch.accountType !== undefined) next.accountType = patch.accountType;
+  if (patch.accountNumber !== undefined) {
+    if (!ctx.userId) throw new Error("applyPatch: ctx.userId is required to store an account number");
+    const digits = bankDetails.normalizeDigits(patch.accountNumber);
+    let same = false;
+    if (existing?.accountEnc) {
+      try {
+        same = bankDetails.decryptAccountNumber(existing.accountEnc, ctx.userId, ctx.keyring) === digits;
+      } catch {
+        // Nie Payload/Klartext loggen
+        console.warn(`[settings] could not decrypt stored bank account number for userId=${ctx.userId}`);
+        same = false;
+      }
+    }
+    if (!same) {
+      next.accountEnc = bankDetails.encryptAccountNumber(digits, ctx.userId, ctx.keyring);
+      next.accountLast4 = digits.slice(-4);
+      accountNumberChanged = true;
+    }
+  }
+  for (const f of ["accountHolderName", "routingNumber", "accountType", "accountEnc"]) {
+    if (!next[f]) return { error: `payout.bank.${f === "accountEnc" ? "accountNumber" : f}: Required` };
+  }
+  return { bank: bankDetails.sanitizeStoredBank(next), accountNumberChanged };
+}
+
+// Fuer die App: Kontonummer nie zurueckgeben, nur die letzten 4 Ziffern
 function publicSettings(stored) {
   const s = withDefaults(stored);
-  const { iban, ...payout } = s.payout;
-  return {
-    ...s,
-    payout: { ...payout, hasIban: !!iban, ibanMasked: maskIban(iban) },
-  };
+  return { ...s, payout: { ...s.payout, bank: bankDetails.publicBank(s.payout.bank) } };
 }
 
 module.exports = {
   NOTIFICATION_CATEGORIES,
   DEFAULT_SETTINGS,
-  isValidIban,
   withDefaults,
   applyPatch,
-  maskIban,
   publicSettings,
 };
