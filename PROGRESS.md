@@ -819,4 +819,10 @@ Gefunden beim Profile-Screen-Abgleich: Legal-Schalter (Worker + Arbeitgeber) und
 - Statistik: auto-angenommene Bewerbungen zählen nicht als „New Applicants“/„needs response“, nicht in Antwortquote/-zeit; eigene Kennzahl „Instant Matches“ (Dashboard) und „Instant“ (Job-Karte); „Auto-accepted“-Pille bei Bewerbern/zugewiesenen Workern. Gebuchte Plätze, Finanzen, Reviews zählen sie als normale Worker
 - Backend-utils: `jobData.js` (Validierung, `evaluateStatusChange`, `shouldAutoAccept`), `applyCounts.js` (+ Tests); Migrationen `20261118160000_job_extra_fields`, `20261118170000_job_extra_fields_backfill` (lokal angewendet)
 - Bewusst nicht umgesetzt: Job-Type-Mehrfachauswahl, Plattformgebühr/Netto-Lohn (kein Gebührenmodell)
-- Offen: Zertifikate bei Instant Match nicht prüfbar (kein Worker-Feld); Statuswechsel außerhalb von Drafts nicht eingeschränkt (z. B. published→draft); PATCH-Veröffentlichen prüft Draft nicht auf Vollständigkeit; `applicantCount` zählt alle manuellen Bewerbungen (Wireframe: nur unbeantwortete)
+- Offen: Zertifikate bei Instant Match nicht prüfbar (kein Worker-Feld)
+
+### Job-Status-Regeln, Vollständigkeit beim Veröffentlichen, Bewerberzahl (2026-11-18)
+- Statuswechsel nur noch: draft → published/cancelled; published → inProgress/completed/cancelled, → draft nur ohne Bewerbungen (409 `HAS_APPLICANTS`); inProgress → completed/cancelled; completed/cancelled final (409 `INVALID_TRANSITION`, neu ausschreiben statt wiedereröffnen); gleicher Status = No-op. Race-sicher über bedingtes Update (Status + updatedAt)
+- Veröffentlichen (POST, PUT, PATCH) prüft nach den Terms die Vollständigkeit: Titel, Kategorie, Ort, jede Schicht mit Start < Ende, Stundenlohn > 0, ≥ 1 Platz → sonst 400 `INCOMPLETE_JOB` mit `missing`; App zeigt fehlende Angaben + „Edit draft“; Post-Job-Formular verlangt jetzt auch Ort + Stundenlohn
+- `GET /jobs/mine`: `applicantCount` = nur unbeantwortete manuelle Bewerbungen (Wireframe), dazu `instantMatchCount`, `totalApplicationCount`; Jobkarte zeigt „N new“ nur bei veröffentlichten Jobs
+- Helper: `STATUS_TRANSITIONS`/`evaluateStatusChange`, `missingPublishFields`/`publishGate` (jobData.js), `summarizeJobApplies` (applyCounts.js) + Tests
