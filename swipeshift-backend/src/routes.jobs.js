@@ -12,7 +12,7 @@ const { buildJobData, validateJobBody, checkDraftAccess, publishGate, resolveCre
 const { isBlockedBetween } = require("./utils/safety");
 const { normalizeCancellationReason } = require("./utils/applicationStatus");
 const { companyJobsWhere, countCompletedJobs } = require("./utils/companyStats");
-const { countNewMatches, pickInlineApplies } = require("./utils/employerJobCard");
+const { countNewMatches, pickInlineApplies, inlineScheduleConflicts } = require("./utils/employerJobCard");
 const { loadApplicantSummaries } = require("./applicantSummaries");
 
 const router = express.Router();
@@ -588,15 +588,21 @@ router.get("/mine", requireAuth, requireVerifiedEmail, async (req, res) => {
     const inlineByJob = new Map(jobs.map(({ id, status, applies }) =>
       [id, status === "published" ? pickInlineApplies(applies) : []]));
     const inlineUserIds = [...new Set([...inlineByJob.values()].flat().map((a) => a.userId))];
-    const [summaries, users] = inlineUserIds.length
+    const [summaries, users, acceptedApplies] = inlineUserIds.length
       ? await Promise.all([
           loadApplicantSummaries(inlineUserIds),
           prisma.user.findMany({
             where: { id: { in: inlineUserIds } },
             select: { id: true, firstName: true, lastName: true, worker: { select: { profilePhotoUrl: true } } },
           }),
+          // Andere angenommene Jobs aller Inline-Bewerber (eine Query fuer alle Jobs) → Zeitkonflikt
+          prisma.apply.findMany({
+            where: { userId: { in: inlineUserIds }, status: "accepted" },
+            select: { id: true, userId: true, jobId: true, job: { select: { startTime: true, endTime: true, status: true } } },
+          }),
         ])
-      : [new Map(), []];
+      : [new Map(), [], []];
+    const inlineConflicts = inlineScheduleConflicts(jobs, inlineByJob, acceptedApplies);
     const userById = new Map(users.map((u) => [u.id, u]));
 
     // Zaehler siehe utils/applyCounts.js (applicantCount = nur unbeantwortete manuelle Bewerbungen)
@@ -615,6 +621,10 @@ router.get("/mine", requireAuth, requireVerifiedEmail, async (req, res) => {
           profilePhotoUrl: u?.worker?.profilePhotoUrl ?? null,
           ratingAverage: summaries.get(a.userId)?.ratingAverage ?? null,
           reviewCount: summaries.get(a.userId)?.reviewCount ?? 0,
+          // Shift-Fit-Hinweis (wie auf der Bewerberkarte)
+          availableDays: summaries.get(a.userId)?.availableDays ?? [],
+          availableTimes: summaries.get(a.userId)?.availableTimes ?? [],
+          hasScheduleConflict: inlineConflicts.has(a.id),
         };
       }),
     }));

@@ -17,6 +17,10 @@ struct InlineApplicant: Identifiable, Decodable, Hashable {
     let reviewCount: Int
     /// Chat erst nach Annahme nutzbar
     let conversationId: String?
+    /// Shift-Fit-Hinweis (optional, aeltere Backends liefern sie nicht)
+    var availableDays: [String]? = nil
+    var availableTimes: [String]? = nil
+    var hasScheduleConflict: Bool? = nil
 
     var id: String { applyId }
 
@@ -88,6 +92,8 @@ struct EmployerJob: Identifiable, Decodable, Hashable {
     /// Bewerbungen seit dem letzten Oeffnen der Bewerberliste ("N new matches")
     var newMatchCount: Int? = nil
     var inlineApplicants: [InlineApplicant]? = nil
+    /// Schichtbeginn (ISO 8601), fuer den Shift-Fit-Hinweis der Inline-Bewerber
+    var startTime: String? = nil
     let createdAt: String
     let updatedAt: String?
 
@@ -104,6 +110,11 @@ struct EmployerJob: Identifiable, Decodable, Hashable {
             if let d = Self.isoWithFraction.date(from: raw) ?? Self.isoPlain.date(from: raw) { return d }
         }
         return nil
+    }
+
+    var startDate: Date? {
+        guard let raw = startTime else { return nil }
+        return Self.isoWithFraction.date(from: raw) ?? Self.isoPlain.date(from: raw)
     }
 
     var statusEnum: JobStatus {
@@ -584,6 +595,14 @@ private struct PostedJobCard: View {
                     .foregroundColor(.primary)
                     .lineLimit(1)
                 ApplicantRatingLabel(average: applicant.ratingAverage, count: applicant.reviewCount)
+                if decision == nil, let fit = ApplicantShiftFit.evaluate(
+                    hasConflict: applicant.hasScheduleConflict == true,
+                    availableDays: applicant.availableDays ?? [],
+                    availableTimes: applicant.availableTimes ?? [],
+                    start: job.startDate
+                ) {
+                    ApplicantShiftFitLabel(fit: fit, compact: true)
+                }
             }
             Spacer(minLength: 6)
             switch decision {

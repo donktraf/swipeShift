@@ -1,6 +1,6 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { countNewMatches, pickInlineApplies } = require("./employerJobCard");
+const { countNewMatches, pickInlineApplies, inlineScheduleConflicts } = require("./employerJobCard");
 
 const t = (n) => new Date(Date.UTC(2026, 10, n));
 
@@ -24,4 +24,25 @@ test("pickInlineApplies: nur pending + manuell, aelteste zuerst, max 2", () => {
   ];
   assert.deepEqual(pickInlineApplies(applies).map((a) => a.id), ["b", "c"]);
   assert.deepEqual(pickInlineApplies(applies, 5).map((a) => a.id), ["b", "c", "a"]);
+});
+
+test("inlineScheduleConflicts: Ueberschneidung mit anderem angenommenem Job, Randfaelle", () => {
+  const h = (n) => new Date(Date.UTC(2026, 10, 20, n));
+  const jobs = [
+    { id: "j1", startTime: h(10), endTime: h(14) },
+    { id: "j2", startTime: h(9), endTime: h(11) },
+  ];
+  const inlineByJob = new Map([
+    ["j1", [{ id: "a1", userId: "u1" }, { id: "a2", userId: "u2" }, { id: "a3", userId: "u3" }]],
+    ["j2", []],
+  ]);
+  const accepted = [
+    { id: "x1", userId: "u1", jobId: "other", job: { startTime: h(13), endTime: h(16), status: "published" } }, // Konflikt
+    { id: "x2", userId: "u2", jobId: "other", job: { startTime: h(14), endTime: h(16), status: "published" } }, // angrenzend
+    { id: "x3", userId: "u3", jobId: "other", job: { startTime: h(11), endTime: h(12), status: "cancelled" } }, // storniert
+  ];
+  const result = inlineScheduleConflicts(jobs, inlineByJob, accepted);
+  assert.deepEqual([...result], ["a1"]);
+  assert.equal(inlineScheduleConflicts(jobs, new Map(), accepted).size, 0);
+  assert.equal(inlineScheduleConflicts(undefined, undefined, undefined).size, 0);
 });

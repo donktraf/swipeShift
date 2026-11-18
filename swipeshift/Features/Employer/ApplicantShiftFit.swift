@@ -72,10 +72,22 @@ enum ApplicantShiftFit: Equatable {
 /// Kleine Zeile mit Icon + Text in der Ampelfarbe
 struct ApplicantShiftFitLabel: View {
     let fit: ApplicantShiftFit
+    /// Kompakt (Jobkarte): kleiner Punkt + kurzer Text in einer Zeile
+    var compact: Bool = false
 
     var body: some View {
-        Label(fit.text, systemImage: fit.icon)
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundColor(fit.color)
+        if compact {
+            HStack(spacing: 5) {
+                Circle().fill(fit.color).frame(width: 6, height: 6)
+                Text(fit.text)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(fit.color)
+                    .lineLimit(1)
+            }
+        } else {
+            Label(fit.text, systemImage: fit.icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(fit.color)
+        }
     }
 }

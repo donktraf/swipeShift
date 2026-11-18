@@ -836,4 +836,4 @@ Gefunden beim Profile-Screen-Abgleich: Legal-Schalter (Worker + Arbeitgeber) und
 - Worker-Detailprofil: vergangene Jobs (max. 10, Firma/Job/Datum/Bewertung, keine Kommentare), Konto (E-Mail bestätigt, Mitglied seit — Pausiert wird bewusst nicht gezeigt), Match-Hinweis im Kontext eines eigenen Jobs (Kategorie, Skills ≥ 4, Arbeitserlaubnis, Mindestalter)
 - Behoben: Bewerberliste des Arbeitgebers lieferte Serverfehler, sobald Bewerber da waren (Profilfoto aus falschem Modell abgefragt, seit März)
 - Backend-utils: `scheduleConflict.js`, `employerJobCard.js`, `workerDetail.js`, `savedCompanyDates.js`, `jobNotes.js` (+ Tests); Migration `20261118180000_applicants_seen_and_not_interested` (lokal angewendet)
-- Offen: Verfügbarkeits-Hinweis noch nicht bei den Bewerbern direkt auf der Jobkarte
+- Verfügbarkeits-Hinweis auch bei den Bewerbern direkt auf der Jobkarte (kompakt, gleicher Wortlaut)

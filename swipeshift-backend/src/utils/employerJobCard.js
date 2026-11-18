@@ -1,6 +1,8 @@
 // src/utils/employerJobCard.js
 // Jobkarte des Arbeitgebers (GET /jobs/mine): "New Matches" + Inline-Bewerber. Rein und DB-frei → testbar.
 
+const { computeScheduleConflicts } = require("./scheduleConflict");
+
 const MAX_INLINE_APPLICANTS = 2;
 
 // Neue Matches = Bewerbungen (manuell ODER automatisch angenommen), die nach dem letzten Oeffnen der
@@ -21,4 +23,20 @@ function pickInlineApplies(applies, cap = MAX_INLINE_APPLICANTS) {
     .slice(0, cap);
 }
 
-module.exports = { MAX_INLINE_APPLICANTS, countNewMatches, pickInlineApplies };
+// Zeitkonflikt je Inline-Bewerbung: Set der apply-ids, deren Worker schon einen ANDEREN angenommenen Job
+// zur selben Zeit hat. `jobs` = Jobs des Employers (id, startTime, endTime), `inlineByJob` = Map(jobId → applies),
+// `accepted` = gebuendelt geladene angenommene Bewerbungen der Inline-Worker ueber alle Jobs.
+function inlineScheduleConflicts(jobs, inlineByJob, accepted) {
+  const jobById = new Map((Array.isArray(jobs) ? jobs : []).map((j) => [j.id, j]));
+  const toCheck = [];
+  for (const [jobId, applies] of inlineByJob ?? []) {
+    const job = jobById.get(jobId);
+    if (!job) continue;
+    for (const a of applies) {
+      toCheck.push({ id: a.id, userId: a.userId, jobId, job: { startTime: job.startTime, endTime: job.endTime } });
+    }
+  }
+  return computeScheduleConflicts(toCheck, accepted);
+}
+
+module.exports = { MAX_INLINE_APPLICANTS, countNewMatches, pickInlineApplies, inlineScheduleConflicts };
