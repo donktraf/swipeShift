@@ -841,3 +841,12 @@ Gefunden beim Profile-Screen-Abgleich: Legal-Schalter (Worker + Arbeitgeber) und
 ### Liste blockierter Nutzer (2026-11-18)
 - Einstellungen → Privacy & Data → „Blocked users“ (Worker und Arbeitgeber): Foto/Initiale, Name (Arbeitgeber = Firmenname), Rolle, „Blocked on …“, „Unblock“ mit Bestätigung; Lade-, Fehler- und Leerzustand, Erklärung was Blockieren bewirkt
 - Backend: `GET /safety/blocks` liefert zusätzlich Rolle und Foto (gebündelt, `src/utils/blockedUsers.js` + Tests)
+
+### Benachrichtigungen per Push + E-Mail (2026-11-18)
+- Versand nach den Einstellungen pro Kategorie (Job Activity, Messages, Payments, Account) und Kanal; Ruhezeiten dämpfen nur Push (Zeitzone vom Gerät, `X-Time-Zone` → `User.timeZone`); Sicherheits-Mails (Passwort, 2FA, neues Gerät) unverändert immer
+- Ereignisse: Bewerbung angenommen/abgelehnt, Job storniert, Schicht-Erinnerung (einmal, ≤ 24 h vorher), neue Bewerbung, Instant Match; Chat-Nachricht (Push sofort mit Vorschau, E-Mail nur wenn nach 15 min ungelesen, max. 1/Chat/Stunde, ohne Nachrichtentext); als bezahlt markiert, Zahlung offen nach Jobende; neue Bewertung, Konto pausiert/fortgesetzt. Keine Benachrichtigungen zwischen blockierten Nutzern; pausierte Konten nur Pause/Fortsetzen; Stornogrund nur im Push, nicht in Mails
+- Push: komplett vorbereitet (APNs über HTTP/2, `src/push.js`, Geräte `PushDevice`, `/auth/me/push-devices`), aber inaktiv bis `APNS_*` gesetzt sind (siehe `.env.example`); Geräte werden bei Logout/Sitzungs-Widerruf/Passwortwechsel entfernt, Offline-Logout wird nachgeholt, Token wechselt beim Login den Besitzer, Push-Taps nur im richtigen Konto
+- Hintergrundjobs: `src/scheduler.js` (alle 5 min, idempotent auch bei mehreren Servern)
+- iOS: Berechtigung einmal nach dem Onboarding, Hinweis + „Open Settings“ in den Benachrichtigungs-Einstellungen, Tap öffnet Chat/Job (Arbeitgeber: nur Tab)
+- Migration `20261118190000_push_notifications` (lokal angewendet)
+- Offen: Push-Capability/`aps-environment` in Xcode + APNs-Schlüssel (braucht bezahltes Apple Developer Program); Arbeitgeber-Deep-Links aus Push
