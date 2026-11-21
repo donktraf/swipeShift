@@ -145,7 +145,9 @@ extension JobDTO {
 struct EmployerStatsDTO: Decodable {
     let activeJobs: Int
     let newApplicants: Int
-    let monthlySpend: Double
+    let monthlySpend: Double   // inkl. Plattform-Gebuehr
+    var monthlySpendWages: Double? = nil
+    var monthlySpendFees: Double? = nil
     let applicationsThisWeek: Int
     let instantMatchesThisWeek: Int?
     let jobsFilledThisWeek: Int

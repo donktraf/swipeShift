@@ -32,6 +32,12 @@ struct AssignableJobDTO: Identifiable, Decodable {
     let openSpots: Int
     let shifts: [ShiftSlotDTO]
     var assignedWorkers: [AssignedWorkerDTO]
+    /// Kosten fuer den Employer (Backend utils/jobCost.js): je Worker Lohn + Plattform-Gebuehr, sowie fuer die aktuell Zugewiesenen
+    var feePercent: Double? = nil
+    var costPerWorker: Double? = nil
+    var costPerWorkerWage: Double? = nil
+    var costPerWorkerFee: Double? = nil
+    var assignedCost: Double? = nil
 
     var isFullyStaffed: Bool { assignedWorkers.count >= openSpots }
     var openCount: Int { max(0, openSpots - assignedWorkers.count) }
@@ -310,6 +316,27 @@ private struct JobAssignCard: View {
                                 Divider().padding(.leading, 14)
                             }
                         }
+                    }
+
+                    // Kosten (Lohn geht komplett an den Worker, Gebuehr kommt obendrauf)
+                    if let perWorker = job.costPerWorker, let wage = job.costPerWorkerWage, let fee = job.costPerWorkerFee {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Cost per worker: \(Money.format(perWorker, fractionDigits: 2))")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(.primary)
+                            Text("\(Money.format(wage, fractionDigits: 2)) wage + \(Money.format(fee, fractionDigits: 2)) platform fee (\(PlatformFees.percentLabel(job.feePercent ?? PlatformFees.defaultPlatformPercent)))")
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                            if let assigned = job.assignedCost, !job.assignedWorkers.isEmpty {
+                                Text("Assigned (\(job.assignedWorkers.count)): \(Money.format(assigned, fractionDigits: 2)) incl. fee")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        Divider().padding(.leading, 14)
                     }
 
                     // Zugewiesene Mitarbeiter

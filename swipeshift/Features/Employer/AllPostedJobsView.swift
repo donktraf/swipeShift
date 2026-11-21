@@ -99,6 +99,8 @@ struct EmployerJob: Identifiable, Decodable, Hashable {
     var startTime: String? = nil
     let createdAt: String
     let updatedAt: String?
+    /// Eingefrorener Gebuehren-Satz (nil bei Entwuerfen → aktueller Satz aus FeeConfig)
+    var platformFeePercent: Double? = nil
 
     /// Zeitpunkt der letzten Aenderung (Fallback createdAt)
     private static let isoWithFraction: ISO8601DateFormatter = {
@@ -328,6 +330,7 @@ struct AllPostedJobsView: View {
         }) { job in
             PublishDraftSheet(
                 jobTitle: job.title,
+                frozenFeePercent: job.platformFeePercent,
                 publish: {
                     try await APIClient.shared.updateJobStatus(jobId: job.id, status: "published", termsAccepted: true)
                 },
@@ -707,11 +710,13 @@ private struct PostedJobCard: View {
 /// Das Sheet fuehrt die Anfrage selbst aus, damit Fehler (z.B. unvollstaendiger Entwurf) hier erscheinen.
 private struct PublishDraftSheet: View {
     let jobTitle: String
+    var frozenFeePercent: Double? = nil
     let publish: () async throws -> Void
     let onPublished: () -> Void
     let onEditDraft: () -> Void
     let onCancel: () -> Void
 
+    @ObservedObject private var feeConfig = FeeConfig.shared
     @State private var termsAccepted = false
     @State private var isPublishing = false
     @State private var errorText: String? = nil
@@ -738,6 +743,12 @@ private struct PublishDraftSheet: View {
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 24)
             }
+
+            Text("A \(PlatformFees.percentLabel(frozenFeePercent ?? feeConfig.platformFeePercent)) platform fee is added on top of the wages and billed after each shift. Workers receive the full hourly rate.")
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 24)
 
             TermsConsentRow(isAccepted: $termsAccepted)
                 .padding(.horizontal, 16)
@@ -784,7 +795,8 @@ private struct PublishDraftSheet: View {
             .padding(.bottom, 24)
         }
         .background(Color(uiColor: .systemGroupedBackground))
-        .presentationDetents([.fraction(0.55), .large])
+        .presentationDetents([.fraction(0.6), .large])
+        .task { await feeConfig.refresh() }
     }
 
     @MainActor

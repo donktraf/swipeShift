@@ -533,7 +533,7 @@ private struct EmployerCalJobCard: View {
                     .background(SS.primary.opacity(0.1))
                     .clipShape(Capsule())
             }
-            Label("Shift cost \(Money.format(job.shiftCost))", systemImage: "banknote")
+            Label("Shift cost \(Money.format(job.shiftCost)) incl. fee", systemImage: "banknote")
                 .font(.system(size: 12))
                 .foregroundColor(.secondary)
             Spacer()

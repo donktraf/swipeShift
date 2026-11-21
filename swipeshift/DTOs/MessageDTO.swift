@@ -213,12 +213,22 @@ struct SavedCompanyActivity: Decodable {
 
 // MARK: - Employer Financials
 
+/// Alle Betraege inkl. Plattform-Gebuehr ("Total Spending" = Lohn + Gebuehr); Lohn/Gebuehr zusaetzlich getrennt.
 struct EmployerFinancialsDTO: Decodable {
     let totalSpending:      Double
+    var totalWages:         Double? = nil
+    var totalFees:          Double? = nil
     let upcomingPayments:   Double
+    var upcomingWages:      Double? = nil
+    var upcomingFees:       Double? = nil
     let completedJobsCount: Int
     let paidOut:            Double
+    var paidOutWages:       Double? = nil
+    var paidOutFees:        Double? = nil
     let monthlySpend:       Double
+    var monthlySpendWages:  Double? = nil
+    var monthlySpendFees:   Double? = nil
+    var platformFeePercent: Double? = nil
     let chartData:          [DailySpendDTO]
     let byCategory:         [String: Double]
     let upcomingJobs:       [FinancialJobDTO]
@@ -237,6 +247,8 @@ struct FinancialJobDTO: Decodable, Identifiable {
     let title:     String
     let logoEmoji: String
     let shiftText: String
-    let amount:    Double
+    let amount:    Double   // inkl. Plattform-Gebuehr
+    var wages:     Double? = nil
+    var fee:       Double? = nil
     let status:    String
 }

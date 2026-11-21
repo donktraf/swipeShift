@@ -804,6 +804,7 @@ struct PaymentsPayoutsView: View {
     @State private var isChangingAccount  = false
     @State private var paypalEmail:       String          = ""
     @State private var selectedFrequency: PayoutFrequency = .weekly
+    @ObservedObject private var feeConfig = FeeConfig.shared
     @State private var savedBank:         BankDetailsDTO?
     @State private var isLoading          = true
     @State private var isSaving           = false
@@ -823,6 +824,7 @@ struct PaymentsPayoutsView: View {
             .padding(.horizontal, 16)
         }
         .task { await load() }
+        .task { await feeConfig.refresh() }
         .onDisappear {
             accountNumber = ""
             confirmAccount = ""
@@ -890,6 +892,10 @@ struct PaymentsPayoutsView: View {
                                 .font(.system(size: 15))
                                 .foregroundColor(.primary)
                             Spacer()
+                            Text(freq == .instant ? "\(PlatformFees.percentLabel(feeConfig.instantPayoutFeePercent)) fee" : "Free")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(freq == .instant ? .orange : .green)
+                                .padding(.trailing, 14)
                         }
                         .padding(.vertical, 14)
                         .contentShape(Rectangle())
@@ -899,6 +905,12 @@ struct PaymentsPayoutsView: View {
                         Divider().padding(.leading, 52)
                     }
                 }
+                Divider().padding(.horizontal, 14)
+                Text("Standard payouts (weekly or monthly) are free. Instant payouts will cost \(PlatformFees.percentLabel(feeConfig.instantPayoutFeePercent)) once in-app payouts launch. You always earn the full hourly wage; there are no platform fees for workers.")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14)
             }
         }
 

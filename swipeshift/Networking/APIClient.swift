@@ -449,6 +449,14 @@ final class APIClient {
             return try JSONDecoder().decode(UserDTO.self, from: data)
         }
     
+    // GET /config (oeffentlich): Plattform-Gebuehr + Sofortauszahlungs-Gebuehr in Prozent
+    func fetchAppConfig() async throws -> AppConfigDTO {
+        let req = try makeRequest(path: "/config", method: "GET")
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(AppConfigDTO.self, from: data)
+    }
+
     // GET /employer/stats
     func fetchEmployerStats() async throws -> EmployerStatsDTO {
         let req = try makeRequest(path: "/employer/stats", method: "GET")
@@ -957,12 +965,11 @@ final class APIClient {
 
     // MARK: - Job Payments
 
-    func fetchJobPayments(jobId: String) async throws -> [PayableWorker] {
+    func fetchJobPayments(jobId: String) async throws -> JobPaymentsResponse {
         let req = try makeRequest(path: "/employer/jobs/\(jobId)/payments", method: "GET")
         let (data, resp) = try await URLSession.shared.data(for: req)
         try validate(response: resp, data: data)
-        struct W: Decodable { let workers: [PayableWorker] }
-        return try JSONDecoder().decode(W.self, from: data).workers
+        return try JSONDecoder().decode(JobPaymentsResponse.self, from: data)
     }
 
     func payWorker(jobId: String, applyId: String) async throws {

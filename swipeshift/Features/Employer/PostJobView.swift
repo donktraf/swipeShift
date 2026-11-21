@@ -12,6 +12,9 @@ struct DraftShift: Identifiable {
     var startTime: Date = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: Date()) ?? Date()
     var endTime: Date = Calendar.current.date(bySettingHour: 13, minute: 0, second: 0, of: Date()) ?? Date()
 
+    /// Schichtdauer in Stunden (0 bei ungueltiger Zeitspanne)
+    var hours: Double { max(0, endTime.timeIntervalSince(startTime) / 3600) }
+
     var durationText: String {
         let diff = endTime.timeIntervalSince(startTime)
         guard diff > 0 else { return "–" }
@@ -109,6 +112,10 @@ struct PostJobView: View {
     // Workers & Lohn
     @State private var numberOfWorkers = 1
     @State private var hourlyRateText = ""
+    @ObservedObject private var feeConfig = FeeConfig.shared
+    /// Eingefrorener Satz eines geladenen Jobs; nil bei neuen Jobs/Entwuerfen (dann aktueller Satz)
+    @State private var frozenFeePercent: Double? = nil
+    private var effectiveFeePercent: Double { frozenFeePercent ?? feeConfig.platformFeePercent }
 
     // Beschreibung & Aufgaben
     @State private var jobDescription = ""
@@ -176,6 +183,7 @@ struct PostJobView: View {
                         tagsSection
                         shiftsSection
                         workersAndPaySection
+                        costSummarySection
                         descriptionSection
                         tasksSection
                         requirementsSection
@@ -219,12 +227,19 @@ struct PostJobView: View {
                 }
             }
         }
-        .task { await loadDraftIfNeeded() }
+        .task {
+            await feeConfig.refresh()
+            await loadDraftIfNeeded()
+        }
         .sheet(isPresented: $showConfirmSheet) {
             PostJobConfirmSheet(
                 jobTitle: title,
                 company: companyName,
                 shiftsCount: shifts.count,
+                shiftHours: shifts.map(\.hours),
+                hourlyRate: parsedRate,
+                workers: numberOfWorkers,
+                feePercent: effectiveFeePercent,
                 isDraft: pendingStatus == "draft",
                 onSaveAsDraft: {
                     showConfirmSheet = false
@@ -467,6 +482,21 @@ struct PostJobView: View {
                         .font(.system(size: 15))
                         .multilineTextAlignment(.trailing)
                 }
+            }
+        }
+    }
+
+    private var parsedRate: Double {
+        Double(hourlyRateText.replacingOccurrences(of: ",", with: ".")) ?? 0
+    }
+
+    // MARK: - Kostenuebersicht (Plattform-Gebuehr obendrauf, Worker erhaelt den vollen Lohn)
+    @ViewBuilder
+    private var costSummarySection: some View {
+        if parsedRate > 0, shifts.contains(where: { $0.hours > 0 }) {
+            FormSection(title: "Cost Summary") {
+                FeeSummaryView(shiftHours: shifts.map(\.hours), hourlyRate: parsedRate,
+                               workers: numberOfWorkers, percent: effectiveFeePercent)
             }
         }
     }
@@ -750,6 +780,7 @@ struct PostJobView: View {
         do {
             let job = try await APIClient.shared.fetchJobForEditing(id: editingJobId)
             title = job.title
+            frozenFeePercent = job.platformFeePercent
             if !job.location.isEmpty && job.location != locationText { skipNextLocationReset = true }
             locationText = job.location
             locationLat = job.lat
@@ -870,6 +901,10 @@ struct PostJobConfirmSheet: View {
     let jobTitle: String
     let company: String
     let shiftsCount: Int
+    var shiftHours: [Double] = []
+    var hourlyRate: Double = 0
+    var workers: Int = 1
+    var feePercent: Double = PlatformFees.defaultPlatformPercent
     let isDraft: Bool
     let onSaveAsDraft: () -> Void
     let onPost: () -> Void
@@ -924,6 +959,12 @@ struct PostJobConfirmSheet: View {
             }
             .padding(.bottom, 24)
 
+            if !isDraft && hourlyRate > 0 && shiftHours.contains(where: { $0 > 0 }) {
+                FeeSummaryView(shiftHours: shiftHours, hourlyRate: hourlyRate, workers: workers, percent: feePercent)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 16)
+            }
+
             if !isDraft {
                 TermsConsentRow(isAccepted: $termsAccepted)
                     .padding(.horizontal, 16)
@@ -964,6 +1005,69 @@ struct PostJobConfirmSheet: View {
         .background(Color(uiColor: .systemGroupedBackground))
         .presentationDetents(isDraft ? [.medium] : [.fraction(0.8), .large])
         .presentationDragIndicator(.hidden)
+    }
+}
+
+// MARK: - FeeSummaryView (Kostenaufstellung fuer den Employer)
+/// Pro Worker und Schicht: Lohn (Stunden × Stundenlohn), Plattform-Gebuehr, Gesamt; dazu Summe fuer alle Worker/Schichten.
+/// Die Gebuehr wird nach der Schicht obendrauf berechnet; der Worker erhaelt den vollen Lohn.
+struct FeeSummaryView: View {
+    let shiftHours: [Double]
+    let hourlyRate: Double
+    let workers: Int
+    let percent: Double
+
+    private var activeHours: [Double] { shiftHours.filter { $0 > 0 } }
+
+    private func hoursText(_ h: Double) -> String {
+        h.truncatingRemainder(dividingBy: 1) == 0 ? "\(Int(h))h" : String(format: "%.1fh", h)
+    }
+
+    /// Summe ueber alle Schichten fuer `count` Worker
+    private func total(workers count: Int) -> PlatformFees.Breakdown {
+        let parts = activeHours.map { PlatformFees.breakdown(hours: $0, hourlyRate: hourlyRate, workers: count, percent: percent) }
+        return PlatformFees.Breakdown(wages: PlatformFees.roundMoney(parts.reduce(0) { $0 + $1.wages }),
+                                      fees:  PlatformFees.roundMoney(parts.reduce(0) { $0 + $1.fees }))
+    }
+
+    var body: some View {
+        let perWorker = total(workers: 1)
+        let all = total(workers: workers)
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Per worker, per shift")
+                .font(.system(size: 12, weight: .semibold)).foregroundColor(.secondary)
+            ForEach(Array(activeHours.enumerated()), id: \.offset) { i, h in
+                let b = PlatformFees.breakdown(hours: h, hourlyRate: hourlyRate, workers: 1, percent: percent)
+                if activeHours.count > 1 {
+                    Text("Shift \(i + 1)").font(.system(size: 12, weight: .medium))
+                }
+                row("Wage (\(hoursText(h)) × \(Money.format(hourlyRate, fractionDigits: 2)))", b.wages)
+                row("Platform fee (\(PlatformFees.percentLabel(percent)))", b.fees)
+                row("Total per worker", b.total, bold: true)
+            }
+            Divider()
+            Text("All \(workers) worker\(workers == 1 ? "" : "s") × \(activeHours.count) shift\(activeHours.count == 1 ? "" : "s")")
+                .font(.system(size: 12, weight: .semibold)).foregroundColor(.secondary)
+            row("Wages", all.wages)
+            row("Platform fee (\(PlatformFees.percentLabel(percent)))", all.fees)
+            row("You pay in total", all.total, bold: true)
+            row("Worker receives (each, full wage)", perWorker.wages, accent: true)
+            Text("The platform fee is added on top and billed after the shift. No-shows are not billed.")
+                .font(.system(size: 11)).foregroundColor(.secondary)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(uiColor: .systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    private func row(_ label: String, _ amount: Double, bold: Bool = false, accent: Bool = false) -> some View {
+        HStack {
+            Text(label).font(.system(size: 13, weight: bold ? .semibold : .regular))
+            Spacer()
+            Text(Money.format(amount, fractionDigits: 2)).font(.system(size: 13, weight: bold ? .bold : .semibold))
+        }
+        .foregroundColor(accent ? .green : .primary)
     }
 }
 
@@ -1281,6 +1385,8 @@ private struct MultiPickerRow: View {
 
 // MARK: - EditableJob (GET /jobs/:id → Bearbeiten-Modus)
 struct EditableJob: Decodable {
+    /// Eingefrorener Gebuehren-Satz (nur fuer veroeffentlichte Jobs; Entwuerfe: nil → aktueller Satz)
+    var platformFeePercent: Double? = nil
     struct Shift: Decodable {
         let startTimeISO: String?
         let endTimeISO: String?

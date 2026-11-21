@@ -28,6 +28,7 @@ struct EmployerFinancialView: View {
                     ProgressView().tint(.white).frame(maxWidth: .infinity).padding(.top, 40)
                 } else if let f = financials {
                     summaryGrid(f).padding(.horizontal, 16)
+                    feeSplitCard(f).padding(.horizontal, 16)
                     barChartSection(f)
                     jobListSection(f)
                     breakdownButton
@@ -72,13 +73,43 @@ struct EmployerFinancialView: View {
             columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)],
             spacing: 10
         ) {
-            EmployerStatCard(label: "Total Spending",     value: Money.format(f.totalSpending),    icon: "dollarsign.circle.fill",   color: SS.primary)
-            EmployerStatCard(label: "Upcoming Payments",  value: Money.format(f.upcomingPayments), icon: "clock.fill",             color: .orange)
+            EmployerStatCard(label: "Total Spending (incl. fee)", value: Money.format(f.totalSpending),    icon: "dollarsign.circle.fill",   color: SS.primary)
+            EmployerStatCard(label: "Upcoming (incl. fee)", value: Money.format(f.upcomingPayments), icon: "clock.fill",             color: .orange)
             EmployerStatCard(label: "Completed Jobs",     value: "\(f.completedJobsCount)",     icon: "checkmark.circle.fill",  color: .green)
             // Wireframe: Total Spending, Upcoming Payments, Completed Jobs, Paid Out
             // (Monthly Spend steht weiterhin auf dem Employer-Dashboard)
             EmployerStatCard(label: "Paid Out",           value: Money.format(f.paidOut),          icon: "checkmark.seal.fill",    color: .teal)
         }
+    }
+
+    /// "Total Spending" = Lohn + Plattform-Gebuehr; hier die Aufteilung (Worker erhalten den vollen Lohn)
+    @ViewBuilder
+    private func feeSplitCard(_ f: EmployerFinancialsDTO) -> some View {
+        if let wages = f.totalWages, let fees = f.totalFees {
+            let percent = f.platformFeePercent ?? PlatformFees.defaultPlatformPercent
+            VStack(spacing: 8) {
+                splitRow("Worker wages", Money.format(wages, fractionDigits: 2))
+                splitRow("Platform fees (\(PlatformFees.percentLabel(percent)))", Money.format(fees, fractionDigits: 2))
+                Divider()
+                splitRow("Total spending", Money.format(f.totalSpending, fractionDigits: 2), bold: true)
+                Text("Totals include the platform fee. Workers always receive the full hourly wage.")
+                    .font(.system(size: 11)).foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(14)
+            .background(Color(uiColor: .systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
+        }
+    }
+
+    private func splitRow(_ label: String, _ value: String, bold: Bool = false) -> some View {
+        HStack {
+            Text(label).font(.system(size: 13, weight: bold ? .semibold : .regular))
+            Spacer()
+            Text(value).font(.system(size: 13, weight: bold ? .bold : .regular))
+        }
+        .foregroundColor(.primary)
     }
 
     // MARK: - Bar Chart

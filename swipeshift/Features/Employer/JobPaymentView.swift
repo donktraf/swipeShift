@@ -24,7 +24,31 @@ struct PayableWorker: Identifiable, Decodable {
     /// Bezahlbar = noch offen und weder No-Show noch unter Pruefung
     var isPayable: Bool { !isPaid && !isNoShow && !isUnderReview }
 
+    /// Lohn, den der Worker erhaelt (voller Stundenlohn, keine Abzuege)
     var totalEarned: Double { hoursWorked * hourlyRate }
+
+    /// Plattform-Gebuehr + Gesamtbetrag fuer den Employer (Backend: wage/fee/total; Fallback nur fuer aeltere Antworten)
+    var wage: Double? = nil
+    var fee: Double? = nil
+    var total: Double? = nil
+    var feeAmount: Double { fee ?? 0 }
+    var totalCharged: Double { total ?? totalEarned }
+}
+
+struct JobPaymentSummary: Decodable {
+    let feePercent: Double
+    let wages: Double
+    let fees: Double
+    let total: Double
+    let paidTotal: Double
+    let remainingWages: Double
+    let remainingFees: Double
+    let remainingTotal: Double
+}
+
+struct JobPaymentsResponse: Decodable {
+    let workers: [PayableWorker]
+    var summary: JobPaymentSummary? = nil
 }
 
 // MARK: - JobPaymentView
@@ -36,7 +60,11 @@ struct JobPaymentView: View {
     let jobLocation: String
 
     @State private var workers: [PayableWorker] = []
+    @State private var summary: JobPaymentSummary? = nil
+    @ObservedObject private var feeConfig = FeeConfig.shared
     @State private var isLoading    = false
+    @State private var isPaying     = false          // blockiert Doppel-Zahlungen waehrend ein Request laeuft
+    @State private var payError: String? = nil       // Servermeldung bei fehlgeschlagener Zahlung
     @State private var errorMessage: String? = nil
 
     // Confirmation state
@@ -51,9 +79,17 @@ struct JobPaymentView: View {
     /// No-Show (nicht berechnet) bzw. No-Show unter Einspruch (Zahlung angehalten)
     private var heldWorkers:   [PayableWorker] { workers.filter { $0.isNoShow || $0.isUnderReview } }
 
-    private var totalAmount:    Double { workers.reduce(0) { $0 + $1.totalEarned } }
-    private var paidAmount:     Double { paidWorkers.reduce(0) { $0 + $1.totalEarned } }
-    private var remainingAmount: Double { unpaidWorkers.reduce(0) { $0 + $1.totalEarned } }
+    // Alle Betraege inkl. Plattform-Gebuehr (Lohn + Gebuehr); Worker erhaelt davon nur den Lohn
+    private var billedWorkers:  [PayableWorker] { workers.filter { !$0.isNoShow && !$0.isUnderReview } }
+    private var totalAmount:    Double { PlatformFees.roundMoney(billedWorkers.reduce(0) { $0 + $1.totalCharged }) }
+    private var paidAmount:     Double { PlatformFees.roundMoney(paidWorkers.reduce(0) { $0 + $1.totalCharged }) }
+    private var remainingAmount: Double { PlatformFees.roundMoney(unpaidWorkers.reduce(0) { $0 + $1.totalCharged }) }
+    private var remainingWages: Double { PlatformFees.roundMoney(unpaidWorkers.reduce(0) { $0 + $1.totalEarned }) }
+    private var remainingFees:  Double { PlatformFees.roundMoney(unpaidWorkers.reduce(0) { $0 + $1.feeAmount }) }
+    private var totalWages:     Double { PlatformFees.roundMoney(billedWorkers.reduce(0) { $0 + $1.totalEarned }) }
+    private var totalFees:      Double { PlatformFees.roundMoney(billedWorkers.reduce(0) { $0 + $1.feeAmount }) }
+    private var onHoldAmount:   Double { PlatformFees.roundMoney(workers.filter { $0.isUnderReview }.reduce(0) { $0 + $1.totalCharged }) }
+    private var feePercent:     Double { summary?.feePercent ?? feeConfig.platformFeePercent }
 
     private var allPaid: Bool { unpaidWorkers.isEmpty }
     private var payableCount: Int { workers.filter { !$0.isNoShow && !$0.isUnderReview }.count }
@@ -65,6 +101,7 @@ struct JobPaymentView: View {
             VStack(spacing: 20) {
                 jobHeader
                 summaryBar
+                if !billedWorkers.isEmpty { feeBreakdownBar }
                 // Anwesenheit nach Schichtende (blendet sich vor Schichtende aus)
                 AttendanceSectionView(jobId: jobId)
 
@@ -93,7 +130,15 @@ struct JobPaymentView: View {
                 }
             }
         }
-        .task { await loadPayments() }
+        .task {
+            await feeConfig.refresh()
+            await loadPayments()
+        }
+        .alert("Payment failed", isPresented: Binding(get: { payError != nil }, set: { if !$0 { payError = nil } })) {
+            Button("OK", role: .cancel) { payError = nil }
+        } message: {
+            Text(payError ?? "")
+        }
         // Pay single worker confirmation
         .alert("Pay \(workerToPay?.name ?? "")?", isPresented: Binding(
             get:  { workerToPay != nil },
@@ -106,7 +151,7 @@ struct JobPaymentView: View {
             Button("Cancel", role: .cancel) { workerToPay = nil }
         } message: {
             if let w = workerToPay {
-                Text("You are about to pay \(Money.format(w.totalEarned, fractionDigits: 2)) to \(w.name) for \(w.hoursWorked, specifier: "%.0f") hours.")
+                Text("You are about to pay \(Money.format(w.totalCharged, fractionDigits: 2)) for \(w.name): \(Money.format(w.totalEarned, fractionDigits: 2)) wages (\(w.hoursWorked, specifier: "%.0f") hours) + \(Money.format(w.feeAmount, fractionDigits: 2)) platform fee (\(PlatformFees.percentLabel(feePercent))). The worker receives the full wages.")
             }
         }
         // Pay all confirmation
@@ -117,7 +162,7 @@ struct JobPaymentView: View {
             }
             Button("Cancel", role: .cancel) { showPayAllConfirm = false }
         } message: {
-            Text("You are about to pay \(Money.format(remainingAmount, fractionDigits: 2)) to \(unpaidWorkers.count) worker\(unpaidWorkers.count == 1 ? "" : "s"). No-shows are not billed.")
+            Text("You are about to pay \(Money.format(remainingAmount, fractionDigits: 2)) for \(unpaidWorkers.count) worker\(unpaidWorkers.count == 1 ? "" : "s"): \(Money.format(remainingWages, fractionDigits: 2)) wages + \(Money.format(remainingFees, fractionDigits: 2)) platform fee (\(PlatformFees.percentLabel(feePercent))). Workers receive the full wages. No-shows are not billed.")
         }
         // Pay remaining confirmation
         .alert("Pay Remaining Workers?", isPresented: $showPayRemainingConfirm) {
@@ -127,7 +172,7 @@ struct JobPaymentView: View {
             }
             Button("Cancel", role: .cancel) { showPayRemainingConfirm = false }
         } message: {
-            Text("You are about to pay \(Money.format(remainingAmount, fractionDigits: 2)) to \(unpaidWorkers.count) remaining worker\(unpaidWorkers.count == 1 ? "" : "s").")
+            Text("You are about to pay \(Money.format(remainingAmount, fractionDigits: 2)) for \(unpaidWorkers.count) remaining worker\(unpaidWorkers.count == 1 ? "" : "s"): \(Money.format(remainingWages, fractionDigits: 2)) wages + \(Money.format(remainingFees, fractionDigits: 2)) platform fee (\(PlatformFees.percentLabel(feePercent))).")
         }
     }
 
@@ -173,6 +218,32 @@ struct JobPaymentView: View {
         .background(Color.white.opacity(0.1))
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .padding(.horizontal, 16)
+    }
+
+    /// Job-Summen: Lohn (geht komplett an die Worker) + Plattform-Gebuehr = Gesamt
+    private var feeBreakdownBar: some View {
+        VStack(spacing: 6) {
+            feeLine("Worker wages", Money.format(totalWages, fractionDigits: 2))
+            feeLine("Platform fee (\(PlatformFees.percentLabel(feePercent)))", Money.format(totalFees, fractionDigits: 2))
+            Divider().opacity(0.2)
+            feeLine("Total incl. fee", Money.format(totalAmount, fractionDigits: 2), bold: true)
+            if onHoldAmount > 0 {
+                feeLine("On hold (no-show under review, not billed yet)", Money.format(onHoldAmount, fractionDigits: 2))
+            }
+        }
+        .padding(14)
+        .background(Color.white.opacity(0.1))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .padding(.horizontal, 16)
+    }
+
+    private func feeLine(_ label: String, _ value: String, bold: Bool = false) -> some View {
+        HStack {
+            Text(label).font(.system(size: 13, weight: bold ? .semibold : .regular))
+            Spacer()
+            Text(value).font(.system(size: 13, weight: bold ? .bold : .regular))
+        }
+        .foregroundColor(.white.opacity(bold ? 1 : 0.75))
     }
 
     private func summaryCell(label: String, value: String, color: Color) -> some View {
@@ -237,9 +308,14 @@ struct JobPaymentView: View {
 
             // Amount + action
             VStack(alignment: .trailing, spacing: 4) {
-                Text(Money.format(worker.totalEarned, fractionDigits: 2))
+                Text(Money.format(worker.totalCharged, fractionDigits: 2))
                     .font(.system(size: 15, weight: .bold))
                     .foregroundColor(.primary)
+                if !worker.isNoShow && worker.fee != nil {
+                    Text("incl. \(Money.format(worker.feeAmount, fractionDigits: 2)) fee")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
 
                 if worker.isNoShow {
                     Text("No-show — not billed")
@@ -276,6 +352,7 @@ struct JobPaymentView: View {
                             .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
+                    .disabled(isPaying)
                 }
             }
             .padding(.trailing, 14)
@@ -305,57 +382,68 @@ struct JobPaymentView: View {
 
         } else if paidWorkers.isEmpty {
             Button { showPayAllConfirm = true } label: {
-                Text("Pay All Workers  ·  \(Money.format(totalAmount))")
+                Text("Pay All Workers  ·  \(Money.format(remainingAmount, fractionDigits: 2)) incl. fee")
                     .font(.system(size: 15, weight: .semibold))
             }
             .buttonStyle(SSPrimaryButtonStyle())
+            .disabled(isPaying)
             .padding(.horizontal, 16)
 
         } else {
             Button { showPayRemainingConfirm = true } label: {
-                Text("Pay Remaining \(unpaidWorkers.count) Worker\(unpaidWorkers.count == 1 ? "" : "s")  ·  \(Money.format(remainingAmount))")
+                Text("Pay Remaining \(unpaidWorkers.count) Worker\(unpaidWorkers.count == 1 ? "" : "s")  ·  \(Money.format(remainingAmount, fractionDigits: 2)) incl. fee")
                     .font(.system(size: 15, weight: .semibold))
             }
             .buttonStyle(SSPrimaryButtonStyle())
+            .disabled(isPaying)
             .padding(.horizontal, 16)
         }
     }
 
     // MARK: - Data & API
 
-    private func loadPayments() async {
-        isLoading = true
+    private func loadPayments(showSpinner: Bool = true) async {
+        if showSpinner { isLoading = true }
         errorMessage = nil
         do {
-            workers = try await APIClient.shared.fetchJobPayments(jobId: jobId)
+            let response = try await APIClient.shared.fetchJobPayments(jobId: jobId)
+            workers = response.workers
+            summary = response.summary
         } catch {
             errorMessage = error.localizedDescription
         }
         isLoading = false
     }
 
-    private func markPaid(id: String) {
-        withAnimation {
-            if let i = workers.firstIndex(where: { $0.id == id }) {
-                workers[i].isPaid = true
+    /// Fuehrt eine oder mehrere Zahlungs-Requests aus: kein Doppel-Tippen (isPaying), Serverfehler im Alert,
+    /// danach immer neu laden, damit die Anzeige dem Serverstand entspricht (kein optimistisches "Paid").
+    private func runPayment(_ requests: @escaping () async throws -> Void) {
+        guard !isPaying else { return }
+        isPaying = true
+        Task {
+            do {
+                try await requests()
+            } catch {
+                payError = error.localizedDescription
             }
+            await loadPayments(showSpinner: false)
+            isPaying = false
         }
-        Task { try? await APIClient.shared.payWorker(jobId: jobId, applyId: id) }
+    }
+
+    private func markPaid(id: String) {
+        runPayment { try await APIClient.shared.payWorker(jobId: jobId, applyId: id) }
     }
 
     private func markAllPaid() {
-        withAnimation { for i in workers.indices where workers[i].isPayable { workers[i].isPaid = true } }
-        Task { try? await APIClient.shared.payAllWorkers(jobId: jobId) }
+        runPayment { try await APIClient.shared.payAllWorkers(jobId: jobId) }
     }
 
     private func markRemainingPaid() {
         let unpaidIds = workers.filter { $0.isPayable }.map(\.id)
-        withAnimation {
-            for i in workers.indices where workers[i].isPayable { workers[i].isPaid = true }
-        }
-        Task {
+        runPayment {
             for applyId in unpaidIds {
-                try? await APIClient.shared.payWorker(jobId: jobId, applyId: applyId)
+                try await APIClient.shared.payWorker(jobId: jobId, applyId: applyId)
             }
         }
     }

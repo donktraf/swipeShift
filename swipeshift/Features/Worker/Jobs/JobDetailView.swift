@@ -354,6 +354,11 @@ struct JobDetailView: View {
             }
             .background(Color(uiColor: .secondarySystemGroupedBackground))
             .clipShape(RoundedRectangle(cornerRadius: SS.cardRadius))
+
+            Text("You earn the full hourly rate — no fees deducted.")
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+                .padding(.top, 6)
         }
     }
 

@@ -208,7 +208,7 @@ struct EmployerDashboardView: View {
 
             StatCard(
                 value: Money.format(monthlySpend),
-                label: "Monthly Spend",
+                label: "Monthly Spend (incl. fee)",
                 icon: "dollarsign.circle.fill",
                 color: .orange,
                 actionLabel: "Overview"
