@@ -19,6 +19,7 @@ const rel = require("./utils/reliability");
 
 const { restrictedEmployerIds } = require("./restrictedUsers");
 const { restrictedWhere, isRestricted, visibleApplyFilter } = require("./utils/moderation");
+const { platformFeePercent } = require("./utils/fees");
 
 const router = express.Router();
 
@@ -317,6 +318,7 @@ router.post("/", requireAuth, requireVerifiedEmail, async (req, res) => {
       const denied = publishGate(req.body, data);
       if (denied) return res.status(denied.status).json(denied.body);
       data.termsAcceptedAt = new Date();
+      data.platformFeePercent = platformFeePercent(); // Satz beim Veroeffentlichen einfrieren
     }
 
     // Koordinaten: direkt aus dem Request nutzen (vom iOS Location-Picker),
@@ -597,6 +599,7 @@ router.get("/mine", requireAuth, requireVerifiedEmail, async (req, res) => {
     const jobs = await prisma.job.findMany({
       where: { employerId },
       orderBy: { createdAt: "desc" },
+      omit: { platformFeePercent: false }, // Employer sieht den eingefrorenen Gebuehren-Satz (global ausgeblendet, siehe prisma.js)
       include: {
         // Offene Bewerbungen gesperrter/gebannter Worker zaehlen/erscheinen nicht (angenommene bleiben)
         applies: { where: visibleApplyFilter(), select: { id: true, userId: true, status: true, autoAccepted: true, createdAt: true, attendance: true, disputedAt: true, conversation: { select: { id: true } } } },
@@ -694,7 +697,7 @@ router.patch("/:id/status", requireAuth, requireVerifiedEmail, async (req, res) 
       data:  {
         status,
         cancellationReason: status === "cancelled" ? normalizeCancellationReason(reason) : null,
-        ...(decision.publishing ? { termsAcceptedAt: new Date() } : {}),
+        ...(decision.publishing ? { termsAcceptedAt: new Date(), platformFeePercent: platformFeePercent() } : {}),
       },
     });
     if (result.count === 0) {
@@ -765,6 +768,7 @@ router.put("/:id", requireAuth, requireVerifiedEmail, async (req, res) => {
       const gate = publishGate(req.body, data);
       if (gate) return res.status(gate.status).json(gate.body);
       data.termsAcceptedAt = new Date();
+      data.platformFeePercent = platformFeePercent(); // Satz beim Veroeffentlichen einfrieren
     }
 
     // Geocoding nur, wenn der Ort geaendert wurde und der Client keine Koordinaten schickt
@@ -821,8 +825,10 @@ router.get("/:id", requireAuth, requireVerifiedEmail, async (req, res) => {
   const { id } = req.params;
   const userId  = req.auth.sub;
   try {
-    const job = await prisma.job.findUnique({ where: { id } });
+    // platformFeePercent nur fuer den Employer des Jobs (Bearbeiten/Kosten), nie fuer Worker
+    const job = await prisma.job.findUnique({ where: { id }, omit: { platformFeePercent: false } });
     if (!job) return res.status(404).json({ error: "Job not found" });
+    if (job.employerId !== userId) delete job.platformFeePercent;
     // Job eines gesperrten/gebannten Employers: nur noch sichtbar, wenn der Nutzer bereits eine Bewerbung darauf hat
     // (Kalender/Verlauf bleiben heil) bzw. selbst der Employer ist
     if (job.employerId && job.employerId !== userId) {

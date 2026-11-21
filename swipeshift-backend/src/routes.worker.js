@@ -40,7 +40,7 @@ router.get("/applications", requireAuth, requireVerifiedEmail, async (req, res) 
           select: {
             id: true, title: true, company: true, logoEmoji: true,
             location: true, payText: true, shiftText: true, lat: true, lng: true,
-            startTime: true, endTime: true, category: true,
+            startTime: true, endTime: true, shifts: true, category: true,
             status: true, cancellationReason: true, payAmount: true, jobNotes: true,
           },
         },
@@ -75,7 +75,7 @@ router.get("/applications", requireAuth, requireVerifiedEmail, async (req, res) 
         // Hinweise des Employers (nur bei offener/angenommener Bewerbung, utils/jobNotes.js)
         jobNotes:       jobNotesForApply(a.status, job?.jobNotes),
         // Verdienst fuer diese Schicht (gleiche Formel wie Finanz-Uebersicht)
-        earnings:       job && !rel.isFinalNoShow(a) ? payPerWorker(job) : 0, // No-Show wird nicht bezahlt
+        earnings:       job && rel.isPayable(a) ? payPerWorker(job) : 0, // No-Show (auch unter Einspruch) noch nicht bezahlt; alle Schichten des Jobs (TODO in utils/jobCost.js)
         // Entfernung Worker → Job in Meilen (null ohne Koordinaten)
         distanceMiles:  distanceMilesBetween(me?.lat, me?.lng, job?.lat, job?.lng),
         // Chat erst nach Annahme sinnvoll — die Conversation existiert aber ab Bewerbung
@@ -463,13 +463,13 @@ router.get("/financials", requireAuth, requireVerifiedEmail, async (req, res) =>
         job: {
           select: {
             id: true, title: true, company: true, logoEmoji: true,
-            payAmount: true, startTime: true, endTime: true, shiftText: true,
+            payAmount: true, startTime: true, endTime: true, shifts: true, shiftText: true,
           },
         },
       },
       orderBy: { createdAt: "desc" },
     });
-    // Endgueltige No-Shows werden nicht bezahlt → kein Verdienst (utils/reliability.js)
+    // No-Shows (auch unter Einspruch: on hold) werden noch nicht bezahlt → kein Verdienst (utils/reliability.js)
     const applies = rel.billable(allApplies);
 
     // "This week": Verdienst der laufenden Woche Mo–So (in SERVER-Lokalzeit, nicht Geraetezeit),
@@ -481,7 +481,7 @@ router.get("/financials", requireAuth, requireVerifiedEmail, async (req, res) =>
         status: "accepted",
         job: { status: { not: "cancelled" }, startTime: prismaRange(currentWeekRange(now)) },
       },
-      include: { job: { select: { payAmount: true, startTime: true, endTime: true } } },
+      include: { job: { select: { payAmount: true, startTime: true, endTime: true, shifts: true } } },
     });
     const weekApplies = rel.billable(weekRows);
     const thisWeekEarnings = weekApplies.reduce((sum, a) => sum + (a.job ? payPerWorker(a.job) : 0), 0);

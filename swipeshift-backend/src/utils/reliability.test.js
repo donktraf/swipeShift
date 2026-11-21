@@ -174,7 +174,8 @@ test("Abrechnung: No-Show nicht bezahlbar/berechnet, Einspruch offen = on hold, 
   assert.deepEqual([r.isPayable(cleared), r.paymentState(cleared)], [true, "pending"]);
   assert.equal(r.isPayable({ attendance: "late" }), true);
   assert.equal(r.paymentState({ attendance: "late", isPaid: true }), "paid");
-  assert.equal(r.billable([ns, review, upheld, cleared, { attendance: "late" }, {}]).length, 4); // ns + upheld raus
+  assert.equal(r.billable([ns, review, upheld, cleared, { attendance: "late" }, {}]).length, 3); // ns, upheld und Einspruch-offen raus
+  assert.deepEqual(r.onHold([ns, review, upheld, cleared]), [review]);
 });
 
 test("jobCosts: endgueltige No-Shows zaehlen nicht", () => {
@@ -183,7 +184,9 @@ test("jobCosts: endgueltige No-Shows zaehlen nicht", () => {
   const c = jobCosts(job, [{ isPaid: true }, { isPaid: false, attendance: "late" }, { isPaid: false, attendance: "no_show" }]);
   assert.equal(c.completed, 40);
   assert.equal(c.paidOut, 20);
-  assert.equal(jobCosts(job, [{ attendance: "no_show", disputedAt: now }]).completed, 20); // Einspruch offen: noch gezaehlt
+  const held = jobCosts({ ...job, platformFeePercent: null }, [{ attendance: "no_show", disputedAt: now }]);
+  assert.equal(held.completed, 0); // Einspruch offen: noch nicht berechnet
+  assert.equal(held.onHold, 20);
 });
 
 test("attendanceReminderWindow: Schichtende 24–48 h her", () => {

@@ -126,9 +126,14 @@ function isFinalNoShow(apply) {
 function isPayable(apply) {
   return apply?.attendance !== "no_show";
 }
-// Zeilen, die in Kosten/Verdienst zaehlen (alles ausser endgueltigen No-Shows; Einspruch offen zaehlt noch)
+// Zeilen, die in Kosten/Verdienst zaehlen: alles ausser No-Shows. Ein No-Show unter Einspruch wird
+// ebenfalls noch NICHT berechnet ("On hold", getrennt ausgewiesen) — erst nach Entscheidung (attended/late → berechnet).
 function billable(applies) {
-  return (Array.isArray(applies) ? applies : []).filter((a) => !isFinalNoShow(a));
+  return (Array.isArray(applies) ? applies : []).filter(isPayable);
+}
+// Zeilen "On hold": No-Show unter Einspruch
+function onHold(applies) {
+  return (Array.isArray(applies) ? applies : []).filter(isNoShowUnderReview);
 }
 // Zahlungsstatus fuer den Payment-Screen: paid | no_show | under_review | pending
 function paymentState(apply) {
@@ -230,6 +235,6 @@ module.exports = {
   MAX_NOTE_LENGTH, DISPUTE_WINDOW_DAYS, ATTENDANCE_REMINDER_AFTER_HOURS, ADMIN_NO_SHOW_THRESHOLD, ADMIN_LATE_CANCEL_THRESHOLD,
   ATTENDANCE_VALUES, CANCELLED_BY_WORKER, LISTED_STATUSES, GUIDANCE_TEXT,
   normalizeAttendance, isLateCancellation, evaluateWorkerCancel, canWorkerCancel, attendanceDeadline, attendanceState,
-  disputeStatus, canDispute, isNoShowUnderReview, isFinalNoShow, isPayable, billable, paymentState, attendanceReminderWindow, validateDisputeNote, parseDisputeResolution,
+  disputeStatus, canDispute, isNoShowUnderReview, isFinalNoShow, isPayable, billable, onHold, paymentState, attendanceReminderWindow, validateDisputeNote, parseDisputeResolution,
   summarizeReliability, reliabilityText, isConspicuous, reliabilityRowsWhere,
 };

@@ -45,6 +45,9 @@ app.use("/uploads", uploadsRoutes);
 // Healthcheck
 app.get("/health", (req, res) => res.json({ ok: true }));
 
+// Oeffentliche App-Konfiguration (keine Secrets): Plattform-Gebuehr + Sofortauszahlungs-Gebuehr in Prozent
+app.get("/config", (req, res) => res.json(require("./utils/fees").publicFeeConfig()));
+
 // Use Routes
 app.use("/auth",      meRoutes);
 app.use("/auth",      authRoutes);

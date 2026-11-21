@@ -328,6 +328,8 @@ model Job {
   jobNotes              String?  @db.Text
   instantMatch          Boolean  @default(false)
   termsAcceptedAt       DateTime?
+  // Plattform-Gebuehr in Prozent, beim Veroeffentlichen eingefroren (null = Entwurf/Altjob → aktueller Default, utils/fees.js)
+  platformFeePercent    Float?
   // Zeitpunkt, zu dem der Employer die Bewerberliste dieses Jobs zuletzt geoeffnet hat ("New Matches")
   applicantsSeenAt      DateTime?
   // "Payment open"-Hinweis an den Employer (Job vorbei, unbezahlte Worker) bereits verschickt

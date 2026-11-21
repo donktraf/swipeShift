@@ -1,10 +1,10 @@
 // src/utils/jobCost.test.js
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { shiftHours, payPerWorker, jobCosts, DEFAULT_SHIFT_HOURS } = require("./jobCost");
+const { shiftHoursList, shiftHours, payPerWorker, jobCosts, DEFAULT_SHIFT_HOURS } = require("./jobCost");
 
 const job = (h, extra = {}) => ({
-  payAmount: 15, openSpots: 3,
+  payAmount: 15, openSpots: 3, platformFeePercent: null,
   startTime: new Date(2026, 10, 3, 9), endTime: new Date(2026, 10, 3, 9 + h), ...extra,
 });
 
@@ -37,4 +37,62 @@ test("jobCosts: ohne angenommene Worker kostet ein abgeschlossener Job nichts", 
   assert.equal(c.completed, 0);
   assert.equal(c.paidOut, 0);
   assert.equal(c.planned, 180);
+});
+
+test("jobCosts: Gebuehr obendrauf, Worker-Lohn unveraendert (Default 15 %)", () => {
+  const c = jobCosts(job(4), [{ isPaid: true }, { isPaid: false }]);
+  assert.equal(c.feePercent, 15);
+  assert.equal(c.perWorker, 60);
+  assert.equal(c.perWorkerFee, 9);
+  assert.equal(c.perWorkerTotal, 69);
+  assert.equal(c.completed, 120);        // Lohn unveraendert
+  assert.equal(c.completedFee, 18);
+  assert.equal(c.completedTotal, 138);
+  assert.equal(c.plannedTotal, 207);
+  assert.equal(c.paidOutFee, 9);
+  assert.equal(c.paidOutTotal, 69);
+});
+
+test("jobCosts: Snapshot-Satz hat Vorrang, 0 % moeglich, No-Show ohne Gebuehr", () => {
+  const c = jobCosts(job(4, { platformFeePercent: 10 }), [{ isPaid: false }, { isPaid: false, attendance: "no_show" }]);
+  assert.equal(c.feePercent, 10);
+  assert.equal(c.completedFee, 6);
+  assert.equal(c.completedTotal, 66);
+  assert.equal(jobCosts(job(4, { platformFeePercent: 0 }), [{}]).completedTotal, 60);
+});
+
+const iso = (h, len) => { const st = new Date(2026, 10, 3, h); return { startTimeISO: st.toISOString(), endTimeISO: new Date(st.getTime() + len * 3_600_000).toISOString() }; };
+
+test("Mehrere Schichten: Stunden und Lohn ueber ALLE Schichten", () => {
+  const j = { payAmount: 20, openSpots: 2, platformFeePercent: 15, shifts: [iso(9, 4), iso(14, 2.5), { startTimeISO: null }],
+    startTime: new Date(2026, 10, 3, 9), endTime: new Date(2026, 10, 3, 13) };
+  assert.deepEqual(shiftHoursList(j), [4, 2.5]);
+  assert.equal(shiftHours(j), 6.5);
+  assert.equal(payPerWorker(j), 130);
+  const c = jobCosts(j, [{}, {}]);
+  assert.equal(c.perWorker, 130);
+  assert.equal(c.perWorkerFee, 19.5);   // 12 + 7.5 → je Schicht gerundet (12 + 7.5)
+  assert.equal(c.completed, 260);
+  assert.equal(c.completedFee, 39);
+  assert.equal(c.completedTotal, 299);
+});
+
+test("Schichten ohne gueltige shifts-JSON → startTime/endTime, sonst 8 h", () => {
+  assert.deepEqual(shiftHoursList({ shifts: [], startTime: new Date(2026, 0, 1, 9), endTime: new Date(2026, 0, 1, 12) }), [3]);
+  assert.deepEqual(shiftHoursList({ shifts: [] }), [8]);
+});
+
+test("jobCosts: No-Show unter Einspruch wird nicht berechnet, sondern on hold", () => {
+  const now = new Date();
+  const applies = [{ isPaid: false }, { attendance: "no_show", disputedAt: now }, { attendance: "no_show" }];
+  const c = jobCosts(job(4, { platformFeePercent: 10 }), applies);
+  assert.equal(c.completed, 60);      // nur der reguläre Worker
+  assert.equal(c.completedTotal, 66);
+  assert.equal(c.onHold, 60);
+  assert.equal(c.onHoldFee, 6);
+  assert.equal(c.onHoldTotal, 66);
+  // Entschieden auf attended → berechnet, nicht mehr on hold
+  const c2 = jobCosts(job(4, { platformFeePercent: 10 }), [{ attendance: "attended", disputedAt: now, disputeResolvedAt: now }]);
+  assert.equal(c2.completedTotal, 66);
+  assert.equal(c2.onHoldTotal, 0);
 });

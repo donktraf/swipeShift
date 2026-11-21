@@ -12,6 +12,8 @@ const adapter = new PrismaPg({
   connectionString: process.env.DATABASE_URL,
 });
 
-const prisma = new PrismaClient({ adapter });
+// platformFeePercent ist Employer-intern (Snapshot der Servicegebuehr) und soll nicht in Worker-Job-Antworten
+// auftauchen: global ausgeblendet; Employer-Routen lesen es explizit per select (utils/jobCost.js).
+const prisma = new PrismaClient({ adapter, omit: { job: { platformFeePercent: true } } });
 
 module.exports = { prisma };
