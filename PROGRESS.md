@@ -891,3 +891,12 @@ Gefunden beim Profile-Screen-Abgleich: Legal-Schalter (Worker + Arbeitgeber) und
 - No-Show wird nicht bezahlt und nicht als Kosten/Verdienst gezählt; während eines Widerspruchs „Under review“ (nicht zahlbar); nach erfolgreichem Widerspruch wieder zahlbar
 - Migrationen `20261119000000_reliability_tracking`, `20261119010000_reliability_followups` (lokal angewendet)
 - Offen: „Popular“-Sortierung zählt abgesagte Bewerbungen mit (Prisma-Einschränkung)
+
+### Plattformgebühr (2026-11-21)
+- Entscheidung: noch kein Zahlungsanbieter (Geld läuft außerhalb der App, „als bezahlt markieren“ bleibt); Servicegebühr als Aufschlag beim Arbeitgeber, Worker bekommt immer den vollen Lohn; Belastung nach der Schicht; Auszahlung wählbar (Instant 1,5 % sobald Auszahlungen starten, Standard kostenlos)
+- `PLATFORM_FEE_PERCENT` (Standard 15) und `INSTANT_PAYOUT_FEE_PERCENT` (1,5) als Server-Einstellung, öffentlich über `GET /config`; Satz wird pro Job beim Veröffentlichen eingefroren (`Job.platformFeePercent`, für Worker nie sichtbar); bestehende veröffentlichte Jobs per Backfill auf 15 % fixiert
+- Arbeitgeber sieht überall Lohn + Gebühr + Gesamt: Post a Job (Kostenübersicht, „Worker receives“), Veröffentlichen, Zahlung, Finanzen, Dashboard, Kalender, Zuweisung
+- Kosten über alle Schichten eines Jobs (bisher nur die erste), auch beim Verdienst des Workers; No-Show unter Widerspruch überall „On hold“ (nicht berechnet), endgültiger No-Show 0
+- Zahlung: Fehler werden angezeigt, Buttons gesperrt während der Anfrage (keine Doppelzahlung)
+- Backend: `src/utils/fees.js` (+ Tests), `utils/jobCost.js` erweitert; Migrationen `20261120000000_platform_fee`, `20261120010000_platform_fee_backfill` (lokal angewendet)
+- Offen: Apply speichert nicht, welche Schichten ein Worker gebucht hat (alle angenommen); echter Zahlungsanbieter
