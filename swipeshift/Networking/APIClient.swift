@@ -13,6 +13,7 @@ enum ApplyError: Error {
     case shiftTaken
     case jobUnavailable
     case schedulingConflict
+    case shiftUnavailable   // Backend: SHIFT_UNAVAILABLE (Schicht hat begonnen) / INVALID_SHIFTS
     case accountPaused
     case blocked
     case tryAgain   // Backend: TRY_AGAIN (viele parallele Bewerbungen) → wie Verbindungsfehler behandeln
@@ -70,8 +71,13 @@ final class APIClient {
 
     /// Liefert `true`, wenn die Bewerbung per Instant Match sofort angenommen wurde.
     @discardableResult
-    func apply(jobId: String) async throws -> Bool {
-        let req = try makeRequest(path: "/jobs/\(jobId)/apply", method: "POST")
+    /// `shiftIds`: gebuchte Schichten (Job.shifts[].id); nil = Backend bucht alle Schichten (Single-Shift/alte Clients).
+    func apply(jobId: String, shiftIds: [String]? = nil) async throws -> Bool {
+        var req = try makeRequest(path: "/jobs/\(jobId)/apply", method: "POST")
+        if let shiftIds {
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.httpBody = try JSONEncoder().encode(["shiftIds": shiftIds])
+        }
         let (data, response) = try await URLSession.shared.data(for: req)
         if let http = response as? HTTPURLResponse, http.statusCode != 200 {
             if let body = try? JSONDecoder().decode([String: String].self, from: data),
@@ -82,6 +88,7 @@ final class APIClient {
                 case "SHIFT_TAKEN":          throw ApplyError.shiftTaken
                 case "JOB_UNAVAILABLE":      throw ApplyError.jobUnavailable
                 case "SCHEDULING_CONFLICT":  throw ApplyError.schedulingConflict
+                case "SHIFT_UNAVAILABLE", "INVALID_SHIFTS": throw ApplyError.shiftUnavailable
                 case "ACCOUNT_PAUSED":       throw ApplyError.accountPaused
                 default: break
                 }

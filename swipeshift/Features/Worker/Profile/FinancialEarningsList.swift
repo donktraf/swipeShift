@@ -82,7 +82,7 @@ struct EarningRow: View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.jobTitle).font(.system(size: 14, weight: .semibold)).foregroundColor(.primary)
-                Text("\(item.company) · \(item.shiftText)")
+                Text("\(item.company) · \(item.bookedShifts?.cardLabel ?? item.shiftText)")
                     .font(.system(size: 12)).foregroundColor(.secondary)
                 if let rateLine {
                     Text(rateLine).font(.system(size: 12)).foregroundColor(.secondary)

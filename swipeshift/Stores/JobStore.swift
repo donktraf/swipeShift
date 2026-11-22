@@ -199,9 +199,9 @@ final class JobStore: ObservableObject {
     /// Rueckgabe: `true` bei sofortiger Annahme (Instant Match).
     @MainActor
     @discardableResult
-    func apply(to job: Job) async throws -> Bool {
+    func apply(to job: Job, shiftIds: [String]? = nil) async throws -> Bool {
         errorMessage = nil
-        let autoAccepted = try await APIClient.shared.apply(jobId: job.id)
+        let autoAccepted = try await APIClient.shared.apply(jobId: job.id, shiftIds: shiftIds)
         swipeJobs.removeAll { $0.id == job.id }
         return autoAccepted
     }

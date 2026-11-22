@@ -16,6 +16,8 @@ struct PayableWorker: Identifiable, Decodable {
     let hoursWorked: Double
     let hourlyRate: Double
     var isPaid: Bool
+    /// Gebuchte Schichten dieses Workers (Stunden/Betrag gelten nur dafuer); fehlt bei aelteren Backends
+    var bookedShifts: [BookedShift]? = nil
     /// "paid" | "pending" | "no_show" (nicht berechnet) | "under_review" (No-Show-Einspruch, Zahlung angehalten)
     var paymentState: String? = nil
 
@@ -299,7 +301,7 @@ struct JobPaymentView: View {
                 Text(worker.name)
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(.primary)
-                Text("\(worker.shiftDate) · \(worker.hoursWorked, specifier: "%.0f")h × \(Money.hourly(worker.hourlyRate))")
+                Text("\(worker.bookedShifts?.cardLabel ?? worker.shiftDate) · \(worker.hoursWorked, specifier: "%.1f")h × \(Money.hourly(worker.hourlyRate))")
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
             }

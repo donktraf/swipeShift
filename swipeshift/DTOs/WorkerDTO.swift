@@ -38,6 +38,8 @@ struct WorkerApplicationItem: Identifiable, Decodable {
     let canDispute:         Bool?
     let disputeStatus:      String?   // nil | "pending" | "resolved"
     let disputeResolution:  String?   // "upheld" | "changed"
+    /// Vom Worker gebuchte Schichten (startTime/endTime oben gelten bereits nur fuer diese); fehlt bei aelteren Backends
+    var bookedShifts:       [BookedShift]? = nil
 
     var attendanceStatus: AttendanceStatus? { attendance.flatMap(AttendanceStatus.init(rawValue:)) }
 }
@@ -108,6 +110,8 @@ struct WorkerEarningItem: Identifiable, Decodable {
     let hours:      Double?
     let startTime:  Date?
     let isPaid:     Bool?
+    /// Gebuchte Schichten (Betrag/Stunden gelten nur dafuer); fehlt bei aelteren Backends
+    var bookedShifts: [BookedShift]? = nil
 }
 
 struct WorkerFinancialsDTO: Decodable {

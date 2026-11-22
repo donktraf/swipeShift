@@ -22,6 +22,8 @@ struct InlineApplicant: Identifiable, Decodable, Hashable {
     var availableTimes: [String]? = nil
     var hasScheduleConflict: Bool? = nil
     var reliability: ReliabilitySummary? = nil
+    /// Vom Worker gebuchte Schichten
+    var bookedShifts: [BookedShift]? = nil
 
     var id: String { applyId }
 
@@ -620,6 +622,12 @@ private struct PostedJobCard: View {
                     .lineLimit(1)
                 ApplicantRatingLabel(average: applicant.ratingAverage, count: applicant.reviewCount)
                 if let reliability = applicant.reliability { ReliabilityLabel(summary: reliability, font: 11) }
+                if let booked = applicant.bookedShifts, !booked.isEmpty {
+                    Text("Shifts: \(booked.summaryLabel)")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
                 if decision == nil, let fit = ApplicantShiftFit.evaluate(
                     hasConflict: applicant.hasScheduleConflict == true,
                     availableDays: applicant.availableDays ?? [],

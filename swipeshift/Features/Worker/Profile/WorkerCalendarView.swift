@@ -79,7 +79,7 @@ struct WorkerCalendarView: View {
         loadFailed = false
         do {
             let items = try await APIClient.shared.fetchWorkerApplications()
-            entries = CalendarEntry.markingConflicts(items.compactMap(CalendarEntry.init(item:)))
+            entries = CalendarEntry.markingConflicts(items.flatMap(CalendarEntry.entries(from:)))
         } catch {
             if (error as? URLError)?.code != .cancelled { loadFailed = true }
         }

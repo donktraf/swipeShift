@@ -18,6 +18,8 @@ struct WorkerProfileDTO: Decodable {
     let matchHint: String?
     /// Anwesenheit / No-Shows / kurzfristige Stornos (fehlt in aelteren Backend-Antworten)
     let reliability: ReliabilitySummary?
+    /// Nur mit Job-Kontext: die Schichten, die dieser Worker fuer den Job gebucht hat
+    let bookedShifts: [BookedShift]?
 }
 
 struct WorkerPastJob: Decodable, Identifiable {

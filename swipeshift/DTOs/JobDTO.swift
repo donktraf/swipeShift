@@ -15,8 +15,9 @@ struct ShiftDTO: Decodable {
     let duration: String
     let totalPay: String
 
-    func toDomain() -> JobShift {
-        JobShift(id: id ?? UUID().uuidString, date: date, timeRange: timeRange, duration: duration, totalPay: totalPay)
+    /// `fallbackIndex`: Backend-Fallback-ID "s<Position ab 1>" fuer Altdaten ohne id (muss zu utils/shiftBooking.js passen)
+    func toDomain(fallbackIndex: Int = 0) -> JobShift {
+        JobShift(id: id ?? "s\(fallbackIndex + 1)", date: date, timeRange: timeRange, duration: duration, totalPay: totalPay)
     }
 }
 
@@ -105,7 +106,7 @@ extension JobDTO {
             languages: languages, experienceLevel: experienceLevel, minAge: minAge,
             paymentMethod: paymentMethod, contractType: contractType,
             companyRating: companyRating, replyTime: replyTime, isVerified: isVerified,
-            shifts: shifts?.map { $0.toDomain() },
+            shifts: shifts?.enumerated().map { $1.toDomain(fallbackIndex: $0) },
             reviewBreakdown: reviewBreakdown.map {
                 JobReviewSummary(
                     avgRating: $0.avgRating, totalReviews: $0.totalReviews,

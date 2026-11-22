@@ -128,7 +128,7 @@ struct ApplicantCard: View {
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(.primary)
                     HStack(spacing: 8) {
-                        Label(job.shiftText, systemImage: "calendar")
+                        Label(applicant.bookedShifts?.cardLabel ?? job.shiftText, systemImage: "calendar")
                         Label(job.payText,   systemImage: "banknote")
                     }
                     .font(.system(size: 11))

@@ -131,19 +131,28 @@ struct ApplyFlowView: View {
         return shifts.filter { selectedShiftIds.contains($0.id) }
     }
 
+    /// Schicht-IDs fuer den Backend-Call: die ausgewaehlten (in Job-Reihenfolge) bzw. alle Schichten bei Single-Shift-Jobs.
+    /// nil bei Jobs ohne Schicht-Eintraege → Backend bucht dann "alle".
+    private var shiftIdsToBook: [String]? {
+        guard let shifts = job.shifts, !shifts.isEmpty else { return nil }
+        if selectedShiftIds.isEmpty { return shifts.map(\.id) }
+        return shifts.map(\.id).filter { selectedShiftIds.contains($0) }
+    }
+
     @MainActor
     private func submitApplication() async {
         withAnimation { step = .loading }
 
         do {
             try await Task.sleep(nanoseconds: 900_000_000) // 0.9s UX-Feedback
-            let autoAccepted = try await jobStore.apply(to: job)
+            let autoAccepted = try await jobStore.apply(to: job, shiftIds: shiftIdsToBook)
             withAnimation { step = .result(autoAccepted ? .booked : .submitted) }
         } catch let applyError as ApplyError {
             switch applyError {
             case .shiftTaken:         withAnimation { step = .result(.shiftAlreadyTaken) }
             case .jobUnavailable:     withAnimation { step = .result(.shiftUnavailable) }
             case .schedulingConflict: withAnimation { step = .result(.schedulingConflict) }
+            case .shiftUnavailable:   withAnimation { step = .result(.shiftUnavailable) }
             case .accountPaused:      withAnimation { step = .result(.accountPaused) }
             case .blocked:            withAnimation { step = .result(.blocked) }
             case .tryAgain:           withAnimation { step = .result(.connectionLost) }

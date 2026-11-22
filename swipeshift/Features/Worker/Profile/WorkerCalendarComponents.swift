@@ -12,7 +12,9 @@ import SwiftUI
 // MARK: - Model
 
 struct CalendarEntry: Identifiable, Equatable {
-    let id: String              // applyId
+    /// Eindeutig je Kalendereintrag: applyId, bei mehreren gebuchten Schichten "applyId#shiftId"
+    let id: String
+    let applyId: String
     let jobId: String
     let title: String
     let company: String
@@ -38,18 +40,28 @@ struct CalendarEntry: Identifiable, Equatable {
     let disputeStatus: String?
     var hasConflict = false
 
-    init?(item: WorkerApplicationItem) {
-        guard let start = item.startTime else { return nil }
-        id = item.id
+    /// Ein Eintrag je GEBUCHTER Schicht (bei mehreren gebuchten Schichten); sonst ein Eintrag fuer die Bewerbung
+    static func entries(from item: WorkerApplicationItem) -> [CalendarEntry] {
+        if let booked = item.bookedShifts, booked.count > 1 {
+            let perShift = booked.compactMap { CalendarEntry(item: item, shift: $0) }
+            if !perShift.isEmpty { return perShift }
+        }
+        return CalendarEntry(item: item).map { [$0] } ?? []
+    }
+
+    init?(item: WorkerApplicationItem, shift: BookedShift? = nil) {
+        guard let start = shift?.startTime ?? item.startTime else { return nil }
+        id = shift.map { "\(item.id)#\($0.id)" } ?? item.id
+        applyId = item.id
         jobId = item.jobId
         title = item.jobTitle
         company = item.company
         logoEmoji = item.logoEmoji
         location = item.location
         payText = item.payText
-        shiftText = item.shiftText
+        shiftText = shift.flatMap { $0.fullLabel.isEmpty ? nil : $0.fullLabel } ?? item.bookedShifts?.cardLabel ?? item.shiftText
         self.start = start
-        end = item.endTime
+        end = shift != nil ? shift?.endTime : item.endTime
         switch item.displayStatus {
         case "confirmed": status = .confirmed
         case "completed": status = .completed
@@ -58,7 +70,7 @@ struct CalendarEntry: Identifiable, Equatable {
         }
         paymentStatus = item.paymentStatus
         cancellationReason = item.cancellationReason
-        earnings = item.earnings
+        earnings = shift != nil ? nil : item.earnings  // Verdienst gilt fuer die ganze Buchung, nicht je Schicht
         conversationId = item.conversationId
         // Backend liefert "—" wenn der Job keine Kategorie hat
         category = item.category == "—" ? nil : item.category

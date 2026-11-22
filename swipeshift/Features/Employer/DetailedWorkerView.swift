@@ -258,6 +258,16 @@ struct DetailedWorkerView: View {
             }
             .padding(14)
 
+            // Gebuchte Schichten dieses Bewerbers (aus der Bewerberliste, sonst aus dem Profil-Request mit jobId)
+            if let booked = applicant.bookedShifts ?? profile?.bookedShifts, !booked.isEmpty {
+                Divider().padding(.horizontal, 14)
+                Label("Shifts: \(booked.summaryLabel)", systemImage: "calendar.badge.checkmark")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+            }
+
             if let hint = profile?.matchHint {
                 Divider().padding(.horizontal, 14)
                 Label(hint, systemImage: "sparkles")

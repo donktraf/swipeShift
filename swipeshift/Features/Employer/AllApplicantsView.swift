@@ -47,6 +47,8 @@ struct Applicant: Identifiable, Decodable {
     var autoAccepted: Bool? = nil
     /// Worker hat zur selben Zeit einen anderen angenommenen Job (Backend)
     var hasScheduleConflict: Bool? = nil
+    /// Vom Worker gebuchte Schichten (leer/fehlt bei aelteren Backends)
+    var bookedShifts: [BookedShift]? = nil
 
     var id: String { applyId }
 }

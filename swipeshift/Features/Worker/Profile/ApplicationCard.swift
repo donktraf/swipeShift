@@ -50,7 +50,7 @@ struct ApplicationCard: View {
 
             // Details
             HStack(spacing: 16) {
-                Label(item.shiftText, systemImage: "calendar")
+                Label(item.bookedShifts?.cardLabel ?? item.shiftText, systemImage: "calendar")
                 Label(item.payText,   systemImage: "dollarsign.circle")
                 Label(item.location,  systemImage: "mappin")
             }
