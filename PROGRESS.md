@@ -900,3 +900,14 @@ Gefunden beim Profile-Screen-Abgleich: Legal-Schalter (Worker + Arbeitgeber) und
 - Zahlung: Fehler werden angezeigt, Buttons gesperrt während der Anfrage (keine Doppelzahlung)
 - Backend: `src/utils/fees.js` (+ Tests), `utils/jobCost.js` erweitert; Migrationen `20261120000000_platform_fee`, `20261120010000_platform_fee_backfill` (lokal angewendet)
 - Offen: Apply speichert nicht, welche Schichten ein Worker gebucht hat (alle angenommen); echter Zahlungsanbieter
+
+### Gebuchte Schichten pro Worker + Sperr-Umgehung über E-Mail-Aliasse (2026-11-22)
+- Die Schicht-Auswahl im Bewerbungsablauf wird jetzt gesendet und gespeichert (`Apply.shiftIds`; ohne Auswahl / Altbestand = alle Schichten); Schicht-Ids vergibt der Server stabil
+- Plätze pro Schicht: Instant Match nur wenn alle gewählten Schichten frei sind, Annahme bei voller Schicht → 409 `SHIFT_FULL`, bereits begonnene Schichten nicht buchbar/annehmbar; erneute Bewerbung mit anderer Auswahl → 409 `ALREADY_APPLIED`
+- Lohn, Gebühr, Verdienst, Stunden, Terminkonflikte, Kalender, Schicht-Erinnerung, Anwesenheit (Fenster, Auto-Eintrag, Erinnerungen), Zahlungshinweis, Chat-Status und Finanz-Zeiträume richten sich nach den gebuchten Schichten
+- Job-Zeitraum = früheste bis späteste Schicht (bisher nur erste Schicht); Bestand per Migration nachgezogen
+- Gebuchte Schichten sichtbar auf Bewerberkarte, Worker-Profil, Zahlung, Bewerbungen und Kalender
+- Dauerhaft gesperrte E-Mail blockiert auch Aliasse (Gmail: Punkte, „+…“, googlemail.com; sonst „+…“) bei Registrierung, Google/Apple-Anmeldung und E-Mail-Änderung, ohne „gesperrt“ zu verraten (`User.emailCanonical`)
+- E-Mail ändern: alter Absturz behoben, 409 bei vergebener Adresse, Sicherheits-Mail an die alte Adresse
+- Migrationen `20261121000000_shift_booking_email_canonical`, `20261121010000_job_time_span` (lokal angewendet)
+- Offen: Worker kann nur die ganze Buchung absagen; Swipe bucht alle offenen Schichten; Zahlungs-/Anwesenheits-Erinnerung einmal pro Job; App zeigt bei fehlgeschlagener Bestätigungsmail noch kein „Resend“
