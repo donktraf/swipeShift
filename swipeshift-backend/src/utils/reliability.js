@@ -9,6 +9,8 @@
 //   - Kurzfristige Stornierung = angenommene Schicht < 24 h vor Beginn storniert.
 //   - Prozentwert erst ab 3 abgeschlossenen Schichten, davor "New".
 
+const { bookedEnd } = require("./shiftBooking");
+
 const LATE_AFTER_MINUTES = 15;
 const LATE_CANCEL_HOURS = 24;
 const AUTO_ATTEND_HOURS = 48;
@@ -80,8 +82,10 @@ function attendanceDeadline(endTime) {
 //   autoDue     kein Eintrag und Frist abgelaufen → Scheduler setzt "attended"
 function attendanceState(apply, job, now = new Date()) {
   const nowMs = new Date(now).getTime();
-  const end = toDate(job?.endTime);
-  const deadline = attendanceDeadline(job?.endTime);
+  // Ende der GEBUCHTEN Schichten dieser Bewerbung (job.shifts + apply.shiftIds); ohne Schichtdaten job.endTime
+  const bookedEndAt = apply ? bookedEnd(job, apply.shiftIds) : toDate(job?.endTime);
+  const end = toDate(bookedEndAt);
+  const deadline = attendanceDeadline(bookedEndAt);
   const base = { ended: false, canRecord: false, pending: false, autoDue: false, deadline };
   if (!apply || apply.status !== "accepted" || !end) return base;
   if (job?.status === "cancelled" || job?.status === "draft") return base;
@@ -164,7 +168,7 @@ function pluralize(n, one, many) {
 }
 
 /**
- * @param {Array} rows { status, attendance, disputedAt, disputeResolvedAt, lateCancellation, cancelledAt, job: { endTime } }
+ * @param {Array} rows { status, attendance, disputedAt, disputeResolvedAt, lateCancellation, cancelledAt, shiftIds?, job: { endTime, startTime?, shifts? } }
  * @returns {{ finishedShifts, attended, late, noShows, lateCancellations, showUpRate, isNew, text }}
  */
 function summarizeReliability(rows, now = new Date(), { windowDays = WINDOW_DAYS } = {}) {
@@ -179,7 +183,7 @@ function summarizeReliability(rows, now = new Date(), { windowDays = WINDOW_DAYS
     }
     if (r.status !== "accepted" || !normalizeAttendance(r.attendance)) continue;
     if (r.disputedAt && !r.disputeResolvedAt) continue; // Einspruch offen → zaehlt noch nicht
-    const end = toDate(r.job?.endTime);
+    const end = toDate(bookedEnd(r.job, r.shiftIds)); // Ende der gebuchten Schichten
     if (!end || end.getTime() < since || end.getTime() > new Date(now).getTime()) continue;
     if (r.attendance === "attended") attended += 1;
     else if (r.attendance === "late") late += 1;
@@ -219,12 +223,14 @@ function attendanceReminderWindow(now = new Date()) {
   return { endedBefore: new Date(n - ATTENDANCE_REMINDER_AFTER_HOURS * HOUR_MS), endedAfter: new Date(n - AUTO_ATTEND_HOURS * HOUR_MS) };
 }
 
-// Prisma-where (rein positiv formuliert, kein NOT ueber nullable Spalten): Zeilen, die in die Zusammenfassung eingehen koennen
+// Prisma-where (rein positiv formuliert, kein NOT ueber nullable Spalten): Zeilen, die in die Zusammenfassung eingehen koennen.
+// Grobfilter: Das Ende der gebuchten Schichten liegt nie nach Job.endTime (= spaetestes Schichtende) → endTime >= since;
+// "Ende <= jetzt" und das genaue Fenster prueft summarizeReliability pro Bewerbung im Speicher.
 function reliabilityRowsWhere(now = new Date(), windowDays = WINDOW_DAYS) {
   const since = new Date(new Date(now).getTime() - windowDays * DAY_MS);
   return {
     OR: [
-      { status: "accepted", attendance: { in: ATTENDANCE_VALUES }, job: { endTime: { gte: since, lte: new Date(now) } } },
+      { status: "accepted", attendance: { in: ATTENDANCE_VALUES }, job: { endTime: { gte: since } } },
       { status: CANCELLED_BY_WORKER, lateCancellation: true, cancelledAt: { gte: since } },
     ],
   };

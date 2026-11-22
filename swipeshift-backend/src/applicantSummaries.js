@@ -22,7 +22,7 @@ async function loadApplicantSummaries(userIds, now = new Date()) {
     }),
     prisma.apply.findMany({
       where: { userId: { in: ids }, status: "accepted" },
-      select: { userId: true, status: true, isPaid: true, job: { select: { category: true, endTime: true, status: true, cancellationReason: true } } },
+      select: { userId: true, status: true, isPaid: true, shiftIds: true, job: { select: { category: true, startTime: true, endTime: true, shifts: true, status: true, cancellationReason: true } } },
     }),
     loadReliability(ids, now), // Anwesenheit / No-Shows / kurzfristige Stornos (utils/reliability.js)
   ]);

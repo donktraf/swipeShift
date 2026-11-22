@@ -31,3 +31,16 @@ test("computeScheduleConflicts: nur andere angenommene, nicht stornierte Jobs de
 test("computeScheduleConflicts: leere/ungueltige Eingaben", () => {
   assert.equal(computeScheduleConflicts(null, undefined).size, 0);
 });
+
+test("computeScheduleConflicts: vergleicht gebuchte Schichten, nicht das ganze Job-Fenster", () => {
+  const sh = (id, s, e) => ({ id, startTimeISO: h(s).toISOString(), endTimeISO: h(e).toISOString() });
+  const day2 = (n) => new Date(Date.UTC(2026, 11, 2, n));
+  const multi = { startTime: h(8), endTime: h(12), status: "published",
+    shifts: [sh("a", 8, 12), { id: "b", startTimeISO: day2(8).toISOString(), endTimeISO: day2(12).toISOString() }] };
+  const other = { id: "x", userId: "u1", jobId: "j9", shiftIds: ["b"], job: { ...multi } }; // bucht nur Tag 2
+  const mineDay1 = { id: "n1", userId: "u1", jobId: "j1", shiftIds: ["a"], job: multi };
+  const mineDay2 = { id: "n2", userId: "u1", jobId: "j1", shiftIds: ["b"], job: multi };
+  assert.deepEqual([...computeScheduleConflicts([mineDay1, mineDay2], [other])], ["n2"]);
+  // Altbestand ohne shiftIds: alle Schichten → Konflikt an beiden Tagen
+  assert.equal(computeScheduleConflicts([mineDay1], [{ ...other, shiftIds: [] }]).has("n1"), true);
+});

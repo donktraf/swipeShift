@@ -3,6 +3,7 @@
 // Past Jobs, Account-Status, Match-Hinweis zu einem Job. Rein und DB-frei → testbar.
 
 const { deriveApplicationStatus } = require("./applicationStatus");
+const { bookedSpan } = require("./shiftBooking");
 const { reviewOverall } = require("./reviewLogic");
 const { ageFromBirthDate, cleanSelfRatedSkills } = require("./workerProfile");
 
@@ -29,14 +30,15 @@ function buildPastJobs(accepted, now = new Date(), limit = MAX_PAST_JOBS) {
   return (Array.isArray(accepted) ? accepted : [])
     .filter((a) => a?.job && deriveApplicationStatus(a, a.job, now).displayStatus === "completed")
     .map((a) => {
-      const date = a.job.startTime ?? a.job.endTime ?? null;
+      const span = bookedSpan(a.job, a.shiftIds); // gebuchte Schichten
+      const date = span.start ?? span.end ?? null;
       const overall = a.review ? reviewOverall(a.review) : null;
       return {
         companyName: a.job.company ?? "",
         jobTitle: a.job.title ?? "",
         date,
         rating: overall === null ? null : round1(overall),
-        _sort: new Date(a.job.endTime ?? a.job.startTime ?? 0).getTime(),
+        _sort: new Date(span.end ?? span.start ?? 0).getTime(),
       };
     })
     .sort((a, b) => b._sort - a._sort)

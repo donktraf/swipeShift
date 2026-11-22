@@ -6,6 +6,9 @@ const { v4: uuid } = require("uuid");
 const { completeLogin, respondIfRestricted } = require("./sessions");
 const { normalizeEmail, decideAppleLogin, decideGoogleLogin, needsTakeoverCleanup } = require("./utils/socialLogin");
 const { sanitizeTakenOverAccount } = require("./accountTakeover");
+const { canonicalEmail } = require("./utils/emailCanonical");
+const { isBannedEmailAlias } = require("./emailBan");
+const { emailChangedNotice } = require("./utils/emailChangeNotice");
 const { prisma } = require("./prisma.js");
 const crypto = require("crypto");
 const { sendMail } = require("./mailer");
@@ -150,7 +153,7 @@ const mailLimiter = rateLimit({
 router.post("/register", registerLimiter, async (req, res) => {
 
   // E-Mail vor der Validierung normalisieren (trim + lowercase), damit der Bestehende-Konten-/Bann-Check greift.
-  // TODO: Plus-Adressen/Gmail-Punkte werden nicht kanonisiert (siehe utils/socialLogin.js).
+  // Alias-Umgehung eines Banns (Gmail-Punkte, +tag): siehe isBannedEmailAlias (utils/emailCanonical.js).
   if (req.body && typeof req.body === "object" && typeof req.body.email === "string") {
     req.body = { ...req.body, email: normalizeEmail(req.body.email) };
   }
@@ -173,7 +176,8 @@ router.post("/register", registerLimiter, async (req, res) => {
     where: { email: data.email.toLowerCase() }
   });
 
-  if (exists) {
+  // Gebannter Nutzer mit derselben kanonischen E-Mail (Alias) → gleiche generische Antwort, kein Hinweis auf den Bann
+  if (exists || await isBannedEmailAlias(data.email)) {
     console.log("Email Existiert.");
 
     return res.status(409).json({
@@ -187,6 +191,7 @@ router.post("/register", registerLimiter, async (req, res) => {
   const user = await prisma.user.create({
     data: {
       email: data.email.toLowerCase(),
+      emailCanonical: canonicalEmail(data.email),
       passwordHash,
       role: data.role,
       firstName: data.firstName,
@@ -518,10 +523,15 @@ router.post("/google", async (req, res) => {
     let isNewUser = false;
 
     if (decision.action === "create") {
+      // Alias eines gebannten Nutzers → wie "E-Mail existiert schon" ablehnen (kein Hinweis auf den Bann)
+      if (await isBannedEmailAlias(email)) {
+        return res.status(409).json({ error: "An account with this email already exists. Please sign in with your original method.", code: "EMAIL_IN_USE" });
+      }
       isNewUser = true;
       user = await prisma.user.create({
         data: {
           email,
+          emailCanonical: canonicalEmail(email),
           passwordHash: SOCIAL_LOGIN_PASSWORD_PLACEHOLDER, // ✅ wird nie genutzt
           onboarding: "pendingRole",
           firstName,
@@ -603,10 +613,16 @@ router.post("/apple", async (req, res) => {
         return { user, isNewUser: false };
       }
 
+      // Alias eines gebannten Nutzers → wie "E-Mail existiert schon" ablehnen (kein Hinweis auf den Bann)
+      if (await isBannedEmailAlias(decision.email)) {
+        return { reject: { status: 409, body: { error: "An account with this email already exists. Please sign in with your original method.", code: "EMAIL_IN_USE" } } };
+      }
+
       try {
         const user = await prisma.user.create({
           data: {
             email: decision.email,
+            emailCanonical: canonicalEmail(decision.email),
             appleSub,
             passwordHash: "SOCIAL_LOGIN",
             role: null,
@@ -766,11 +782,13 @@ router.post("/change-password", requireAuth, async (req, res) => {
 
 // PATCH /auth/me/email
 router.patch("/me/email", requireAuth, async (req, res) => {
-  const { newEmail, password } = req.body;
+  const { password } = req.body;
+  const newEmail = normalizeEmail(req.body.newEmail); // trim + lowercase, wie bei Register
   if (!newEmail || !password) return res.status(400).json({ error: "Missing fields" });
 
+  try {
   const userId = req.auth.sub;
-  const user = await prisma.user.findUnique({ where: { id: userId }, select: { passwordHash: true } });
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { passwordHash: true, email: true } });
   if (!user || !user.passwordHash || user.passwordHash === "SOCIAL_LOGIN")
     return res.status(400).json({ error: "No password set on this account" });
 
@@ -778,18 +796,43 @@ router.patch("/me/email", requireAuth, async (req, res) => {
   if (!valid) return res.status(401).json({ error: "Password is incorrect" });
 
   const existing = await prisma.user.findUnique({ where: { email: newEmail } });
-  if (existing) return res.status(409).json({ error: "Email already in use" });
+  // Alias eines gebannten Nutzers → gleiche generische Antwort wie bei bestehender E-Mail
+  if (existing || await isBannedEmailAlias(newEmail, { excludeUserId: userId })) return res.status(409).json({ error: "Email already in use" });
 
-  const crypto = require("crypto");
-  const rawToken = crypto.randomBytes(32).toString("hex");
-  await prisma.user.update({
-    where: { id: userId },
-    data: { email: newEmail, emailVerifiedAt: null, verificationToken: rawToken },
-  });
+  // Vorher: Schreiben in ein nicht existierendes User.verificationToken-Feld → Prisma-Fehler (Route war kaputt).
+  try {
+    await prisma.user.update({
+      where: { id: userId },
+      data: { email: newEmail, emailCanonical: canonicalEmail(newEmail), emailVerifiedAt: null },
+    });
+  } catch (err) {
+    if (err?.code === "P2002") return res.status(409).json({ error: "Email already in use" }); // paralleler Wechsel auf dieselbe Adresse
+    throw err;
+  }
 
-  const verifyLink = buildVerifyLink(newEmail, rawToken);
-  await sendVerificationEmail(newEmail, verifyLink);
-  return res.json({ ok: true });
+  // Sicherheits-Hinweis an die ALTE Adresse (immer; ein Fehler blockiert die Aenderung nicht)
+  try {
+    const notice = emailChangedNotice({ newEmail });
+    await sendMail({ to: user.email, ...notice });
+  } catch (err) {
+    console.error("PATCH /auth/me/email: security notice failed:", err);
+  }
+
+  // Verifizierungs-Mail an die neue Adresse; schlaegt der Versand fehl, ist die Aenderung trotzdem gespeichert →
+  // verificationEmailSent=false, die App bietet "Resend" an
+  let verificationEmailSent = true;
+  try {
+    const rawToken = await issueEmailVerificationToken(userId);
+    await sendVerificationEmail(newEmail, buildVerifyLink(newEmail, rawToken));
+  } catch (err) {
+    verificationEmailSent = false;
+    console.error("PATCH /auth/me/email: verification mail failed:", err);
+  }
+  return res.json({ ok: true, verificationEmailSent });
+  } catch (err) {
+    console.error("PATCH /auth/me/email error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 // DELETE /auth/me

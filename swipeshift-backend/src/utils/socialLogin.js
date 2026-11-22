@@ -4,7 +4,7 @@
 // Grundregel: einen BESTEHENDEN Account darf nur ein vom Anbieter verifiziertes Merkmal matchen —
 // bei Apple der Subject (`sub`) oder die verifizierte Token-E-Mail, bei Google die verifizierte Token-E-Mail.
 // Eine E-Mail aus dem Request-Body ist unverifiziert und dient hoechstens als Kontaktangabe fuer ein NEUES Konto.
-// TODO: Plus-Adressen (a+x@gmail.com) / Gmail-Punkte werden nicht kanonisiert (Umgehung eines Banns per Alias moeglich).
+// Alias-Kanonisierung (Gmail-Punkte, +tag) fuer den Ban-Check: utils/emailCanonical.js (nur Vergleich; Login-E-Mail bleibt nur normalisiert).
 
 function normalizeEmail(value) {
   return typeof value === "string" ? value.trim().toLowerCase() : "";

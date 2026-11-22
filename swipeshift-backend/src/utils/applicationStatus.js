@@ -7,6 +7,8 @@
 //   cancellationReason: Text fuer die UI (Employer-Grund falls angegeben, sonst Standardtext)
 //   paymentStatus:      paid | pending | null (nur bei completed)
 
+const { bookedSpan } = require("./shiftBooking");
+
 const DEFAULT_REASONS = {
   declined:     "Your application was declined.",
   jobCancelled: "The employer cancelled this job.",
@@ -42,7 +44,9 @@ function deriveApplicationStatus(apply, job, now = new Date()) {
   }
   if (apply.status === "accepted") {
     // Abgeschlossen, wenn die Schicht vorbei ist ODER der Employer den Job als completed markiert hat
-    const ended = job?.status === "completed" || (job?.endTime && new Date(job.endTime) < now);
+    // Ende der GEBUCHTEN Schichten (job.shifts + apply.shiftIds); ohne Schichtdaten job.endTime
+    const bookedEnd = job ? bookedSpan(job, apply.shiftIds).end : null;
+    const ended = job?.status === "completed" || (bookedEnd && new Date(bookedEnd) < now);
     return {
       displayStatus:      ended ? "completed" : "confirmed",
       cancellationKind:   null,

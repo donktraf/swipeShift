@@ -197,3 +197,37 @@ test("attendanceReminderWindow: Schichtende 24–48 h her", () => {
   assert.equal(n.category, "jobActivity");
   assert.match(n.push.body, /2 workers are/);
 });
+
+// ── Gebuchte Schichten: Anwesenheit/Zuverlaessigkeit richten sich nach dem Ende der gebuchten Schichten ──
+test("attendanceState: Fenster richtet sich nach dem Ende der gebuchten Schicht", () => {
+  const rel = require("./reliability");
+  const at = (d, h, len) => ({ startTimeISO: new Date(Date.UTC(2030, 0, d, h)).toISOString(), endTimeISO: new Date(Date.UTC(2030, 0, d, h + len)).toISOString() });
+  const job = { status: "published", startTime: new Date(Date.UTC(2030, 0, 1, 9)), endTime: new Date(Date.UTC(2030, 0, 2, 11)), shifts: [{ id: "a", ...at(1, 9, 2) }, { id: "b", ...at(2, 9, 2) }] };
+  const now = new Date(Date.UTC(2030, 0, 1, 20)); // Schicht a vorbei, b liegt morgen
+  assert.equal(rel.attendanceState({ status: "accepted", shiftIds: ["a"] }, job, now).canRecord, true);
+  const later = rel.attendanceState({ status: "accepted", shiftIds: ["b"] }, job, now);
+  assert.deepEqual([later.ended, later.canRecord, later.pending, later.autoDue], [false, false, false, false]);
+  // Altbestand (leer) = alle Schichten → Ende der letzten
+  assert.equal(rel.attendanceState({ status: "accepted", shiftIds: [] }, job, now).ended, false);
+  // 3 Tage nach Schicht b, ohne Eintrag: Auto-Attendance faellig fuer b, aber a nur 2+ Tage → ebenfalls faellig
+  const way = new Date(Date.UTC(2030, 0, 5, 12));
+  assert.equal(rel.attendanceState({ status: "accepted", shiftIds: ["b"] }, job, way).autoDue, true);
+});
+
+test("summarizeReliability: zaehlt nach dem Ende der gebuchten Schichten", () => {
+  const rel = require("./reliability");
+  const at = (d, h, len) => ({ startTimeISO: new Date(Date.UTC(2030, 0, d, h)).toISOString(), endTimeISO: new Date(Date.UTC(2030, 0, d, h + len)).toISOString() });
+  const job = { endTime: new Date(Date.UTC(2030, 0, 2, 11)), shifts: [{ id: "a", ...at(1, 9, 2) }, { id: "b", ...at(2, 9, 2) }] };
+  const now = new Date(Date.UTC(2030, 0, 1, 20));
+  const rows = [{ status: "accepted", attendance: "attended", shiftIds: ["a"], job }, { status: "accepted", attendance: "no_show", shiftIds: ["b"], job }];
+  const s = rel.summarizeReliability(rows, now);
+  assert.equal(s.finishedShifts, 1); // b ist noch nicht gelaufen
+  assert.equal(s.noShows, 0);
+});
+
+test("reliabilityRowsWhere: nur positive Klauseln, kein NOT/null-Vergleich auf endTime nach oben", () => {
+  const rel = require("./reliability");
+  const w = rel.reliabilityRowsWhere(new Date(Date.UTC(2030, 0, 1)));
+  assert.ok(!JSON.stringify(w).includes('"NOT"'));
+  assert.deepEqual(Object.keys(w.OR[0].job.endTime), ["gte"]);
+});

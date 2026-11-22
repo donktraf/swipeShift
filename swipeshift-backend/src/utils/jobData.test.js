@@ -370,3 +370,17 @@ test("shouldAutoAccept: Instant Match, Plaetze und harte Anforderungen", () => {
   assert.equal(shouldAutoAccept({ job, worker: { ...worker, workAuthorization: false }, acceptedCount: 0, now }), false);
   assert.equal(shouldAutoAccept({ job: { ...job, workAuthorizationRequired: false }, worker: { ...worker, workAuthorization: false }, acceptedCount: 0, now }), true);
 });
+
+test("buildJobData: startTime/endTime = fruehester Start / spaetestes Ende ueber ALLE Schichten, ids vergeben", () => {
+  const iso = (d, h) => new Date(Date.UTC(2030, 0, d, h)).toISOString();
+  const d = buildJobData({ title: "t", shifts: [
+    { date: "b", timeRange: "x", startTimeISO: iso(13, 9), endTimeISO: iso(13, 11) },
+    { date: "a", timeRange: "x", startTimeISO: iso(12, 9), endTimeISO: iso(12, 13) },
+  ] });
+  assert.equal(d.startTime.toISOString(), iso(12, 9));
+  assert.equal(d.endTime.toISOString(), iso(13, 11));
+  assert.deepEqual(d.shifts.map((s) => s.id), ["s1", "s2"]);
+  // ohne gueltige ISO-Zeiten: Fallback wie bisher
+  const none = buildJobData({ title: "t", shifts: [{ date: "x", timeRange: "y" }] });
+  assert.equal(none.startTime, null);
+});

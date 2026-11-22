@@ -96,3 +96,35 @@ test("jobCosts: No-Show unter Einspruch wird nicht berechnet, sondern on hold", 
   assert.equal(c2.completedTotal, 66);
   assert.equal(c2.onHoldTotal, 0);
 });
+
+test("Gebuchte Schichten: Lohn/Stunden nur fuer die gebuchte Schicht", () => {
+  const j = { payAmount: 20, openSpots: 1, platformFeePercent: 10, shifts: [{ id: "a", ...iso(9, 4) }, { id: "b", ...iso(9 + 24, 2) }] };
+  assert.deepEqual(shiftHoursList(j, ["b"]), [2]);
+  assert.equal(shiftHours(j, ["a"]), 4);
+  assert.equal(payPerWorker(j, ["b"]), 40);
+  assert.equal(payPerWorker(j, []), 120);  // leer = alle (Altbestand)
+  assert.equal(payPerWorker(j), 120);
+  const c = jobCosts(j, [{ shiftIds: ["a"] }, { shiftIds: ["b"], isPaid: true }]);
+  assert.equal(c.completed, 120);          // 80 + 40
+  assert.equal(c.completedFee, 12);
+  assert.equal(c.paidOut, 40);
+  assert.equal(c.perWorker, 120);          // Richtwert ueber alle Schichten
+});
+
+test("Geplante Kosten pro Schicht: max(Plaetze, abdeckende Worker)", () => {
+  const j = { payAmount: 10, openSpots: 1, platformFeePercent: 0, shifts: [{ id: "a", ...iso(9, 2) }, { id: "b", ...iso(9 + 24, 4) }] };
+  // zwei Worker auf Schicht a (> 1 Platz), keiner auf b → a: 2×20, b: 1×40
+  assert.equal(jobCosts(j, [{ shiftIds: ["a"] }, { shiftIds: ["a"] }]).planned, 80);
+  assert.equal(jobCosts(j, []).planned, 60);
+});
+
+test("jobCosts: Teilbuchung vs. Altbestand (leere shiftIds = alle Schichten)", () => {
+  const j = { payAmount: 10, openSpots: 1, platformFeePercent: 0, shifts: [{ id: "a", ...iso(9, 2) }, { id: "b", ...iso(9 + 24, 3) }] };
+  const partial = jobCosts(j, [{ shiftIds: ["b"] }]);
+  const legacy  = jobCosts(j, [{ shiftIds: [] }]);
+  const noField = jobCosts(j, [{}]);
+  assert.equal(partial.completed, 30);
+  assert.equal(legacy.completed, 50);
+  assert.equal(noField.completed, 50);
+  assert.equal(legacy.perWorker, 50);
+});

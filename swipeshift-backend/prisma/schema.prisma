@@ -22,6 +22,8 @@ enum OnboardingStatus {
 model User {
   id           String   @id @default(uuid())
   email        String   @unique
+  // Kanonische Form fuer Ban-Evasion-Check (Gmail-Punkte, +tag; siehe src/utils/emailCanonical.js). NICHT unique.
+  emailCanonical String?
   passwordHash String
   role         UserRole?
   onboarding   OnboardingStatus @default(pendingRole)
@@ -85,6 +87,8 @@ model User {
   twoFactorCodes TwoFactorCode[]
   blocksGiven    UserBlock[]  @relation("BlocksGiven")
   blocksReceived UserBlock[]  @relation("BlocksReceived")
+
+  @@index([emailCanonical])
 }
 
 // Eine Login-Sitzung pro Geraet. Jeder JWT traegt die Session-ID (sid);
@@ -375,6 +379,9 @@ model Apply {
   cancelledAt      DateTime?
   lateCancellation Boolean   @default(false)
   cancelReason     String?
+
+  // Gebuchte Schichten (Job.shifts[].id). Leer = Altbestand → alle Schichten des Jobs (siehe utils/shiftBooking.js)
+  shiftIds         String[]  @default([])
 
   // Anwesenheit (vom Employer nach Schichtende erfasst, sonst nach 48 h automatisch "attended")
   attendance        String?   // attended | late | no_show | null (noch offen)

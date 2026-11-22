@@ -51,3 +51,12 @@ test("Employer markiert Job als completed → completed auch vor Schichtende", (
   assert.equal(s.displayStatus, "completed");
   assert.equal(s.paymentStatus, "pending");
 });
+
+test("deriveApplicationStatus: 'completed' erst nach dem Ende der GEBUCHTEN Schichten", () => {
+  const at = (d, h, len) => ({ startTimeISO: new Date(Date.UTC(2030, 0, d, h)).toISOString(), endTimeISO: new Date(Date.UTC(2030, 0, d, h + len)).toISOString() });
+  const job = { status: "published", endTime: new Date(Date.UTC(2030, 0, 2, 11)), shifts: [{ id: "a", ...at(1, 9, 2) }, { id: "b", ...at(2, 9, 2) }] };
+  const now = new Date(Date.UTC(2030, 0, 1, 20));
+  assert.equal(deriveApplicationStatus({ status: "accepted", shiftIds: ["a"] }, job, now).displayStatus, "completed");
+  assert.equal(deriveApplicationStatus({ status: "accepted", shiftIds: ["b"] }, job, now).displayStatus, "confirmed");
+  assert.equal(deriveApplicationStatus({ status: "accepted", shiftIds: [] }, job, now).displayStatus, "confirmed");
+});

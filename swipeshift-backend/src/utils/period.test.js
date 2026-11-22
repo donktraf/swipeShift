@@ -111,3 +111,10 @@ test("currentWeekRange: Montag bis Sonntag der laufenden Woche", () => {
   assert.deepEqual(wrap.since, new Date(2026, 11, 28));
   assert.deepEqual(wrap.until, new Date(2027, 0, 3, 23, 59, 59, 999));
 });
+
+test("bookingPeriodPrefilter: positive Grobklauseln", () => {
+  const { bookingPeriodPrefilter } = require("./period");
+  const since = new Date(Date.UTC(2030, 0, 1)), until = new Date(Date.UTC(2030, 0, 31));
+  assert.deepEqual(bookingPeriodPrefilter({ since, until }), { startTime: { lte: until }, OR: [{ endTime: { gte: since } }, { endTime: null }] });
+  assert.deepEqual(bookingPeriodPrefilter({ since: null, until: null }), {});
+});

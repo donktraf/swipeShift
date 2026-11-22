@@ -5,8 +5,9 @@ const events = require("./notifyEvents");
 const { prisma } = require("./prisma");
 const { requireAuth } = require("./auth");
 const { requireVerifiedEmail } = require("./middlewares/requireVerifiedEmail");
-const { resolvePeriod, prismaRange, currentWeekRange } = require("./utils/period");
+const { resolvePeriod, isInPeriod, bookingPeriodPrefilter, currentWeekRange } = require("./utils/period");
 const { payPerWorker, shiftHours } = require("./utils/jobCost");
+const { bookedSpan, withBookedTimes, describeBooked } = require("./utils/shiftBooking");
 const { distanceMilesBetween } = require("./utils/haversine");
 const { companyJobsWhere, truncateText } = require("./utils/companyStats");
 const { jobNotesForApply } = require("./utils/jobNotes");
@@ -50,7 +51,9 @@ router.get("/applications", requireAuth, requireVerifiedEmail, async (req, res) 
     });
 
     const applications = applies.map((a) => {
-      const job = a.job;
+      const fullJob = a.job;
+      // Aus Worker-Sicht zaehlen nur die GEBUCHTEN Schichten (Start = erste, Ende = letzte gebuchte; Altbestand = alle)
+      const job = fullJob ? withBookedTimes(fullJob, a.shiftIds) : fullJob;
       // Status inkl. storniertem Job, Stornierungsgrund und Zahlungsstatus (utils/applicationStatus.js)
       const { displayStatus, cancellationKind, cancellationReason, paymentStatus } =
         deriveApplicationStatus(a, job, now);
@@ -75,7 +78,9 @@ router.get("/applications", requireAuth, requireVerifiedEmail, async (req, res) 
         // Hinweise des Employers (nur bei offener/angenommener Bewerbung, utils/jobNotes.js)
         jobNotes:       jobNotesForApply(a.status, job?.jobNotes),
         // Verdienst fuer diese Schicht (gleiche Formel wie Finanz-Uebersicht)
-        earnings:       job && rel.isPayable(a) ? payPerWorker(job) : 0, // No-Show (auch unter Einspruch) noch nicht bezahlt; alle Schichten des Jobs (TODO in utils/jobCost.js)
+        earnings:       job && rel.isPayable(a) ? payPerWorker(job, a.shiftIds) : 0, // No-Show (auch unter Einspruch) noch nicht bezahlt; nur gebuchte Schichten
+        // Gebuchte Schichten (Kalender/Job Applications zeigen nur diese)
+        bookedShifts:   fullJob ? describeBooked(fullJob, a.shiftIds) : [],
         // Entfernung Worker → Job in Meilen (null ohne Koordinaten)
         distanceMiles:  distanceMilesBetween(me?.lat, me?.lng, job?.lat, job?.lng),
         // Chat erst nach Annahme sinnvoll — die Conversation existiert aber ab Bewerbung
@@ -137,12 +142,13 @@ router.post("/applications/:applyId/cancel", requireAuth, requireVerifiedEmail, 
 
     const apply = await prisma.apply.findUnique({
       where:   { id: applyId },
-      include: { job: { select: { title: true, status: true, startTime: true, employerId: true } }, conversation: { select: { id: true } } },
+      include: { job: { select: { title: true, status: true, startTime: true, endTime: true, shifts: true, employerId: true } }, conversation: { select: { id: true } } },
     });
     if (!apply)                    return res.status(404).json({ error: "Application not found" });
     if (apply.userId !== workerId) return res.status(403).json({ error: "Forbidden" });
 
-    const decision = rel.evaluateWorkerCancel(apply, apply.job, now);
+    // Start = erste GEBUCHTE Schicht (storniert wird die ganze Buchung)
+    const decision = rel.evaluateWorkerCancel(apply, withBookedTimes(apply.job, apply.shiftIds), now);
     if (!decision.ok) return res.status(decision.status).json({ error: decision.error, code: decision.code });
 
     const reason = normalizeCancellationReason(req.body?.reason);
@@ -394,11 +400,11 @@ router.post("/reviews", requireAuth, requireVerifiedEmail, async (req, res) => {
 
     const apply = await prisma.apply.findFirst({
       where:   { id: applyId, userId: workerId },
-      include: { job: { select: { employerId: true, status: true, endTime: true } } },
+      include: { job: { select: { employerId: true, status: true, startTime: true, endTime: true, shifts: true } } },
     });
     if (!apply) return res.status(404).json({ error: "Application not found" });
     // Gleiche Regel wie Job Applications/Kalender: nur angenommene, abgeschlossene Jobs sind bewertbar
-    if (deriveApplicationStatus(apply, apply.job).displayStatus !== "completed") {
+    if (deriveApplicationStatus(apply, withBookedTimes(apply.job, apply.shiftIds)).displayStatus !== "completed") {
       return res.status(400).json({ error: "You can rate an employer once the job is completed." });
     }
 
@@ -450,14 +456,14 @@ router.get("/financials", requireAuth, requireVerifiedEmail, async (req, res) =>
     // period = thisMonth | last3Months | thisYear | allTime | custom (&from&to=YYYY-MM-DD)
     const range = resolvePeriod(req.query, now);
     if (range.error) return res.status(400).json({ error: range.error });
-    const startTimeRange = prismaRange(range);
 
     const allApplies = await prisma.apply.findMany({
       where: {
         userId: workerId,
         status: "accepted",
         // Stornierte Jobs bringen keinen Verdienst
-        job: { status: { not: "cancelled" }, ...(startTimeRange ? { startTime: startTimeRange } : {}) },
+        // Grobfilter; der Zeitraum gilt fuer den START DER GEBUCHTEN Schichten (unten im Speicher)
+        job: { status: { not: "cancelled" }, ...bookingPeriodPrefilter(range) },
       },
       include: {
         job: {
@@ -470,7 +476,7 @@ router.get("/financials", requireAuth, requireVerifiedEmail, async (req, res) =>
       orderBy: { createdAt: "desc" },
     });
     // No-Shows (auch unter Einspruch: on hold) werden noch nicht bezahlt → kein Verdienst (utils/reliability.js)
-    const applies = rel.billable(allApplies);
+    const applies = rel.billable(allApplies).filter((a) => isInPeriod(a.job ? bookedSpan(a.job, a.shiftIds).start : null, range));
 
     // "This week": Verdienst der laufenden Woche Mo–So (in SERVER-Lokalzeit, nicht Geraetezeit),
     // unabhaengig vom gewaehlten Zeitraum.
@@ -479,18 +485,21 @@ router.get("/financials", requireAuth, requireVerifiedEmail, async (req, res) =>
       where: {
         userId: workerId,
         status: "accepted",
-        job: { status: { not: "cancelled" }, startTime: prismaRange(currentWeekRange(now)) },
+        job: { status: { not: "cancelled" }, ...bookingPeriodPrefilter(currentWeekRange(now)) },
       },
       include: { job: { select: { payAmount: true, startTime: true, endTime: true, shifts: true } } },
     });
-    const weekApplies = rel.billable(weekRows);
-    const thisWeekEarnings = weekApplies.reduce((sum, a) => sum + (a.job ? payPerWorker(a.job) : 0), 0);
+    const week = currentWeekRange(now);
+    const weekApplies = rel.billable(weekRows).filter((a) => a.job && isInPeriod(bookedSpan(a.job, a.shiftIds).start, week));
+    const thisWeekEarnings = weekApplies.reduce((sum, a) => sum + (a.job ? payPerWorker(a.job, a.shiftIds) : 0), 0);
 
     // Gleiche Rechnung wie beim Employer (Stundenlohn × Schichtstunden, utils/jobCost.js)
-    const calcEarning = (a) => (a.job ? payPerWorker(a.job) : 0);
+    // Nur die GEBUCHTEN Schichten des Workers zaehlen (Apply.shiftIds, leer = alle)
+    const calcEarning = (a) => (a.job ? payPerWorker(a.job, a.shiftIds) : 0);
+    const spanOf = (a) => (a.job ? bookedSpan(a.job, a.shiftIds) : { start: null, end: null });
 
-    const upcoming   = applies.filter((a) => a.job?.startTime && new Date(a.job.startTime) > now);
-    const completed  = applies.filter((a) => a.job?.endTime   && new Date(a.job.endTime)   <= now);
+    const upcoming   = applies.filter((a) => { const sp = spanOf(a); return sp.start && new Date(sp.start) > now; });
+    const completed  = applies.filter((a) => { const sp = spanOf(a); return sp.end   && new Date(sp.end)   <= now; });
     const paidOutArr = completed.filter((a) => a.isPaid);
 
     const upcomingEarnings   = upcoming.reduce((s, a) => s + calcEarning(a), 0);
@@ -499,21 +508,22 @@ router.get("/financials", requireAuth, requireVerifiedEmail, async (req, res) =>
 
     // Neueste Schichten zuerst, max. EARNINGS_LIST_LIMIT; total = Anzahl im Zeitraum (fuer "Showing latest N")
     const sortedApplies = [...applies].sort(
-      (a, b) => (b.job?.startTime ? new Date(b.job.startTime).getTime() : 0) - (a.job?.startTime ? new Date(a.job.startTime).getTime() : 0)
+      (a, b) => (spanOf(b).start ? new Date(spanOf(b).start).getTime() : 0) - (spanOf(a).start ? new Date(spanOf(a).start).getTime() : 0)
     );
     const earningsList = sortedApplies.slice(0, EARNINGS_LIST_LIMIT).map((a) => ({
       id:        a.id,
       // Stundenlohn × Stunden = amount (utils/jobCost.js); startTime fuer die Monatsgruppierung
       hourlyRate: a.job?.payAmount ?? null,
-      hours:      a.job ? shiftHours(a.job) : null,
-      startTime:  a.job?.startTime ?? null,
+      hours:      a.job ? shiftHours(a.job, a.shiftIds) : null,
+      startTime:  spanOf(a).start ?? null,
+      bookedShifts: a.job ? describeBooked(a.job, a.shiftIds) : [],
       isPaid:     a.isPaid,
       jobTitle:  a.job?.title     ?? "—",
       company:   a.job?.company   ?? "—",
       logoEmoji: a.job?.logoEmoji ?? "🏢",
       shiftText: a.job?.shiftText ?? "—",
       amount:    calcEarning(a),
-      status:    a.job?.startTime && new Date(a.job.startTime) > now ? "upcoming" : "completed",
+      status:    spanOf(a).start && new Date(spanOf(a).start) > now ? "upcoming" : "completed",
     }));
 
     return res.json({ upcomingEarnings, completedEarnings, paidOut, thisWeekEarnings, earningsTotal: applies.length, earningsList });

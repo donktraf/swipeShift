@@ -70,6 +70,16 @@ function prismaRange({ since, until }) {
   return { ...(since ? { gte: since } : {}), ...(until ? { lte: until } : {}) };
 }
 
+// Grobfilter (positiv) auf Job-Spalten fuer Buchungen, deren GEBUCHTER Start im Zeitraum liegen soll:
+// gebuchter Start liegt zwischen Job.startTime (frueheste Schicht) und Job.endTime (spaetestes Ende) →
+// startTime <= until UND endTime >= since. Das genaue Ergebnis prueft isInPeriod(bookedSpan.start) im Speicher.
+function bookingPeriodPrefilter({ since, until }) {
+  return {
+    ...(until ? { startTime: { lte: until } } : {}),
+    ...(since ? { OR: [{ endTime: { gte: since } }, { endTime: null }] } : {}),
+  };
+}
+
 // Teilt [start, end] in Diagramm-Buckets: Tage (≤ 31 Tage), Wochen (≤ 16 Wochen), sonst Monate.
 function buildBuckets(start, end) {
   if (!start || !end || start > end) return [];
@@ -112,4 +122,4 @@ function currentWeekRange(now = new Date()) {
   return { since: start, until: end };
 }
 
-module.exports = { PERIODS, currentWeekRange, resolvePeriod, isInPeriod, prismaRange, buildBuckets, parseDay };
+module.exports = { PERIODS, currentWeekRange, resolvePeriod, isInPeriod, prismaRange, bookingPeriodPrefilter, buildBuckets, parseDay };

@@ -41,6 +41,7 @@ const cleanText = (v, max) => {
 const uniqueAllowed = (v, allowed) => (Array.isArray(v) ? [...new Set(v.filter((x) => allowed.includes(x)))] : []);
 
 const { ageFromBirthDate } = require("./workerProfile");
+const { assignShiftIds, shiftsSpan } = require("./shiftBooking");
 
 function buildJobData(body = {}) {
   const {
@@ -49,6 +50,7 @@ function buildJobData(body = {}) {
     jobDescription, tasks, dressCode, languages,
     experienceLevel, minAge, paymentMethod, contractType,
   } = body;
+  const shiftSpan = Array.isArray(shifts) ? shiftsSpan(shifts) : null;
 
   return {
     title,
@@ -61,14 +63,15 @@ function buildJobData(body = {}) {
     payText:     payText || (payAmount ? formatPayText(payAmount) : "On request"),
     payAmount:   payAmount ? parseFloat(payAmount) : null,
     shiftText:   shifts?.[0] ? `${shifts[0].date}, ${shifts[0].timeRange}` : "",
-    startTime:   shifts?.[0]?.startTimeISO ? new Date(shifts[0].startTimeISO) : null,
-    endTime:     shifts?.[0]?.endTimeISO   ? new Date(shifts[0].endTimeISO)   : null,
+    // Job.startTime/endTime = fruehester Start / spaetestes Ende ueber ALLE Schichten (Fenster des ganzen Jobs)
+    startTime:   shiftSpan?.start ?? (shifts?.[0]?.startTimeISO ? new Date(shifts[0].startTimeISO) : null),
+    endTime:     shiftSpan?.end   ?? (shifts?.[0]?.endTimeISO   ? new Date(shifts[0].endTimeISO)   : null),
     duration:    shifts?.[0]?.duration || null,
     shortInfo:   jobDescription ? jobDescription.slice(0, 120) : "",
     jobDescription: jobDescription || null,
     tasks:       tasks || [],
     openSpots:   openSpots || 1,
-    shifts:      shifts || [],
+    shifts:      assignShiftIds(shifts || []), // jede Schicht bekommt eine stabile id (buchbar, siehe utils/shiftBooking.js)
     dressCode:   dressCode || null,
     languages:   languages || [],
     experienceLevel: experienceLevel || null,

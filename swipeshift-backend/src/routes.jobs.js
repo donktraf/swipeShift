@@ -9,6 +9,8 @@ const { requireVerifiedEmail } = require("./middlewares/requireVerifiedEmail");
 const { haversineDistance, kmToMiles, milesToKm } = require("./utils/haversine");
 const { geocodeLocation }  = require("./utils/geocode");
 const { summarizeJobApplies } = require("./utils/applyCounts");
+const { parseShiftSelection, fullShiftIds, maxCoverage, describeBooked, bookedShifts } = require("./utils/shiftBooking");
+const { computeScheduleConflicts } = require("./utils/scheduleConflict");
 const { buildJobData, validateJobBody, checkDraftAccess, publishGate, resolveCreateStatus, evaluateStatusChange, shouldAutoAccept } = require("./utils/jobData");
 const { isBlockedBetween } = require("./utils/safety");
 const { normalizeCancellationReason } = require("./utils/applicationStatus");
@@ -358,7 +360,7 @@ router.post("/:id/apply", requireAuth, requireVerifiedEmail, async (req, res) =>
 
     const job = await prisma.job.findUnique({
       where: { id: jobId },
-      select: { id: true, title: true, employerId: true, status: true, openSpots: true, startTime: true, endTime: true, instantMatch: true, minAge: true, workAuthorizationRequired: true },
+      select: { id: true, title: true, employerId: true, status: true, openSpots: true, startTime: true, endTime: true, shifts: true, instantMatch: true, minAge: true, workAuthorizationRequired: true },
     });
     if (!job) return res.status(404).json({ error: "Job not found" });
 
@@ -392,25 +394,48 @@ router.post("/:id/apply", requireAuth, requireVerifiedEmail, async (req, res) =>
       }
     }
 
-    // Keine offenen Stellen mehr
+    // Gebuchte Schichten: Body { shiftIds: [...] }; ohne Body/Feld (Single-Shift, alte Clients) = alle Schichten.
+    // Ids muessen zum Job gehoeren, eindeutig sein; begonnene Schichten sind nicht buchbar (utils/shiftBooking.js)
+    const selection = parseShiftSelection(job, req.body?.shiftIds);
+    if (!selection.ok) return res.status(selection.status).json({ error: selection.error, message: selection.message });
+    const shiftIds = selection.shiftIds;
+
+    // Erneutes Bewerben mit bereits vorhandener Bewerbung: eine ANDERE explizite Schicht-Auswahl wird nicht still ignoriert
+    // (409 ALREADY_APPLIED + bestehende Buchung); gleiche Auswahl bzw. kein shiftIds-Feld → bisheriges Verhalten.
+    if (req.body?.shiftIds != null) {
+      const existingApply = await prisma.apply.findUnique({ where: { userId_jobId: { userId, jobId } }, select: { shiftIds: true } });
+      if (existingApply) {
+        const have = bookedShifts(job, existingApply.shiftIds).map((s) => s.id).sort().join("|");
+        const want = [...shiftIds].sort().join("|");
+        if (have !== want) {
+          return res.status(409).json({
+            error: "ALREADY_APPLIED",
+            message: "You already applied to this job with a different shift selection.",
+            bookedShifts: describeBooked(job, existingApply.shiftIds),
+          });
+        }
+      }
+    }
+
+    // Keine offenen Stellen mehr (openSpots gilt pro Schicht): SHIFT_TAKEN, wenn ALLE angefragten Schichten voll sind
     if (job.openSpots != null && job.openSpots <= 0) {
       return res.status(409).json({ error: "SHIFT_TAKEN" });
     }
-
-    // Scheduling-Konflikt: Worker hat bereits einen angenommenen Job zur gleichen Zeit
-    if (job.startTime && job.endTime) {
-      const conflict = await prisma.apply.findFirst({
-        where: {
-          userId,
-          status: "accepted",
-          job: {
-            startTime: { lt: job.endTime },
-            endTime:   { gt: job.startTime },
-          },
-        },
-      });
-      if (conflict) return res.status(409).json({ error: "SCHEDULING_CONFLICT" });
+    const acceptedForJob = await prisma.apply.findMany({ where: { jobId, status: "accepted" }, select: { id: true, shiftIds: true } });
+    if (fullShiftIds(job, shiftIds, acceptedForJob).length === shiftIds.length) {
+      return res.status(409).json({ error: "SHIFT_TAKEN" });
     }
+
+    // Scheduling-Konflikt: Worker hat bereits angenommene Schichten zur gleichen Zeit (Schicht-Zeiten, nicht nur Job-Zeit)
+    const myAccepted = await prisma.apply.findMany({
+      where:  { userId, status: "accepted" },
+      select: { id: true, userId: true, jobId: true, shiftIds: true, job: { select: { startTime: true, endTime: true, shifts: true, status: true } } },
+    });
+    const conflicts = computeScheduleConflicts(
+      [{ id: "new", userId, jobId, shiftIds, job }],
+      myAccepted,
+    );
+    if (conflicts.has("new")) return res.status(409).json({ error: "SCHEDULING_CONFLICT" });
 
     // Der Worker hat diese (angenommene) Schicht selbst storniert → keine erneute Bewerbung auf denselben Job
     const previous = await prisma.apply.findUnique({ where: { userId_jobId: { userId, jobId } }, select: { status: true } });
@@ -429,7 +454,9 @@ router.post("/:id/apply", requireAuth, requireVerifiedEmail, async (req, res) =>
       if (!apply) {
         let autoAccept = false;
         if (job.instantMatch) {
-          const accepted = await tx.apply.count({ where: { jobId, status: "accepted" } });
+          // Plaetze gelten pro Schicht: automatisch annehmen nur, wenn ALLE angefragten Schichten frei sind
+          const acceptedRows = await tx.apply.findMany({ where: { jobId, status: "accepted" }, select: { id: true, shiftIds: true } });
+          const accepted = maxCoverage(job, shiftIds, acceptedRows);
           const worker = await tx.worker.findUnique({
             where: { userId }, select: { dateOfBirth: true, workAuthorization: true },
           });
@@ -437,8 +464,8 @@ router.post("/:id/apply", requireAuth, requireVerifiedEmail, async (req, res) =>
         }
         apply = await tx.apply.create({
           data: autoAccept
-            ? { userId, jobId, status: "accepted", autoAccepted: true } // respondedAt bewusst nicht gesetzt
-            : { userId, jobId },
+            ? { userId, jobId, shiftIds, status: "accepted", autoAccepted: true } // respondedAt bewusst nicht gesetzt
+            : { userId, jobId, shiftIds },
         });
       }
 
@@ -602,7 +629,7 @@ router.get("/mine", requireAuth, requireVerifiedEmail, async (req, res) => {
       omit: { platformFeePercent: false }, // Employer sieht den eingefrorenen Gebuehren-Satz (global ausgeblendet, siehe prisma.js)
       include: {
         // Offene Bewerbungen gesperrter/gebannter Worker zaehlen/erscheinen nicht (angenommene bleiben)
-        applies: { where: visibleApplyFilter(), select: { id: true, userId: true, status: true, autoAccepted: true, createdAt: true, attendance: true, disputedAt: true, conversation: { select: { id: true } } } },
+        applies: { where: visibleApplyFilter(), select: { id: true, userId: true, shiftIds: true, status: true, autoAccepted: true, createdAt: true, attendance: true, disputedAt: true, conversation: { select: { id: true } } } },
       },
     });
     // Anwesenheit noch zu erfassen (Schicht vorbei, 48-h-Fenster offen) → Hinweis auf der Jobkarte
@@ -626,7 +653,7 @@ router.get("/mine", requireAuth, requireVerifiedEmail, async (req, res) => {
           // Andere angenommene Jobs aller Inline-Bewerber (eine Query fuer alle Jobs) → Zeitkonflikt
           prisma.apply.findMany({
             where: { userId: { in: inlineUserIds }, status: "accepted" },
-            select: { id: true, userId: true, jobId: true, job: { select: { startTime: true, endTime: true, status: true } } },
+            select: { id: true, userId: true, jobId: true, shiftIds: true, job: { select: { startTime: true, endTime: true, shifts: true, status: true } } },
           }),
         ])
       : [new Map(), [], []];
@@ -655,6 +682,8 @@ router.get("/mine", requireAuth, requireVerifiedEmail, async (req, res) => {
           availableDays: summaries.get(a.userId)?.availableDays ?? [],
           availableTimes: summaries.get(a.userId)?.availableTimes ?? [],
           hasScheduleConflict: inlineConflicts.has(a.id),
+          // Gebuchte Schichten dieses Bewerbers (leer im Altbestand = alle)
+          bookedShifts: describeBooked(job, a.shiftIds),
         };
       }),
     }));
@@ -939,6 +968,7 @@ router.get("/:id/applicants", requireAuth, requireVerifiedEmail, async (req, res
         profilePhotoUrl: u?.worker?.profilePhotoUrl ?? null,
         rating:          r ? Math.round((r.sum / r.count) * 10) / 10 : 0,
         location:        u?.location ?? null,
+        bookedShifts:    describeBooked(job, a.shiftIds),
       };
     });
 

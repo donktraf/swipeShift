@@ -7,6 +7,7 @@ const { requireAuth } = require("./auth");
 const { requireVerifiedEmail } = require("./middlewares/requireVerifiedEmail");
 const { resolvePeriod, isInPeriod, buildBuckets } = require("./utils/period");
 const { jobCosts, shiftHours } = require("./utils/jobCost");
+const { bookedShifts, bookedSpan, describeBooked, fullShiftIds, jobShifts, shiftCoverage } = require("./utils/shiftBooking");
 const fees = require("./utils/fees");
 const { roundMoney } = fees;
 const { mergeConsents, allowedKeysForRole } = require("./utils/consents");
@@ -39,7 +40,7 @@ router.get("/applicants", requireAuth, requireVerifiedEmail, async (req, res) =>
     // Alle Jobs des Arbeitgebers
     const myJobs = await prisma.job.findMany({
       where: { employerId },
-      select: { id: true, title: true, payText: true, shiftText: true, location: true, logoEmoji: true, startTime: true, endTime: true },
+      select: { id: true, title: true, payText: true, shiftText: true, location: true, logoEmoji: true, startTime: true, endTime: true, shifts: true },
     });
     // Optional: nur ein Job (Schnellaktion "View Applicants"). Nur eigene Jobs → fremde jobId liefert nichts.
     const onlyJobId = typeof req.query.jobId === "string" && req.query.jobId ? req.query.jobId : null;
@@ -80,11 +81,11 @@ router.get("/applicants", requireAuth, requireVerifiedEmail, async (req, res) =>
     // Zeitkonflikt: hat der Bewerber einen anderen angenommenen Job zur selben Zeit? (eine Query fuer alle)
     const acceptedApplies = await prisma.apply.findMany({
       where:  { userId: { in: userIds }, status: "accepted" },
-      select: { id: true, userId: true, jobId: true, job: { select: { startTime: true, endTime: true, status: true } } },
+      select: { id: true, userId: true, jobId: true, shiftIds: true, job: { select: { startTime: true, endTime: true, shifts: true, status: true } } },
     });
     // Nur fuer offene (pending) Bewerbungen relevant
     const conflicts = computeScheduleConflicts(
-      applies.filter((a) => a.status === "pending").map((a) => ({ id: a.id, userId: a.userId, jobId: a.jobId, job: jobMap[a.jobId] })),
+      applies.filter((a) => a.status === "pending").map((a) => ({ id: a.id, userId: a.userId, jobId: a.jobId, shiftIds: a.shiftIds, job: jobMap[a.jobId] })),
       acceptedApplies,
     );
 
@@ -98,6 +99,8 @@ router.get("/applicants", requireAuth, requireVerifiedEmail, async (req, res) =>
       // Conversation entsteht schon beim Bewerben; die App zeigt den Chat-Button erst nach Annahme
       conversationId: a.conversation?.id ?? null,
       summary:       summaries.get(a.userId) ?? null,
+      // Gebuchte Schichten dieses Bewerbers (Altbestand ohne Auswahl = alle Schichten des Jobs)
+      bookedShifts:  jobMap[a.jobId] ? describeBooked(jobMap[a.jobId], a.shiftIds) : [],
       job:           jobMap[a.jobId] ?? null,
       user:          userMap[a.userId]
         ? {
@@ -130,7 +133,7 @@ router.get("/workers/:userId", requireAuth, requireVerifiedEmail, async (req, re
     const contextJob = jobId
       ? await prisma.job.findFirst({
           where: { id: jobId, employerId },
-          select: { category: true, requiredSkills: true, workAuthorizationRequired: true, minAge: true },
+          select: { category: true, requiredSkills: true, workAuthorizationRequired: true, minAge: true, startTime: true, endTime: true, shifts: true },
         })
       : null;
 
@@ -138,6 +141,9 @@ router.get("/workers/:userId", requireAuth, requireVerifiedEmail, async (req, re
       where: { userId, job: { employerId } },
       select: { id: true },
     });
+    const contextApply = jobId && contextJob
+      ? await prisma.apply.findFirst({ where: { userId, jobId, job: { employerId } }, select: { shiftIds: true } })
+      : null;
     if (!hasApplied) return res.status(404).json({ error: "Worker not found" });
 
     const user = await prisma.user.findUnique({
@@ -170,10 +176,10 @@ router.get("/workers/:userId", requireAuth, requireVerifiedEmail, async (req, re
       prisma.apply.findMany({
         where: { userId },
         select: {
-          status: true, isPaid: true,
+          status: true, isPaid: true, shiftIds: true,
           // fuer Past Jobs: Firma/Titel/Datum + die Bewertung, die der Employer dieses Jobs vergeben hat (ohne Kommentar)
           review: { select: { communication: true, teamwork: true, reliability: true, underPressure: true, workQuality: true } },
-          job: { select: { title: true, company: true, startTime: true, category: true, endTime: true, status: true, cancellationReason: true } },
+          job: { select: { title: true, company: true, startTime: true, category: true, endTime: true, shifts: true, status: true, cancellationReason: true } },
         },
       }),
       loadReliability([userId]), // Anwesenheit / No-Shows / kurzfristige Stornos
@@ -217,6 +223,8 @@ router.get("/workers/:userId", requireAuth, requireVerifiedEmail, async (req, re
       reliability: reliabilityMap.get(userId) ?? null,
       account: buildAccountStatus(user),
       matchHint: buildMatchHint(contextJob, w)?.text ?? null,
+      // Mit ?jobId: die Schichten, die dieser Worker fuer genau diesen Job gebucht hat
+      bookedShifts: contextJob && contextApply ? describeBooked(contextJob, contextApply.shiftIds) : null,
       recentReviews: reviews
         .filter((r) => r.comment && r.comment.trim())
         .slice(0, 3)
@@ -242,6 +250,7 @@ router.post("/applicants/:applyId/accept", requireAuth, requireVerifiedEmail, as
   try {
     const employerId = req.auth.sub;
     const { applyId } = req.params;
+    const now = new Date();
 
     const apply = await prisma.apply.findUnique({
       where:   { id: applyId },
@@ -253,11 +262,39 @@ router.post("/applicants/:applyId/accept", requireAuth, requireVerifiedEmail, as
     if (isRestricted(apply.user))            return res.status(409).json({ error: "This worker is no longer available.", code: "WORKER_UNAVAILABLE" });
     if (apply.status === rel.CANCELLED_BY_WORKER) return res.status(409).json({ error: "The worker cancelled this shift.", code: "CANCELLED_BY_WORKER" });
 
-    await prisma.apply.update({
-      where: { id: applyId },
-      // respondedAt nur bei der ERSTEN Antwort setzen (Response Time = Zeit bis zur ersten Reaktion)
-      data:  { status: "accepted", autoAccepted: false, ...(apply.respondedAt ? {} : { respondedAt: new Date() }) },
-    });
+    // Kapazitaet pro Schicht (openSpots gilt je Schicht): ist eine der gebuchten Schichten schon voll → 409 SHIFT_FULL,
+    // keine Teil-Annahme. Serializable, damit zwei parallele Annahmen nicht beide den letzten Platz bekommen.
+    if (apply.status !== "accepted") {
+      const full = await prisma.$transaction(async (tx) => {
+        const job = await tx.job.findUnique({ where: { id: apply.jobId }, select: { openSpots: true, startTime: true, endTime: true, shifts: true } });
+        const accepted = await tx.apply.findMany({ where: { jobId: apply.jobId, status: "accepted" }, select: { id: true, shiftIds: true } });
+        const booked = bookedShifts(job, apply.shiftIds);
+        // Alle gebuchten Schichten haben schon begonnen → nicht mehr annehmbar
+        if (booked.every((s) => s.startMs !== null && s.startMs <= now.getTime())) return { unavailable: true };
+        const fullIds = fullShiftIds(job, booked.map((s) => s.id), accepted, applyId);
+        if (fullIds.length) return { shifts: describeBooked(job, fullIds) };
+        await tx.apply.update({
+          where: { id: applyId },
+          // respondedAt nur bei der ERSTEN Antwort setzen (Response Time = Zeit bis zur ersten Reaktion)
+          data:  { status: "accepted", autoAccepted: false, ...(apply.respondedAt ? {} : { respondedAt: new Date() }) },
+        });
+        return null;
+      }, { isolationLevel: "Serializable" }).catch((err) => {
+        if (err?.code === "P2034") return { tryAgain: true };
+        throw err;
+      });
+      if (full?.unavailable) return res.status(409).json({ error: "All booked shifts of this worker have already started.", code: "SHIFT_UNAVAILABLE" });
+      if (full?.tryAgain) return res.status(409).json({ error: "Please try again.", code: "TRY_AGAIN" });
+      if (full) {
+        return res.status(409).json({ error: "One of this worker's shifts is already fully staffed.", code: "SHIFT_FULL", shifts: full.shifts });
+      }
+    } else {
+      // Bereits angenommen (z.B. Instant Match): Annahme bestaetigen → nicht mehr "auto"
+      await prisma.apply.update({
+        where: { id: applyId },
+        data:  { status: "accepted", autoAccepted: false, ...(apply.respondedAt ? {} : { respondedAt: new Date() }) },
+      });
+    }
     if (apply.status !== "accepted") events.applicationDecided(applyId, "accepted"); // fire-and-forget
     console.log(`ACCEPT apply ${applyId} by employer ${employerId}`);
     return res.json({ ok: true, applyId, action: "accepted" });
@@ -313,7 +350,7 @@ router.get("/stats", requireAuth, requireVerifiedEmail, async (req, res) => {
       select: {
         id: true, status: true, payAmount: true, openSpots: true, category: true,
         startTime: true, endTime: true, shifts: true, platformFeePercent: true,
-        applies: { where: { status: "accepted" }, select: { isPaid: true, attendance: true, disputedAt: true, disputeResolvedAt: true } },
+        applies: { where: { status: "accepted" }, select: { isPaid: true, shiftIds: true, attendance: true, disputedAt: true, disputeResolvedAt: true } },
       },
     });
     const myJobIds = myJobs.map((j) => j.id);
@@ -386,7 +423,7 @@ router.get("/financials", requireAuth, requireVerifiedEmail, async (req, res) =>
         id: true, title: true, status: true, payAmount: true,
         openSpots: true, startTime: true, endTime: true, shifts: true, platformFeePercent: true,
         shiftText: true, logoEmoji: true, category: true,
-        applies: { where: { status: "accepted" }, select: { isPaid: true, attendance: true, disputedAt: true, disputeResolvedAt: true } },
+        applies: { where: { status: "accepted" }, select: { isPaid: true, shiftIds: true, attendance: true, disputedAt: true, disputeResolvedAt: true } },
       },
       orderBy: { startTime: "desc" },
     });
@@ -544,6 +581,7 @@ router.get("/assigned-workers", requireAuth, requireVerifiedEmail, async (req, r
           select: {
             id:     true,
             userId: true,
+            shiftIds: true,
             autoAccepted: true,
             user: {
               select: { id: true, firstName: true, lastName: true, ...RESTRICTION_FIELDS },
@@ -569,10 +607,16 @@ router.get("/assigned-workers", requireAuth, requireVerifiedEmail, async (req, r
       location:    job.location,
       openSpots:   job.openSpots,
       shifts:      Array.isArray(job.shifts) ? job.shifts : [],
+      // Besetzung je Schicht: openSpots gilt pro Schicht (capacity), assigned = angenommene Worker, die sie gebucht haben
+      shiftStaffing: (() => {
+        const cov = shiftCoverage(job, job.applies);
+        return jobShifts(job).map((s) => ({ id: s.id, date: s.date, timeRange: s.timeRange, assigned: cov.get(s.id) ?? 0, capacity: job.openSpots ?? 1 }));
+      })(),
       assignedWorkers: job.applies.map((a) => ({
         applyId:     a.id,
         userId:      a.userId,
         autoAccepted: a.autoAccepted === true,
+        bookedShifts: describeBooked(job, a.shiftIds), // gebuchte Schichten (Altbestand = alle)
         restricted:  isRestricted(a.user), // gesperrt/gebannt: bleibt sichtbar (Bezahlung), nur markiert
         name:        `${a.user?.firstName ?? ""} ${a.user?.lastName ?? ""}`.trim(),
         photoEmoji:  "👤",
@@ -612,28 +656,34 @@ router.get("/jobs/:jobId/payments", requireAuth, requireVerifiedEmail, async (re
     });
 
     const hourlyRate  = job.payAmount ?? 0;
-    const hoursWorked = shiftHours(job); // ALLE Schichten des Jobs, gleiche Rundung wie Finanz-Uebersicht
-    const jobCost     = jobCosts(job, []);
-    const feePercent  = jobCost.feePercent;
-    const wageFull    = jobCost.perWorker;      // Lohn je Worker ueber alle Schichten
-    const feeFull     = jobCost.perWorkerFee;   // Gebuehr je Schicht gerundet, summiert (wie PostJobView)
-
-    const shiftLabel = job.startTime
-      ? new Date(job.startTime).toLocaleDateString("en-US", { month: "short", day: "numeric" })
-      : "—";
+    const feePercent  = jobCosts(job, []).feePercent;
+    // Je Worker: Stunden/Lohn/Gebuehr seiner GEBUCHTEN Schichten (Apply.shiftIds, leer = alle), gleiche Rundung wie Finanz-Uebersicht
+    const costsOf = (a) => {
+      const c = jobCosts(job, [{ isPaid: false, shiftIds: a.shiftIds }]); // ohne Attendance → abrechenbar
+      return { hours: shiftHours(job, a.shiftIds), wage: c.completed, fee: c.completedFee };
+    };
+    const shortDate = (d) => new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
     const workers = applies.map((a) => {
       // No-Show (endgueltig) wird nicht berechnet → 0; sonst Lohn + Gebuehr (Worker erhaelt nur den Lohn)
       // Unter Einspruch: Betrag wird gezeigt, aber noch nicht berechnet (On hold, siehe summary.onHold…)
-      const wage = rel.isFinalNoShow(a) ? 0 : wageFull;
-      const fee  = rel.isFinalNoShow(a) ? 0 : feeFull;
+      const mine = costsOf(a);
+      const wage = rel.isFinalNoShow(a) ? 0 : mine.wage;
+      const fee  = rel.isFinalNoShow(a) ? 0 : mine.fee;
+      const booked = describeBooked(job, a.shiftIds);
+      const firstStart = booked.find((b) => b.startTime)?.startTime ?? job.startTime;
+      const shiftLabel = firstStart ? shortDate(firstStart) : "—";
       return {
       id:          a.id,
       name:        `${a.user?.firstName ?? ""} ${a.user?.lastName ?? ""}`.trim() || "Unknown",
       avatarEmoji: "👤",
       jobTitle:    job.title,
       shiftDate:   shiftLabel,
-      hoursWorked,
+      // Gebuchte Schichten dieses Workers ("Mon 12 · Tue 13" im Client aus date/startTime gebaut)
+      bookedShifts: booked,
+      bookedShiftCount: booked.length,
+      totalShiftCount:  jobShifts(job).length,
+      hoursWorked: mine.hours,
       // No-Show (endgueltig): nicht berechnet → Stundenlohn 0; bei offenem Einspruch noch nicht bezahlbar
       hourlyRate:  rel.isFinalNoShow(a) ? 0 : hourlyRate,
       paymentState: rel.paymentState(a), // paid | pending | no_show | under_review
@@ -742,7 +792,7 @@ router.get("/jobs/:jobId/attendance", requireAuth, requireVerifiedEmail, async (
 
     const job = await prisma.job.findUnique({
       where:  { id: jobId },
-      select: { id: true, title: true, employerId: true, status: true, startTime: true, endTime: true },
+      select: { id: true, title: true, employerId: true, status: true, startTime: true, endTime: true, shifts: true },
     });
     if (!job)                          return res.status(404).json({ error: "Job not found" });
     if (job.employerId !== employerId) return res.status(403).json({ error: "Forbidden" });
@@ -761,8 +811,11 @@ router.get("/jobs/:jobId/attendance", requireAuth, requireVerifiedEmail, async (
         name:             `${a.user?.firstName ?? ""} ${a.user?.lastName ?? ""}`.trim() || "Unknown",
         attendance:       a.attendance ?? null,
         attendanceSource: a.attendanceSource ?? null,
+        // Fenster richtet sich nach dem Ende der GEBUCHTEN Schichten dieses Workers
+        ended:            state.ended,
         canRecord:        state.canRecord,
         pending:          state.pending,
+        bookedShifts:     describeBooked(job, a.shiftIds),
         disputeStatus:    rel.disputeStatus(a),
         disputeNote:      a.disputedAt ? a.disputeNote : null,
       };
@@ -771,7 +824,7 @@ router.get("/jobs/:jobId/attendance", requireAuth, requireVerifiedEmail, async (
 
     return res.json({
       job: { id: job.id, title: job.title, startTime: job.startTime, endTime: job.endTime },
-      ended: state.ended,
+      ended: state.ended || workers.some((w) => w.ended),
       deadline: state.deadline,
       guidance: rel.GUIDANCE_TEXT,
       workers,
@@ -802,7 +855,7 @@ router.post("/applicants/:applyId/attendance", requireAuth, requireVerifiedEmail
 // Worker-/Job-Infos fuer Pending-/Draft-Eintraege
 const REVIEW_APPLY_INCLUDE = {
   user: { select: { id: true, firstName: true, lastName: true } },
-  job:  { select: { id: true, title: true, category: true, startTime: true, logoEmoji: true } },
+  job:  { select: { id: true, title: true, category: true, startTime: true, endTime: true, shifts: true, logoEmoji: true } },
 };
 
 function mapReviewApply(a) {
@@ -814,7 +867,8 @@ function mapReviewApply(a) {
     jobId:       a.jobId,
     jobTitle:    a.job?.title    ?? "—",
     jobCategory: a.job?.category ?? "—",
-    shiftDate:   a.job?.startTime ?? a.createdAt,
+    // Start der GEBUCHTEN Schichten dieses Workers
+    shiftDate:   (a.job ? bookedSpan(a.job, a.shiftIds).start : null) ?? a.createdAt,
     logoEmoji:   a.job?.logoEmoji ?? "🏢",
   };
 }
@@ -998,7 +1052,7 @@ router.get("/reviews", requireAuth, requireVerifiedEmail, async (req, res) => {
       jobTitle:      r.apply.job?.title    ?? "—",
       jobCategory:   r.apply.job?.category ?? "—",
       logoEmoji:     r.apply.job?.logoEmoji ?? "🏢",
-      shiftDate:     r.apply.job?.startTime ?? r.createdAt,
+      shiftDate:     (r.apply.job ? bookedSpan(r.apply.job, r.apply.shiftIds).start : null) ?? r.createdAt,
       communication: r.communication,
       teamwork:      r.teamwork,
       reliability:   r.reliability,
@@ -1082,7 +1136,7 @@ router.get("/saved-applicants", requireAuth, requireVerifiedEmail, async (req, r
             },
             job: {
               select: { id: true, title: true, company: true, category: true,
-                        logoEmoji: true, location: true, startTime: true, payText: true },
+                        logoEmoji: true, location: true, startTime: true, endTime: true, shifts: true, payText: true },
             },
           },
         },
@@ -1111,7 +1165,8 @@ router.get("/saved-applicants", requireAuth, requireVerifiedEmail, async (req, r
       company:     s.apply.job?.company ?? "—",
       logoEmoji:   s.apply.job?.logoEmoji ?? "🏢",
       location:    s.apply.job?.location ?? "—",
-      shiftDate:   s.apply.job?.startTime ?? null,
+      shiftDate:   (s.apply.job ? bookedSpan(s.apply.job, s.apply.shiftIds).start : null) ?? null,
+      bookedShifts: s.apply.job ? describeBooked(s.apply.job, s.apply.shiftIds) : [],
       payText:     s.apply.job?.payText ?? "—",
     }));
 
@@ -1154,7 +1209,7 @@ router.get("/calendar", requireAuth, requireVerifiedEmail, async (req, res) => {
         applies: {
           where: { status: "accepted" },
           select: {
-            id: true, userId: true, isPaid: true, attendance: true, disputedAt: true, disputeResolvedAt: true,
+            id: true, userId: true, shiftIds: true, isPaid: true, attendance: true, disputedAt: true, disputeResolvedAt: true,
             user: { select: { firstName: true, lastName: true, ...RESTRICTION_FIELDS, worker: { select: { profilePhotoUrl: true } } } },
           },
         },
@@ -1194,6 +1249,7 @@ router.get("/calendar", requireAuth, requireVerifiedEmail, async (req, res) => {
           photoUrl: a.user?.worker?.profilePhotoUrl ?? null,
           restricted: isRestricted(a.user),
           summary:  summaries.get(a.userId) ?? null,
+          bookedShifts: describeBooked(j, a.shiftIds),
         })),
         averageWorkerRating: averageRating(workerSummaries),
       };

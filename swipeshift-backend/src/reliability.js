@@ -7,11 +7,14 @@
 const { prisma } = require("./prisma");
 const events = require("./notifyEvents");
 const r = require("./utils/reliability");
+const { bookedEnd } = require("./utils/shiftBooking");
+const { collectPaged } = require("./utils/paged");
 
 const BATCH = 200;
 const ROW_SELECT = {
   userId: true, status: true, attendance: true, disputedAt: true, disputeResolvedAt: true,
-  lateCancellation: true, cancelledAt: true, job: { select: { endTime: true } },
+  lateCancellation: true, cancelledAt: true, shiftIds: true,
+  job: { select: { endTime: true, startTime: true, shifts: true } }, // Ende der GEBUCHTEN Schichten (utils/shiftBooking.js)
 };
 
 async function loadReliabilityRows(userIds, now = new Date(), windowDays = r.WINDOW_DAYS) {
@@ -42,7 +45,7 @@ async function recordEmployerAttendance({ applyId, employerId, value, now = new 
 
   const apply = await prisma.apply.findUnique({
     where: { id: applyId },
-    include: { job: { select: { employerId: true, status: true, endTime: true } } },
+    include: { job: { select: { employerId: true, status: true, startTime: true, endTime: true, shifts: true } } },
   });
   if (!apply) return { ok: false, status: 404, error: "Application not found" };
   if (apply.job.employerId !== employerId) return { ok: false, status: 403, error: "Forbidden" };
@@ -67,18 +70,32 @@ async function recordEmployerAttendance({ applyId, employerId, value, now = new 
   return { ok: true, attendance, changed: true };
 }
 
-// Nach 48 h ohne Eintrag zaehlt die Schicht als "attended". Nur Schichten der letzten 12 Monate (Rest ist irrelevant).
+// Nach 48 h ohne Eintrag zaehlt die Schicht als "attended" — gemessen am Ende der GEBUCHTEN Schichten der Bewerbung.
+// Nur Schichten der letzten 12 Monate. SQL grob (positiv): Job.endTime = spaetestes Schichtende >= oldest, Job.startTime
+// (= fruehester Start) < cutoff; das genaue Fenster prueft attendanceState pro Bewerbung im Speicher.
 async function runAutoAttendance(now = new Date()) {
   const cutoff = new Date(now.getTime() - r.AUTO_ATTEND_HOURS * 3_600_000);
   const oldest = new Date(now.getTime() - r.WINDOW_DAYS * 24 * 3_600_000);
-  const rows = await prisma.apply.findMany({
-    where: {
-      status: "accepted", attendance: null,
-      job: { status: { in: ["published", "inProgress", "completed"] }, endTime: { gte: oldest, lt: cutoff } },
+  const rows = await collectPaged({
+    limit: BATCH, pageSize: BATCH,
+    fetchPage: (cursor, take) => prisma.apply.findMany({
+      where: {
+        status: "accepted", attendance: null,
+        job: {
+          status: { in: ["published", "inProgress", "completed"] },
+          endTime: { gte: oldest },
+          OR: [{ startTime: { lt: cutoff } }, { startTime: null }],
+        },
+      },
+      select: { id: true, status: true, attendance: true, disputedAt: true, shiftIds: true, job: { select: { status: true, startTime: true, endTime: true, shifts: true } } },
+      orderBy: { id: "asc" },
+      take,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    }),
+    accept: (a) => {
+      const end = bookedEnd(a.job, a.shiftIds);
+      return !!end && end.getTime() >= oldest.getTime() && r.attendanceState(a, a.job, now).autoDue;
     },
-    select: { id: true },
-    orderBy: { job: { endTime: "asc" } },
-    take: BATCH,
   });
   let claimed = 0;
   for (const row of rows) {

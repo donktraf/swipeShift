@@ -1,6 +1,9 @@
 // src/utils/scheduleConflict.js
-// Zeitkonflikt eines Bewerbers (Employer-Sicht): hat der Worker schon einen ANDEREN angenommenen Job,
-// dessen Zeitraum sich mit diesem Job ueberschneidet? Rein und DB-frei → testbar (Vergleich in UTC genuegt).
+// Zeitkonflikt eines Bewerbers (Employer-Sicht) und beim Bewerben: hat der Worker schon einen ANDEREN angenommenen Job,
+// dessen GEBUCHTE Schichten sich mit den (angefragten) Schichten dieses Jobs ueberschneiden? Verglichen werden die
+// Schicht-Intervalle (utils/shiftBooking.js), nur ohne Schichtzeiten das Fenster startTime/endTime des Jobs.
+// Rein und DB-frei → testbar (Vergleich in UTC genuegt).
+const { bookedIntervals } = require("./shiftBooking");
 
 function toMs(value) {
   if (!value) return null;
@@ -16,9 +19,15 @@ function timesOverlap(a, b) {
   return aStart < bEnd && bStart < aEnd;
 }
 
+// Ueberschneiden sich zwei Intervall-Listen [{ startMs, endMs }]? (halboffen)
+function intervalsOverlap(aList, bList) {
+  return aList.some((a) => bList.some((b) => a.startMs < b.endMs && b.startMs < a.endMs));
+}
+
 /**
- * @param {Array} applies  zu pruefende Bewerbungen { id, userId, jobId, job: { startTime, endTime } }
- * @param {Array} accepted angenommene Bewerbungen derselben Worker { id, userId, jobId, job: { startTime, endTime, status } }
+ * @param {Array} applies  zu pruefende Bewerbungen { id, userId, jobId, shiftIds?, job: { startTime, endTime, shifts? } }
+ * @param {Array} accepted angenommene Bewerbungen derselben Worker { id, userId, jobId, shiftIds?, job: { startTime, endTime, shifts?, status } }
+ *                         (shiftIds leer/fehlend = alle Schichten des Jobs)
  * @returns {Set<string>} IDs der Bewerbungen mit Zeitkonflikt
  */
 function computeScheduleConflicts(applies, accepted) {
@@ -31,11 +40,12 @@ function computeScheduleConflicts(applies, accepted) {
   const conflicts = new Set();
   for (const apply of Array.isArray(applies) ? applies : []) {
     const others = byUser.get(apply?.userId) ?? [];
-    if (others.some((o) => o.id !== apply.id && o.jobId !== apply.jobId && timesOverlap(apply.job, o.job))) {
+    const mine = bookedIntervals(apply?.job, apply?.shiftIds);
+    if (others.some((o) => o.id !== apply.id && o.jobId !== apply.jobId && intervalsOverlap(mine, bookedIntervals(o.job, o.shiftIds)))) {
       conflicts.add(apply.id);
     }
   }
   return conflicts;
 }
 
-module.exports = { timesOverlap, computeScheduleConflicts };
+module.exports = { timesOverlap, intervalsOverlap, computeScheduleConflicts };

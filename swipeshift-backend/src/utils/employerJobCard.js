@@ -24,7 +24,7 @@ function pickInlineApplies(applies, cap = MAX_INLINE_APPLICANTS) {
 }
 
 // Zeitkonflikt je Inline-Bewerbung: Set der apply-ids, deren Worker schon einen ANDEREN angenommenen Job
-// zur selben Zeit hat. `jobs` = Jobs des Employers (id, startTime, endTime), `inlineByJob` = Map(jobId → applies),
+// zur selben Zeit hat (gebuchte Schichten, utils/shiftBooking.js). `jobs` = Jobs des Employers (id, startTime, endTime, shifts), `inlineByJob` = Map(jobId → applies),
 // `accepted` = gebuendelt geladene angenommene Bewerbungen der Inline-Worker ueber alle Jobs.
 function inlineScheduleConflicts(jobs, inlineByJob, accepted) {
   const jobById = new Map((Array.isArray(jobs) ? jobs : []).map((j) => [j.id, j]));
@@ -33,7 +33,7 @@ function inlineScheduleConflicts(jobs, inlineByJob, accepted) {
     const job = jobById.get(jobId);
     if (!job) continue;
     for (const a of applies) {
-      toCheck.push({ id: a.id, userId: a.userId, jobId, job: { startTime: job.startTime, endTime: job.endTime } });
+      toCheck.push({ id: a.id, userId: a.userId, jobId, shiftIds: a.shiftIds, job: { startTime: job.startTime, endTime: job.endTime, shifts: job.shifts } });
     }
   }
   return computeScheduleConflicts(toCheck, accepted);

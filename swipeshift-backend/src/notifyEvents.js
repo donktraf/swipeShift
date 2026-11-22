@@ -106,12 +106,13 @@ const paymentReceived = safe("paymentReceived", async (applyIds) => {
 
 // Employer: Job vorbei/abgeschlossen, unbezahlte Worker. Einmal pro Job (Claim ueber Job.paymentReminderSentAt;
 // Raw-SQL, damit @updatedAt unberuehrt bleibt — PATCH /jobs/:id/status nutzt es als Optimistic Lock).
-const paymentOpen = safe("paymentOpen", async (jobId) => {
+// unpaidCount (optional): Anzahl der Worker, deren gebuchte Schichten vorbei sind (Scheduler); sonst alle unbezahlten
+const paymentOpen = safe("paymentOpen", async (jobId, { unpaidCount: given } = {}) => {
   const claimed = await prisma.$executeRaw`UPDATE "Job" SET "paymentReminderSentAt" = ${new Date()} WHERE "id" = ${jobId} AND "paymentReminderSentAt" IS NULL`;
   if (claimed !== 1) return;
   const job = await prisma.job.findUnique({ where: { id: jobId }, select: { id: true, title: true, employerId: true, status: true } });
   if (!job?.employerId || job.status === "cancelled" || job.status === "draft") return;
-  const unpaidCount = await prisma.apply.count({ where: { jobId, status: "accepted", isPaid: false } });
+  const unpaidCount = given ?? await prisma.apply.count({ where: { jobId, status: "accepted", isPaid: false } });
   if (unpaidCount === 0) return;
   await notify(job.employerId, copy.paymentOpen({ jobTitle: job.title, unpaidCount, jobId }));
 });
@@ -143,12 +144,13 @@ const noShowRecorded = safe("noShowRecorded", async (applyId) => {
 
 // Employer: Anwesenheit fehlt ~24 h nach Schichtende. Einmal pro Job (Claim ueber Job.attendanceReminderSentAt;
 // Raw-SQL, damit @updatedAt unberuehrt bleibt — PATCH /jobs/:id/status nutzt es als Optimistic Lock).
-const attendanceReminder = safe("attendanceReminder", async (jobId) => {
+// pendingCount (optional): Worker, deren gebuchte Schichten vorbei sind (Scheduler); sonst alle ohne Eintrag
+const attendanceReminder = safe("attendanceReminder", async (jobId, { pendingCount: given } = {}) => {
   const claimed = await prisma.$executeRaw`UPDATE "Job" SET "attendanceReminderSentAt" = ${new Date()} WHERE "id" = ${jobId} AND "attendanceReminderSentAt" IS NULL`;
   if (claimed !== 1) return;
   const job = await prisma.job.findUnique({ where: { id: jobId }, select: { id: true, title: true, employerId: true, status: true } });
   if (!job?.employerId || job.status === "cancelled" || job.status === "draft") return;
-  const pendingCount = await prisma.apply.count({ where: { jobId, status: "accepted", attendance: null } });
+  const pendingCount = given ?? await prisma.apply.count({ where: { jobId, status: "accepted", attendance: null } });
   if (pendingCount === 0) return;
   await notify(job.employerId, copy.attendanceReminder({ jobTitle: job.title, pendingCount, jobId }));
 });

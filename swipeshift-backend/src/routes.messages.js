@@ -8,6 +8,7 @@ const {
   isTyping, isOnline, isReadByOther, participantFields,
 } = require("./utils/chatPresence");
 const { blockState, isBlockedBetween } = require("./utils/safety");
+const { withBookedTimes } = require("./utils/shiftBooking");
 
 // Nachricht → iOS ChatMessageDTO. `otherLastReadAt` bestimmt die Lesebestaetigung
 // fuer eigene Nachrichten (fremde Nachrichten haben kein Lese-Flag fuer uns).
@@ -91,7 +92,8 @@ function deriveStatus(job, convStatus) {
 
 // Conversation-Response-Shape für iOS
 function formatConversation(conv, currentUserId, extra = {}) {
-  const job      = conv.job;
+  // Zeiten/Status aus der Buchung dieser Conversation (gebuchte Schichten der Bewerbung), nicht aus dem ganzen Job
+  const job      = withBookedTimes(conv.job, conv.apply?.shiftIds);
   const isWorker = conv.workerId === currentUserId;
 
   // Worker sieht: company als Titel, logoEmoji des Jobs
@@ -164,12 +166,12 @@ router.get("/", requireAuth, handle("GET /messages", async (req, res) => {
       job: {
         select: {
           id: true, title: true, company: true, logoEmoji: true,
-          startTime: true, endTime: true, payAmount: true, payText: true,
+          startTime: true, endTime: true, shifts: true, payAmount: true, payText: true,
           location: true, shiftText: true,
         },
       },
       apply: {
-        select: { isPaid: true, savedApplicant: { select: { employerId: true } } },
+        select: { isPaid: true, shiftIds: true, savedApplicant: { select: { employerId: true } } },
       },
       messages: {
         orderBy: { createdAt: "asc" },
