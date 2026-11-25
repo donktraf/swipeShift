@@ -464,7 +464,7 @@ router.post("/:id/apply", requireAuth, requireVerifiedEmail, async (req, res) =>
         }
         apply = await tx.apply.create({
           data: autoAccept
-            ? { userId, jobId, shiftIds, status: "accepted", autoAccepted: true } // respondedAt bewusst nicht gesetzt
+            ? { userId, jobId, shiftIds, status: "accepted", autoAccepted: true, acceptedAt: new Date() } // respondedAt bewusst nicht gesetzt
             : { userId, jobId, shiftIds },
         });
       }

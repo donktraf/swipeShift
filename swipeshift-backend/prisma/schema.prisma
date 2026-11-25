@@ -44,6 +44,9 @@ model User {
   // Presence fuer Chat: zuletzt aktiv (gedrosselt aktualisiert in requireAuth)
   lastSeenAt DateTime?
 
+  // Glocke zuletzt geoeffnet (Benachrichtigungen sind dynamisch → Ungelesen = Zeitstempel > notificationsSeenAt)
+  notificationsSeenAt DateTime?
+
   // 2FA per E-Mail-Code (beim Login wird zusaetzlich ein Code an die E-Mail geschickt)
   twoFactorEnabled Boolean @default(false)
   // "email" | "totp" (null + twoFactorEnabled = Altbestand = email)
@@ -372,6 +375,10 @@ model Apply {
   createdAt DateTime @default(now())
   // Erste Antwort des Employers (accept/decline) → Response Rate + Response Time im Company-Profil
   respondedAt DateTime?
+  // Zeitpunkt JEDES Uebergangs zu accepted (auch Re-Accept nach Decline, Instant Match) → Benachrichtigungen/Badge
+  acceptedAt DateTime?
+  // Zeitpunkt der Zahlung (isPaid = true) → Benachrichtigung "Payment received"
+  paidAt DateTime?
   // Schicht-Erinnerung (Push/Mail, ~24h vorher) bereits verschickt → genau einmal (bedingtes updateMany als Claim)
   reminderSentAt DateTime?
 

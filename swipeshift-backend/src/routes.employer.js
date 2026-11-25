@@ -276,7 +276,7 @@ router.post("/applicants/:applyId/accept", requireAuth, requireVerifiedEmail, as
         await tx.apply.update({
           where: { id: applyId },
           // respondedAt nur bei der ERSTEN Antwort setzen (Response Time = Zeit bis zur ersten Reaktion)
-          data:  { status: "accepted", autoAccepted: false, ...(apply.respondedAt ? {} : { respondedAt: new Date() }) },
+          data:  { status: "accepted", autoAccepted: false, acceptedAt: new Date(), ...(apply.respondedAt ? {} : { respondedAt: new Date() }) },
         });
         return null;
       }, { isolationLevel: "Serializable" }).catch((err) => {
@@ -292,7 +292,7 @@ router.post("/applicants/:applyId/accept", requireAuth, requireVerifiedEmail, as
       // Bereits angenommen (z.B. Instant Match): Annahme bestaetigen → nicht mehr "auto"
       await prisma.apply.update({
         where: { id: applyId },
-        data:  { status: "accepted", autoAccepted: false, ...(apply.respondedAt ? {} : { respondedAt: new Date() }) },
+        data:  { status: "accepted", autoAccepted: false, ...(apply.acceptedAt ? {} : { acceptedAt: apply.respondedAt ?? apply.createdAt }), ...(apply.respondedAt ? {} : { respondedAt: new Date() }) },
       });
     }
     if (apply.status !== "accepted") events.applicationDecided(applyId, "accepted"); // fire-and-forget
@@ -734,7 +734,7 @@ router.post("/jobs/:jobId/workers/:applyId/pay", requireAuth, requireVerifiedEma
     if (rel.isNoShowUnderReview(apply)) return res.status(409).json({ error: "The worker disputed the no-show. Payment is on hold until our team has reviewed it.", code: "NO_SHOW_UNDER_REVIEW" });
     if (rel.isFinalNoShow(apply))       return res.status(409).json({ error: "This worker was recorded as a no-show and is not billed.", code: "NO_SHOW" });
 
-    await prisma.apply.update({ where: { id: applyId }, data: { isPaid: true } });
+    await prisma.apply.update({ where: { id: applyId }, data: { isPaid: true, ...(apply.paidAt ? {} : { paidAt: new Date() }) } });
     if (!apply.isPaid) events.paymentReceived([applyId]); // fire-and-forget
     return res.json({ ok: true, applyId });
   } catch (err) {
@@ -768,7 +768,7 @@ router.post("/jobs/:jobId/pay-all", requireAuth, requireVerifiedEmail, async (re
     const unpaid = candidates.filter(rel.isPayable);
     const { count } = await prisma.apply.updateMany({
       where: { jobId, status: "accepted", id: { in: unpaid.map((a) => a.id) } },
-      data:  { isPaid: true },
+      data:  { isPaid: true, paidAt: new Date() },
     });
     events.paymentReceived(unpaid.map((a) => a.id)); // fire-and-forget
 

@@ -192,6 +192,7 @@ router.post("/register", registerLimiter, async (req, res) => {
     data: {
       email: data.email.toLowerCase(),
       emailCanonical: canonicalEmail(data.email),
+      notificationsSeenAt: new Date(), // neue Konten starten ohne Ungelesen-Badge
       passwordHash,
       role: data.role,
       firstName: data.firstName,
@@ -532,6 +533,7 @@ router.post("/google", async (req, res) => {
         data: {
           email,
           emailCanonical: canonicalEmail(email),
+          notificationsSeenAt: new Date(),
           passwordHash: SOCIAL_LOGIN_PASSWORD_PLACEHOLDER, // ✅ wird nie genutzt
           onboarding: "pendingRole",
           firstName,
@@ -624,6 +626,7 @@ router.post("/apple", async (req, res) => {
             email: decision.email,
             emailCanonical: canonicalEmail(decision.email),
             appleSub,
+            notificationsSeenAt: new Date(),
             passwordHash: "SOCIAL_LOGIN",
             role: null,
             onboarding: "pendingRole",

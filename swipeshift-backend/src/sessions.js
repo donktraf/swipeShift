@@ -69,6 +69,8 @@ function authUserPayload(user, overrides = {}) {
     lastName: user.lastName,
     isEmailVerified: !!user.emailVerifiedAt,
     hasSocialLogin: user.passwordHash === "SOCIAL_LOGIN",
+    // Admin-Eintrag in den Einstellungen sofort nach Login zeigen (nicht erst nach GET /auth/me)
+    isAdmin: user.isAdmin === true,
     ...overrides,
   };
 }
