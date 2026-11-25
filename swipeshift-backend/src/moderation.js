@@ -126,6 +126,8 @@ async function applyReportAction({ report, target: targetHint, adminId, value, n
         where: { reportedUserId: target.id, status: "open" },
         select: { id: true, reporterId: true },
       });
+      const handleCheck = m.canHandleReport(adminId, report, open);
+      if (!handleCheck.ok) throw new ModerationError(handleCheck.status, handleCheck.error);
       if (!open.some((r) => r.id === report.id)) throw new ModerationError(409, "This report was already handled.", "ALREADY_RESOLVED");
       // Claim: nur noch offene Reports schliessen (zwei Admins gleichzeitig → der zweite bekommt weniger/0)
       const claimed = await tx.userReport.updateMany({

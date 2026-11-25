@@ -41,11 +41,36 @@ test("validateAction", () => {
   assert.equal(m.validateAction(null).ok, false);
 });
 
-test("canModerate: not self, not admin, must exist", () => {
+test("canModerate: not self, other admins allowed, must exist", () => {
   assert.equal(m.canModerate("a", null).status, 404);
-  assert.equal(m.canModerate("a", { id: "a" }).ok, false);
-  assert.equal(m.canModerate("a", { id: "b", isAdmin: true }).status, 403);
+  assert.equal(m.canModerate("a", { id: "a" }).status, 400);
+  assert.equal(m.canModerate("a", { id: "a", isAdmin: true }).status, 400);
+  assert.equal(m.canModerate("a", { id: "b", isAdmin: true }).ok, true);
   assert.equal(m.canModerate("a", { id: "b", isAdmin: false }).ok, true);
+});
+
+test("report visibility / handling for admins", () => {
+  const r = { reporterId: "w", reportedUserId: "a" };
+  assert.equal(m.isReportHiddenFrom("a", r), true);
+  assert.equal(m.isReportHiddenFrom("b", r), false);
+  assert.equal(m.isReportHiddenFrom("b", null), false);
+  assert.equal(m.canHandleReport("a", r).status, 404);
+  assert.equal(m.canHandleReport("b", r).ok, true);
+  assert.equal(m.canHandleReport("w", r).status, 403);
+  assert.match(m.canHandleReport("w", r).error, /you filed/);
+  assert.equal(m.canHandleReport("b", null).status, 404);
+  // andere offene Reports gegen dasselbe Ziel, einer davon vom Admin selbst -> blockiert
+  assert.equal(m.canHandleReport("b", r, [r, { reporterId: "b" }]).status, 403);
+  assert.equal(m.canHandleReport("b", r, [r, { reporterId: "x" }]).ok, true);
+  assert.equal(m.canHandleReport("b", r, null).ok, true);
+});
+
+test("disputeConflict: own attendance or own job", () => {
+  assert.equal(m.disputeConflict("a", { userId: "a", employerId: "e" }).conflict, true);
+  assert.equal(m.disputeConflict("a", { userId: "w", employerId: "a" }).conflict, true);
+  assert.equal(m.disputeConflict("a", { userId: "w", employerId: "e" }).conflict, false);
+  assert.equal(m.disputeConflict("a", { userId: "w", employerId: null }).conflict, false);
+  assert.equal(m.disputeConflict("a", {}).conflict, false);
 });
 
 test("userUpdateFor", () => {
@@ -144,4 +169,34 @@ test("applicant visibility helpers: no NOT over nullable comparisons (SQL NULL l
   const w = m.withVisibleApplicants({ jobId: "j" }, now);
   assert.deepEqual(w.AND[0], { jobId: "j" });
   assert.deepEqual(w.AND[1], f);
+});
+
+test("reportsVisibleWhere / disputeVisibleWhere", () => {
+  assert.deepEqual(m.reportsVisibleWhere("a", "closed", ["t"]), { status: "closed", reportedUserId: { not: "a" } });
+  assert.deepEqual(m.reportsVisibleWhere("a", "open"), { status: "open", reportedUserId: { not: "a" } });
+  assert.deepEqual(m.reportsVisibleWhere("a", "open", ["t1", "t2"]), { status: "open", reportedUserId: { not: "a", notIn: ["t1", "t2"] } });
+  const d = m.disputeVisibleWhere("a");
+  assert.deepEqual(d.userId, { not: "a" });
+  assert.deepEqual(d.job.OR, [{ employerId: null }, { employerId: { not: "a" } }]);
+  assert.equal(d.status, "accepted");
+  assert.equal(d.disputeResolvedAt, null);
+});
+
+test("disputeConflict with undefined ids never conflicts", () => {
+  assert.equal(m.disputeConflict("a", { userId: undefined, employerId: undefined }).conflict, false);
+  assert.equal(m.disputeConflict(undefined, { userId: undefined, employerId: undefined }).conflict, false);
+});
+
+test("planUserUpdate: suspend/ban against admins forbidden, warn/dismiss allowed", () => {
+  const admin = { isAdmin: true };
+  for (const v of [{ action: "suspend", durationDays: 7 }, { action: "ban" }]) {
+    const p = m.planUserUpdate(v, now, admin);
+    assert.equal(p.ok, false);
+    assert.equal(p.status, 403);
+    assert.equal(p.code, "ADMIN_TARGET");
+    assert.match(p.error, /make-admin/);
+  }
+  assert.equal(m.planUserUpdate({ action: "warn" }, now, admin).ok, true);
+  assert.equal(m.planUserUpdate({ action: "dismiss" }, now, admin).ok, true);
+  assert.equal(m.planUserUpdate({ action: "ban" }, now, { isAdmin: false }).ok, true);
 });

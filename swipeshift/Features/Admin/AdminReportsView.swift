@@ -278,9 +278,11 @@ struct AdminReportDetailView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                     .onChange(of: note) { _, v in if v.count > 500 { note = String(v.prefix(500)) } }
                 actionButton("Warn", icon: "exclamationmark.triangle.fill", color: .orange, .warn)
-                actionButton("Suspend 7 days", icon: "pause.circle.fill", color: .orange, .suspend7)
-                actionButton("Suspend 30 days", icon: "pause.circle.fill", color: .red, .suspend30)
-                actionButton("Ban permanently", icon: "nosign", color: .red, .ban)
+                if r.reported.isAdmin != true {
+                    actionButton("Suspend 7 days", icon: "pause.circle.fill", color: .orange, .suspend7)
+                    actionButton("Suspend 30 days", icon: "pause.circle.fill", color: .red, .suspend30)
+                    actionButton("Ban permanently", icon: "nosign", color: .red, .ban)
+                }
                 actionButton("Dismiss report", icon: "checkmark.circle.fill", color: .green, .dismiss)
             }
         } else if let label = r.resolutionLabel {

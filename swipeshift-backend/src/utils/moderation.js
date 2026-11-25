@@ -73,12 +73,53 @@ function validateAction(body) {
   return { ok: true, value: { action, durationDays: days, note: trimmed || null } };
 }
 
-// Darf `admin` auf `target` reagieren? (nicht auf sich selbst, nicht auf andere Admins)
+// Darf `admin` auf `target` reagieren? Nicht auf sich selbst; andere Admins duerfen moderiert werden
+// (Interessenkonflikt wird ueber die Sichtbarkeits-/Bearbeitungsregeln unten geloest).
 function canModerate(adminId, target) {
   if (!target) return { ok: false, status: 404, error: "User not found" };
   if (target.id === adminId) return { ok: false, status: 400, error: "You can't take action on yourself" };
-  if (target.isAdmin) return { ok: false, status: 403, error: "You can't take action on another admin" };
   return { ok: true };
+}
+
+// Meldungen GEGEN den Admin sieht nur ein anderer Admin (Liste, Zaehler, Detail).
+function isReportHiddenFrom(adminId, report) {
+  return !!report && report.reportedUserId === adminId;
+}
+
+// Darf `admin` diese Meldung bearbeiten? Nicht gegen sich selbst (-> wie "nicht gefunden") und nicht, wenn er selbst
+// Melder ist. Eine Aktion schliesst ALLE offenen Reports gegen das Ziel mit; deshalb wird mit `openReports`
+// ([{ reporterId }], alle offenen Reports gegen dasselbe Ziel) auch jede andere eigene Meldung geprueft.
+function canHandleReport(adminId, report, openReports = []) {
+  if (!report) return { ok: false, status: 404, error: "Report not found" };
+  if (isReportHiddenFrom(adminId, report)) return { ok: false, status: 404, error: "Report not found" };
+  if (report.reporterId === adminId || (openReports || []).some((r) => r.reporterId === adminId)) {
+    return { ok: false, status: 403, error: "You can't handle a report you filed" };
+  }
+  return { ok: true };
+}
+
+// Prisma-where fuer die Report-Liste: nie Reports gegen den Admin; in der Open-Liste zusaetzlich keine Ziel-Gruppen,
+// in denen der Admin selbst einen offenen Report gestellt hat (ownTargetIds) -> ein anderer Admin entscheidet.
+function reportsVisibleWhere(adminId, status, ownTargetIds = []) {
+  const reportedUserId = { not: adminId };
+  if (status === "open" && ownTargetIds.length) reportedUserId.notIn = [...ownTargetIds];
+  return { status, reportedUserId };
+}
+
+// Prisma-where fuer offene Anwesenheits-Einsprueche: nicht der eigene (Worker) und nicht auf eigenem Job (Employer)
+function disputeVisibleWhere(adminId) {
+  return {
+    status: "accepted", disputedAt: { not: null }, disputeResolvedAt: null,
+    userId: { not: adminId },
+    job: { OR: [{ employerId: null }, { employerId: { not: adminId } }] },
+  };
+}
+
+// Anwesenheits-Einspruch: Admin darf nicht ueber eigene Schicht (Worker) oder eigenen Job (Employer) entscheiden.
+function disputeConflict(adminId, { userId, employerId } = {}) {
+  if (userId && userId === adminId) return { conflict: true, error: "You can't decide on your own attendance dispute" };
+  if (employerId && employerId === adminId) return { conflict: true, error: "You can't decide on a dispute for your own job" };
+  return { conflict: false };
 }
 
 // Plan fuer eine Aktion: { ok:true, update|null } oder { ok:false, status, code, error }.
@@ -86,6 +127,9 @@ function canModerate(adminId, target) {
 // suspend hebt nie einen Bann auf und verkuerzt nie eine laengere Admin-Sperre (die spaetere Frist gilt);
 // eine Auto-Sperre (kein festes Ende) wird durch die explizite Frist ersetzt. ban behaelt ein bestehendes bannedAt.
 function planUserUpdate(value, now = new Date(), target = null) {
+  if (target?.isAdmin && (value.action === "suspend" || value.action === "ban")) {
+    return { ok: false, status: 403, code: "ADMIN_TARGET", error: "Admins can't be suspended or banned. Remove admin rights first (npm run make-admin -- <email> --remove)." };
+  }
   const state = restrictionState(target, now);
   switch (value.action) {
     case "suspend": {
@@ -216,6 +260,6 @@ function targetNotice(kind, { reason, until = null } = {}) {
 module.exports = {
   ACTIONS, SUSPEND_DAYS, AUTO_SUSPEND_THRESHOLD, MAX_NOTE_LENGTH, FAR_FUTURE, PENDING_REVIEW,
   restrictionState, isRestricted, restrictedWhere, restrictionResponse,
-  validateAction, canModerate, planUserUpdate, userUpdateFor, hiddenPendingClause, visibleApplyFilter, withVisibleApplicants, resolutionFor,
+  validateAction, canModerate, isReportHiddenFrom, canHandleReport, reportsVisibleWhere, disputeVisibleWhere, disputeConflict, planUserUpdate, userUpdateFor, hiddenPendingClause, visibleApplyFilter, withVisibleApplicants, resolutionFor,
   distinctOpenReporters, shouldAutoSuspend, reporterFeedback, reasonLabel, targetNotice,
 };

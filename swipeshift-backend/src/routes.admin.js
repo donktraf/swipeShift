@@ -5,6 +5,8 @@
 //   POST /admin/users/:id/lift               Sperre/Bann aufheben
 //   GET  /admin/reliability                  Auffaellige Worker (>= 2 No-Shows / >= 3 kurzfristige Stornos in 90 Tagen) + offene Anwesenheits-Einsprueche
 //   POST /admin/attendance/:applyId/resolve  { uphold: true } | { attendance: attended|late|no_show }
+// Interessenkonflikte: Meldungen gegen den Admin sind fuer ihn unsichtbar (404), eigene Meldungen darf er nicht bearbeiten,
+// eigene No-Show-Einsprueche / Einsprueche auf eigenen Jobs entscheidet ein anderer Admin (siehe utils/moderation.js).
 const express = require("express");
 const rateLimit = require("express-rate-limit");
 const { prisma } = require("./prisma.js");
@@ -37,7 +39,7 @@ function handle(label, fn) {
 }
 
 const USER_SELECT = {
-  id: true, role: true, firstName: true, lastName: true,
+  id: true, role: true, isAdmin: true, firstName: true, lastName: true,
   bannedAt: true, suspendedUntil: true, suspensionReason: true,
   employer: { select: { companyName: true, companyLogoUrl: true } },
   worker: { select: { profilePhotoUrl: true } },
@@ -65,15 +67,19 @@ function reportCard(r, briefs, openCount, openReporterCount) {
     id: r.id, status: r.status, reason: r.reason, details: r.details, createdAt: r.createdAt,
     resolvedAt: r.resolvedAt, resolution: r.resolution, conversationId: r.conversationId,
     reporter: brief(briefs.get(r.reporterId), r.reporterId),
-    reported: { ...brief(briefs.get(r.reportedUserId), r.reportedUserId), restriction: restrictionOf(briefs.get(r.reportedUserId)) },
+    reported: { ...brief(briefs.get(r.reportedUserId), r.reportedUserId), isAdmin: !!briefs.get(r.reportedUserId)?.isAdmin, restriction: restrictionOf(briefs.get(r.reportedUserId)) },
     openReportCount: openCount, openReporterCount,
   };
 }
 
 router.get("/reports", handle("GET /admin/reports", async (req, res) => {
   const status = req.query.status === "closed" ? "closed" : "open";
+  // Meldungen gegen den Admin selbst sowie Ziel-Gruppen mit eigener offener Meldung bearbeitet nur ein anderer Admin
+  const own = status === "open"
+    ? await prisma.userReport.findMany({ where: { status: "open", reporterId: req.auth.sub }, select: { reportedUserId: true } })
+    : [];
   const rows = await prisma.userReport.findMany({
-    where: { status },
+    where: m.reportsVisibleWhere(req.auth.sub, status, [...new Set(own.map((o) => o.reportedUserId))]),
     orderBy: status === "open" ? { createdAt: "desc" } : { resolvedAt: "desc" },
     take: 300,
   });
@@ -106,7 +112,7 @@ router.get("/reports", handle("GET /admin/reports", async (req, res) => {
 
 router.get("/reports/:id", handle("GET /admin/reports/:id", async (req, res) => {
   const report = await prisma.userReport.findUnique({ where: { id: String(req.params.id) } });
-  if (!report) return res.status(404).json({ error: "Report not found" });
+  if (!report || m.isReportHiddenFrom(req.auth.sub, report)) return res.status(404).json({ error: "Report not found" });
 
   const [openReports, history, convo] = await Promise.all([
     prisma.userReport.findMany({ where: { reportedUserId: report.reportedUserId, status: "open" }, orderBy: { createdAt: "desc" } }),
@@ -157,7 +163,8 @@ router.post("/reports/:id/actions", handle("POST /admin/reports/:id/actions", as
   if (!check.ok) return res.status(400).json({ error: check.error });
 
   const report = await prisma.userReport.findUnique({ where: { id: String(req.params.id) } });
-  if (!report) return res.status(404).json({ error: "Report not found" });
+  const handle_ = m.canHandleReport(req.auth.sub, report);
+  if (!handle_.ok) return res.status(handle_.status).json({ error: handle_.error });
   if (report.status !== "open") return res.status(409).json({ error: "This report was already handled.", code: "ALREADY_RESOLVED" });
 
   const target = await prisma.user.findUnique({
@@ -198,8 +205,10 @@ router.get("/reliability", handle("GET /admin/reliability", async (req, res) => 
     orderBy: [{ createdAt: "asc" }, { id: "asc" }], // deterministisch, falls das Limit greift
     take: 5000,
   });
+  const me = req.auth.sub;
   const byUser = new Map();
   for (const row of rows) {
+    if (row.userId === me) continue; // eigene Zuverlaessigkeit bewertet ein anderer Admin
     if (!byUser.has(row.userId)) byUser.set(row.userId, []);
     byUser.get(row.userId).push(row);
   }
@@ -211,7 +220,7 @@ router.get("/reliability", handle("GET /admin/reliability", async (req, res) => 
   flagged.sort((a, b) => b.summary.noShows - a.summary.noShows || b.summary.lateCancellations - a.summary.lateCancellations);
 
   const disputes = await prisma.apply.findMany({
-    where: { status: "accepted", disputedAt: { not: null }, disputeResolvedAt: null },
+    where: m.disputeVisibleWhere(me), // eigener Einspruch bzw. Einspruch auf eigenem Job: nur fuer andere Admins
     orderBy: [{ disputedAt: "asc" }, { id: "asc" }],
     take: 100,
     select: {
@@ -244,8 +253,10 @@ router.post("/attendance/:applyId/resolve", handle("POST /admin/attendance/:appl
   if (!parsed.ok) return res.status(400).json({ error: parsed.error });
 
   const applyId = String(req.params.applyId);
-  const apply = await prisma.apply.findUnique({ where: { id: applyId }, select: { id: true, status: true, disputedAt: true, disputeResolvedAt: true } });
+  const apply = await prisma.apply.findUnique({ where: { id: applyId }, select: { id: true, userId: true, status: true, disputedAt: true, disputeResolvedAt: true, job: { select: { employerId: true } } } });
   if (!apply || apply.status !== "accepted") return res.status(404).json({ error: "Application not found" });
+  const conflict = m.disputeConflict(req.auth.sub, { userId: apply.userId, employerId: apply.job?.employerId });
+  if (conflict.conflict) return res.status(403).json({ error: conflict.error, code: "CONFLICT_OF_INTEREST" });
   if (!apply.disputedAt) return res.status(409).json({ error: "This entry has no dispute.", code: "NO_DISPUTE" });
   if (apply.disputeResolvedAt) return res.status(409).json({ error: "This dispute was already handled.", code: "ALREADY_RESOLVED" });
 

@@ -39,6 +39,7 @@ struct AdminReportedUser: Decodable, Equatable {
     let role: String?
     let photoUrl: String?
     let restriction: AdminRestriction
+    let isAdmin: Bool?         // Admin-Konten koennen nicht gesperrt/gebannt werden (Backend: ADMIN_TARGET)
     var initial: String { name.first.map { String($0).uppercased() } ?? "?" }
     var roleLabel: String { role == "employer" ? "Employer" : (role == "worker" ? "Worker" : "User") }
 }
