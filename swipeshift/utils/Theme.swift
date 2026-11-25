@@ -8,8 +8,9 @@
 import SwiftUI
 
 enum SS {
-    // Primary from Hex: #2563EB — Electric Blue
-    static let primary = Color(red: 37/255, green: 99/255, blue: 235/255)
+    // Primary: zeigt auf die zentrale Markenfarbe (Brand, #2563EB hell). SS wird vom Design-System
+    // (UI/Design, DS.*) abgeloest. Bewusst die Hell-Variante: SS-Screens sind nicht fuer Dark Mode gebaut.
+    static let primary = Color(hex: Brand.primaryLight)
     static let bgTop    = Color(red: 29/255, green: 78/255, blue: 216/255).opacity(0.97)
     static let bgBottom = Color(red: 30/255, green: 58/255, blue: 138/255).opacity(0.97)
 

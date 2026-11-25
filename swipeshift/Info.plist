@@ -27,5 +27,13 @@
 	<string>426389454990-f15heflrjh0bv6iuvs65jbh44chau2ca.apps.googleusercontent.com</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>SwipeShift verwendet deinen Standort, um Jobs in deiner Nähe anzuzeigen.</string>
+	<key>UIAppFonts</key>
+	<array>
+		<string>PlusJakartaSans-Regular.ttf</string>
+		<string>PlusJakartaSans-Medium.ttf</string>
+		<string>PlusJakartaSans-SemiBold.ttf</string>
+		<string>PlusJakartaSans-Bold.ttf</string>
+		<string>PlusJakartaSans-ExtraBold.ttf</string>
+	</array>
 </dict>
 </plist>
