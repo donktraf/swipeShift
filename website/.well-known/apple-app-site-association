@@ -1,0 +1,12 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["988DGAA7W2.com.swipeShift"],
+        "components": [
+          { "/": "/jobs/*" }
+        ]
+      }
+    ]
+  }
+}

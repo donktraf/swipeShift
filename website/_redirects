@@ -1,0 +1,2 @@
+# Job-Fallback: jede /jobs/<id> liefert die allgemeine Seite (ID wird per JS aus dem Pfad gelesen)
+/jobs/* /jobs/index.html 200
