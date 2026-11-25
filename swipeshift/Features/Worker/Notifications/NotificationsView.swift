@@ -100,11 +100,13 @@ struct NotificationsView: View {
 
     private func loadNotifications() async {
         isLoading = true
+        defer { isLoading = false }
         do {
             let dtos = try await APIClient.shared.fetchNotifications()
             notifications = dtos.map { AppNotification(dto: $0) }
+            // Erst nach erfolgreichem Laden als gelesen markieren (bis zum juengsten gezeigten Eintrag)
+            await NotificationBadgeStore.shared.markSeen(upTo: dtos.map(\.timestamp).max())
         } catch { }
-        isLoading = false
     }
 
     // MARK: - Filter Bar

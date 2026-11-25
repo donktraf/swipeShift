@@ -38,6 +38,8 @@ struct EmployerDashboardView: View {
     @State private var showFinancial      = false
     @State private var showCalendar       = false
     @State private var showNotifications  = false
+    @ObservedObject private var badge = NotificationBadgeStore.shared
+    @Environment(\.scenePhase) private var scenePhase
     @State private var stats: EmployerStatsDTO? = nil
     @State private var jobsNeedingWorkersCount: Int = 0
     @State private var pendingReviewsCount: Int = 0
@@ -114,6 +116,11 @@ struct EmployerDashboardView: View {
             }
         }
         .task { await loadStats() }
+        // Glocken-Badge: beim Erscheinen und beim Zurueckkommen in den Vordergrund
+        .task { await badge.refresh() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await badge.refresh() } }
+        }
         .navigationDestination(isPresented: $showLeaveReviews) {
             LeaveReviewsView()
         }
@@ -179,6 +186,7 @@ struct EmployerDashboardView: View {
                         .padding(10)
                         .background(Color.white.opacity(0.15))
                         .clipShape(Circle())
+                        .notificationBadge(badge.unreadCount)
                 }
             }
             .padding(.horizontal, 16)

@@ -64,11 +64,19 @@ final class UserStore: ObservableObject {
         if let sessionRevokedObserver { NotificationCenter.default.removeObserver(sessionRevokedObserver) }
     }
 
+    /// Lokaler Zustand, der zum Konto gehoert (Glocken-Badge, weggetippte Confirmed-Karten) — bei jedem Abmelden leeren
+    @MainActor
+    private func clearPerAccountState() {
+        NotificationBadgeStore.shared.reset()
+        UserDefaults.standard.removeObject(forKey: ConfirmedShiftLogic.dismissedKey)
+    }
+
     @MainActor
     private func handleSessionRevoked(message: String? = nil) {
         guard currentUser != nil || APIClient.shared.token != nil else { return }
         APIClient.shared.token = nil
         currentUser = nil
+        clearPerAccountState()
         signedOutNotice = (message?.isEmpty == false) ? message : "You were signed out. Please sign in again."
     }
 
@@ -387,6 +395,7 @@ final class UserStore: ObservableObject {
             // Token evtl. abgelaufen → logout
             APIClient.shared.token = nil
             self.currentUser = nil
+            clearPerAccountState()
         }
     }
     
@@ -487,6 +496,7 @@ final class UserStore: ObservableObject {
         APIClient.shared.token = nil
         currentUser = nil
         DeviceInfo.clearCity()   // Ort gehoert zum Profil des ausgeloggten Users
+        clearPerAccountState()
         errorMessage = nil
         pendingTwoFactor = nil
     }

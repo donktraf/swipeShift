@@ -5,10 +5,21 @@
 //
 
 import SwiftUI
+import Combine
 
 struct WorkerHomeTabView: View {
     @EnvironmentObject var userStore: UserStore
     @EnvironmentObject var jobStore: JobStore
+    @EnvironmentObject var messageStore: MessageStore
+    @ObservedObject private var badge = NotificationBadgeStore.shared
+    @StateObject private var confirmedModel = ConfirmedShiftModel()
+    // Stabiler Minuten-Takt (nicht in body erzeugen, sonst startet der Countdown bei jedem Re-Render neu)
+    private let minuteTicker = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
+    // Chat-Navigation lebt hier (immer vorhanden), nicht in der Karte — sonst wuerde der Chat mit der Karte abgebaut
+    @StateObject private var applicationNavigation = ApplicationNavigation()
+    @AppStorage(ConfirmedShiftLogic.dismissedKey) private var dismissedConfirmedRaw: String = ""
+    @State private var now = Date()
+    @Environment(\.scenePhase) private var scenePhase
 
     // Callback wenn User eine Kategorie auswählt
     let onCategorySelected: (JobCategory) -> Void
@@ -53,11 +64,28 @@ struct WorkerHomeTabView: View {
                             .padding(10)
                             .background(Color.gray.opacity(0.08))
                             .clipShape(Circle())
+                            .notificationBadge(badge.unreadCount)
                     }
                     .buttonStyle(.plain)
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
+
+                // MARK: - Confirmed-Karte (naechste angenommene Schicht)
+                let confirmed = confirmedModel.visible(dismissedRaw: dismissedConfirmedRaw, now: now)
+                if let next = confirmed.first {
+                    ConfirmedShiftCard(
+                        item: next,
+                        more: confirmed.count - 1,
+                        now: now,
+                        onOpenChat: {
+                            applicationNavigation.openChat(conversationId: next.conversationId, messageStore: messageStore)
+                        },
+                        onDismiss: {
+                            dismissedConfirmedRaw = ConfirmedShiftLogic.appendId(next.id, to: dismissedConfirmedRaw)
+                        }
+                    )
+                }
 
                 // MARK: - View All Jobs Button
                 NavigationLink {
@@ -184,5 +212,20 @@ struct WorkerHomeTabView: View {
             async let saved    = jobStore.loadSavedJobIds()
             _ = await (base, sections, saved)
         }
+        // Glocken-Badge: beim Erscheinen und beim Zurueckkommen in den Vordergrund
+        .task { await badge.refresh() }
+        .task { await confirmedModel.load() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                now = Date()
+                Task {
+                    await badge.refresh()
+                    await confirmedModel.load()
+                }
+            }
+        }
+        // Karte verschwindet nach Schichtende, ohne dass neu geladen werden muss
+        .onReceive(minuteTicker) { now = $0 }
+        .applicationNavigation(applicationNavigation)
     }
 }

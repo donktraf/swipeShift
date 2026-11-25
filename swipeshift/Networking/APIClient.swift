@@ -1052,6 +1052,28 @@ final class APIClient {
         return try decoder.decode([NotificationDTO].self, from: data)
     }
 
+    /// Ungelesen-Zaehler fuer die Glocke (Benachrichtigungen seit dem letzten Oeffnen)
+    func fetchUnreadNotificationCount() async throws -> Int {
+        let req = try makeRequest(path: "/notifications/unread-count", method: "GET")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+        struct R: Decodable { let unreadCount: Int }
+        return try JSONDecoder().decode(R.self, from: data).unreadCount
+    }
+
+    /// Glocke wurde geoeffnet → alles bis jetzt gilt als gelesen
+    func markNotificationsSeen(upTo: Date? = nil) async throws {
+        var req = try makeRequest(path: "/notifications/seen", method: "POST")
+        if let upTo {
+            // Server setzt seenAt = min(upTo, now), nie rueckwaerts
+            let iso = ISO8601DateFormatter()
+            iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            req.httpBody = try JSONEncoder().encode(["upTo": iso.string(from: upTo)])
+        }
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+    }
+
     func saveApplicant(applyId: String) async throws {
         let req = try makeRequest(path: "/employer/applicants/\(applyId)/save", method: "POST")
         let (data, resp) = try await URLSession.shared.data(for: req)
