@@ -189,7 +189,6 @@ import UIKit
 struct VerifyEmailView: View {
     @EnvironmentObject var userStore: UserStore
 
-    @State private var isResending = false
     @State private var isRefreshing = false
     @State private var localInfo: String? = nil
     @State private var localError: String? = nil
@@ -255,6 +254,20 @@ struct VerifyEmailView: View {
                                 .multilineTextAlignment(.center)
                         }
 
+                        if userStore.verificationMailFailed {
+                            Text("We couldn't send the verification email. Tap Resend to try again.")
+                                .font(.footnote)
+                                .foregroundColor(.orange)
+                                .multilineTextAlignment(.center)
+                        }
+
+                        if let err = userStore.resendError {
+                            Text(err)
+                                .font(.footnote)
+                                .foregroundColor(.red)
+                                .multilineTextAlignment(.center)
+                        }
+
                         if let err = userStore.errorMessage {
                             Text(err)
                                 .font(.footnote)
@@ -270,16 +283,8 @@ struct VerifyEmailView: View {
                         .buttonStyle(SSPrimaryButtonStyle(isEnabled: !isRefreshing))
                         .disabled(isRefreshing)
 
-                        Button {
-                            Task { await resend() }
-                        } label: {
-                            Text(isResending ? "Sending..." : "Resend verification email")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(.white.opacity(0.95))
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.top, 2)
-                        .foregroundColor(.white)
+                        ResendVerificationButton()
+                            .padding(.top, 2)
                     }
                 }
 
@@ -300,17 +305,6 @@ struct VerifyEmailView: View {
                 .foregroundColor(.secondary)
 
             Spacer()
-        }
-    }
-
-    private func resend() async {
-        localError = nil
-        localInfo = nil
-        isResending = true
-        await userStore.resendVerification()
-        isResending = false
-        if userStore.errorMessage == nil {
-            localInfo = "Verification email sent (if the address exists)."
         }
     }
 

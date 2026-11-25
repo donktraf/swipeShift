@@ -19,11 +19,8 @@ struct EmailVerifyBanner: View {
 
             Spacer()
 
-            Button("Resend") {
-                Task { await userStore.resendVerification() }
-            }
-            .font(.footnote)
-            .fontWeight(.semibold)
+            ResendVerificationButton(title: "Resend")
+                .font(.footnote)
         }
         .padding(12)
         .background(Color.yellow.opacity(0.18))

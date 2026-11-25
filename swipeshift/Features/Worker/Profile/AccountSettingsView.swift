@@ -190,7 +190,7 @@ struct AccountSecurityView: View {
             await userStore.refreshMe()
             await loadBackupRemaining()
         }
-        .sheet(isPresented: $showChangeEmail)    { ChangeEmailSheet() }
+        .sheet(isPresented: $showChangeEmail)    { ChangeEmailSheet().environmentObject(userStore) }
         .sheet(isPresented: $showChangePhone)    { ChangePhoneSheet() }
         .sheet(isPresented: $showChangePassword) { ChangePasswordSheet() }
         .sheet(isPresented: $showSetPassword)    { SetPasswordSheet().environmentObject(userStore) }
@@ -1571,6 +1571,8 @@ struct AppPreferencesView: View {
 
 private struct ChangeEmailSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var userStore: UserStore
+    @State private var mailFailed  = false
     @State private var newEmail    = ""
     @State private var password    = ""
     @State private var isLoading   = false
@@ -1611,10 +1613,16 @@ private struct ChangeEmailSheet: View {
                     }
                 }
             }
-            .alert("Verification Email Sent", isPresented: $success) {
-                Button("OK") { dismiss() }
+            .alert(mailFailed ? "Email Changed" : "Verification Email Sent", isPresented: $success) {
+                Button("OK") {
+                    dismiss()
+                    // Erst jetzt neu laden: ContentView wechselt dann auf VerifyEmailView
+                    Task { await userStore.refreshMe() }
+                }
             } message: {
-                Text("Please check your new inbox and verify the address to complete the change.")
+                Text(mailFailed
+                     ? "Your email was changed, but we couldn't send the confirmation email. Tap Resend to try again."
+                     : "Please check your new inbox and verify the address to complete the change.")
             }
         }
     }
@@ -1623,7 +1631,9 @@ private struct ChangeEmailSheet: View {
         isLoading = true; errorMsg = nil
         Task {
             do {
-                try await APIClient.shared.changeEmail(newEmail: newEmail, password: password)
+                let sent = try await APIClient.shared.changeEmail(newEmail: newEmail, password: password)
+                userStore.verificationMailFailed = !sent
+                mailFailed = !sent
                 success = true
             } catch {
                 errorMsg = error.localizedDescription

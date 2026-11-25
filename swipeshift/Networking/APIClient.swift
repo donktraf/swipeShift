@@ -255,7 +255,7 @@ final class APIClient {
     }
 
     // POST /auth/register
-    func register(requestBody: RegisterRequestDTO) async throws -> UserDTO {
+    func register(requestBody: RegisterRequestDTO) async throws -> (user: UserDTO, verificationEmailSent: Bool) {
         var request = URLRequest(url: baseURL.appendingPathComponent("auth/register"))
         
         request.httpMethod = "POST"
@@ -275,7 +275,7 @@ final class APIClient {
         // Set decoded Token
         self.token = decoded.token
         
-        return decoded.user
+        return (decoded.user, decoded.verificationEmailSent ?? true)
     }
     
     struct ForgotPasswordResult: Decodable {
@@ -335,12 +335,16 @@ final class APIClient {
         try validate(response: resp, data: data)
     }
 
-    func changeEmail(newEmail: String, password: String) async throws {
+    /// Liefert verificationEmailSent (false = E-Mail geaendert, aber Bestaetigungsmail nicht versendet; alt: true).
+    @discardableResult
+    func changeEmail(newEmail: String, password: String) async throws -> Bool {
         var req = try makeRequest(path: "/auth/me/email", method: "PATCH")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try JSONEncoder().encode(["newEmail": newEmail, "password": password])
         let (data, resp) = try await URLSession.shared.data(for: req)
         try validate(response: resp, data: data)
+        struct Result: Decodable { let verificationEmailSent: Bool? }
+        return (try? JSONDecoder().decode(Result.self, from: data))?.verificationEmailSent ?? true
     }
 
     func deleteAccount() async throws {
@@ -1441,6 +1445,13 @@ func validate(response: URLResponse, data: Data) throws {
             let isRestriction = body?.code != "SESSION_REVOKED"
             NotificationCenter.default.post(name: .sessionRevoked, object: nil,
                                             userInfo: isRestriction ? ["message": body?.error ?? ""] : nil)
+        }
+
+        // Rate-Limit ohne Fehlertext (z.B. mailLimiter antwortet { ok: true }) → lesbarer Fehler inkl. Retry-After
+        if http.statusCode == 429, body?.error?.isEmpty != false {
+            let seconds = Int(http.value(forHTTPHeaderField: "Retry-After") ?? "")
+            throw APIError(status: 429, message: "Too many requests. Please try again later.", code: "RATE_LIMITED",
+                           retryAfterMinutes: seconds.map { ($0 + 59) / 60 })
         }
 
         // Lesbare Backend-Meldung ({ error }, optional mit code) durchreichen statt rohem JSON

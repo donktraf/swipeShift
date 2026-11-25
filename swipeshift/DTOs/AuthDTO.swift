@@ -92,6 +92,8 @@ struct AuthResponseDTO: Decodable {
     let token: String
     let user: UserDTO
     let isNewUser: Bool?
+    /// false, wenn die Verifizierungs-Mail nicht verschickt werden konnte (aeltere Backends: nil)
+    let verificationEmailSent: Bool?
 }
 
 // Login Request Body

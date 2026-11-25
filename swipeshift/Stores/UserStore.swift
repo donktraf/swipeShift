@@ -22,6 +22,7 @@ final class UserStore: ObservableObject {
         didSet {
             // Nutzerwechsel oder Logout: Stadt des vorherigen Profils nie weiterverwenden
             if currentUser == nil || currentUser?.id != oldValue?.id { DeviceInfo.clearCity() }
+            if currentUser?.isEmailVerified == true { verificationMailFailed = false }
             if let location = currentUser?.location { DeviceInfo.updateCity(fromLocation: location) }
         }
     }
@@ -31,6 +32,14 @@ final class UserStore: ObservableObject {
     
     // ✅ Neu: App soll Login anzeigen (z.B. nach Reset)
     @Published var showLogin: Bool = false
+
+    // Verifizierungs-Mail "Erneut senden"
+    @Published var resendCooldownEnd: Date? = nil
+    @Published var resendSentAt: Date? = nil
+    @Published var resendError: String? = nil
+    @Published var isResendingVerification = false
+    /// true, wenn Register/E-Mail-Wechsel die Bestaetigungsmail nicht versenden konnte
+    @Published var verificationMailFailed = false
     
     @Published var loginPrefillEmail: String = ""
     
@@ -69,6 +78,11 @@ final class UserStore: ObservableObject {
     private func clearPerAccountState() {
         NotificationBadgeStore.shared.reset()
         UserDefaults.standard.removeObject(forKey: ConfirmedShiftLogic.dismissedKey)
+        resendCooldownEnd = nil
+        resendSentAt = nil
+        resendError = nil
+        isResendingVerification = false
+        verificationMailFailed = false
     }
 
     @MainActor
@@ -249,7 +263,8 @@ final class UserStore: ObservableObject {
                 }
             }
             // Registrierung durchführen
-            let user = try await APIClient.shared.register(requestBody: finalRequest)
+            let (user, mailSent) = try await APIClient.shared.register(requestBody: finalRequest)
+            self.verificationMailFailed = !mailSent
             
             // App-State aktualisieren
             self.currentUser = user
@@ -365,14 +380,30 @@ final class UserStore: ObservableObject {
         }
     }
 
+    /// Gemeinsamer 60-s-Cooldown fuer "Erneut senden" (VerifyEmailView + Banner). Lebt im Store → ueberlebt Tab-/View-Wechsel.
+    static let resendCooldown: TimeInterval = 60
+
     @MainActor
     func resendVerification() async {
-        guard let email = currentUser?.email else { return }
-        errorMessage = nil
+        guard let email = currentUser?.email, !isResendingVerification else { return }
+        if let end = resendCooldownEnd, end > Date() { return }
+        resendError = nil
+        isResendingVerification = true
+        defer { isResendingVerification = false }
         do {
             try await APIClient.shared.resendVerification(email: email)
+            resendSentAt = Date()
+            resendCooldownEnd = Date().addingTimeInterval(Self.resendCooldown)
+            verificationMailFailed = false
         } catch {
-            self.errorMessage = error.localizedDescription
+            if let e = error as? APIError, e.status == 429 {
+                // Rate-Limit: Retry-After (validate() liefert ihn als retryAfterMinutes), sonst 5 Minuten
+                let seconds = e.retryAfterMinutes.map { TimeInterval($0 * 60) } ?? 300
+                resendError = "Too many requests. Please wait a few minutes before trying again."
+                resendCooldownEnd = Date().addingTimeInterval(max(seconds, 60))
+            } else {
+                resendError = error.localizedDescription
+            }
         }
     }
     

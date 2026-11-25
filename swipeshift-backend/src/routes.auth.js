@@ -237,12 +237,15 @@ router.post("/register", registerLimiter, async (req, res) => {
   const rawToken = await issueEmailVerificationToken(user.id);
   const verifyLink = buildVerifyLink(user.email, rawToken);
 
+  // Schlaegt der Versand fehl, bleibt das Konto bestehen → verificationEmailSent=false, die App bietet "Resend" an
+  let verificationEmailSent = true;
   try {
     await sendVerificationEmail(user.email, verifyLink);
 
     console.log("Verification email sent to:", user.email);
     console.log("Verify link:", verifyLink);
   } catch (e) {
+    verificationEmailSent = false;
     console.error("Failed to send verification email:", e);
   }
 
@@ -254,7 +257,7 @@ router.post("/register", registerLimiter, async (req, res) => {
 
 
   try {
-    return res.json(await completeLogin(user, req));
+    return res.json(await completeLogin(user, req, { extra: { verificationEmailSent } }));
   } catch (err) {
     console.error("POST /auth/register session error:", err);
     return res.status(500).json({ error: "Account created, but sign-in failed. Please log in." });
@@ -722,6 +725,7 @@ router.get("/verify-email", async (req, res) => {
 
 const resendSchema = z.object({ email: z.string().email() });
 
+// Antwortet bewusst IMMER { ok: true } (keine User-Enumeration); Versandfehler sind fuer die App hier nicht sichtbar.
 router.post("/resend-verification", mailLimiter, async (req, res) => {
   const parsed = resendSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid input" });
