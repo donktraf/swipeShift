@@ -16,6 +16,9 @@ final class TokenStore {
     private let account = "auth_token"
 
     func saveToken(_ token: String) {
+        #if DEBUG
+        if DebugLaunch.bypassesKeychain { return } // Debug-Launch: nie in den Keychain schreiben
+        #endif
         let data = Data(token.utf8)
 
         // Delete old item first (simplest, reliable)
@@ -37,6 +40,9 @@ final class TokenStore {
     }
 
     func getToken() -> String? {
+        #if DEBUG
+        if DebugLaunch.bypassesKeychain { return DebugLaunch.token } // SS_DEBUG_TOKEN statt Keychain
+        #endif
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -96,6 +102,9 @@ final class TokenStore {
     }
 
     func deleteToken() {
+        #if DEBUG
+        if DebugLaunch.bypassesKeychain { return }
+        #endif
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,

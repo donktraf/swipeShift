@@ -12,6 +12,7 @@
     "make-admin": "node scripts/make-admin.js",
     "cleanup:orphans": "node scripts/cleanup-orphans.js",
     "seed:test-shifts": "node scripts/seed-test-shifts.js",
+    "debug:token": "node scripts/debug-token.js",
     "test": "NODE_ENV=test node --test $(find src -name '*.test.js')"
   },
   "dependencies": {

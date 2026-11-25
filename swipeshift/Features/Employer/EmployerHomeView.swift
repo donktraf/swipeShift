@@ -59,6 +59,9 @@ struct EmployerHomeView: View {
                 .ignoresSafeArea(edges: .bottom)
             }
             .navigationBarHidden(true)
+            #if DEBUG
+            .debugEmployerRouting(selectedTab: $selectedTab, showPostJob: $showPostJob)
+            #endif
             .task { await messageStore.loadConversations() }
             // Home ist sichtbar → eingeloggt + Onboarding fertig: einmalig Push-Berechtigung erfragen / Token registrieren
             .task { await PushNotificationManager.shared.onHomeAppeared() }

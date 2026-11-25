@@ -21,13 +21,20 @@ struct swipeShiftApp: App {
     // Erscheinungsbild pro Geraet (Einstellungen → App Preferences)
     @AppStorage(AppColorSchemePreference.storageKey) private var colorSchemeRaw = AppColorSchemePreference.system.rawValue
 
+    private var effectiveColorScheme: ColorScheme? {
+        #if DEBUG
+        if let forced = DebugLaunch.colorScheme { return forced } // SS_DEBUG_APPEARANCE
+        #endif
+        return AppColorSchemePreference(rawValue: colorSchemeRaw)?.colorScheme
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environmentObject(userStore)
                 .environmentObject(jobStore)
                 .environmentObject(messageStore)
-                .preferredColorScheme(AppColorSchemePreference(rawValue: colorSchemeRaw)?.colorScheme)
+                .preferredColorScheme(effectiveColorScheme)
                 .onOpenURL { url in
                     handleDeepLink(url)
                 }

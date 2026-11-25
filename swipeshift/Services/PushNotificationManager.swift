@@ -71,6 +71,9 @@ final class PushNotificationManager: ObservableObject {
     /// Beim ersten Erscheinen des Homes (eingeloggt + Onboarding fertig) einmalig nach der Berechtigung fragen;
     /// danach nur noch registrieren (das Geraetetoken kann sich aendern).
     func onHomeAppeared() async {
+        #if DEBUG
+        if DebugLaunch.isActive { return } // kein Berechtigungs-Dialog in Debug-Snapshots
+        #endif
         await refreshAuthorizationStatus()
         if authorizationStatus == .notDetermined, !UserDefaults.standard.bool(forKey: askedKey) {
             await requestPermission()

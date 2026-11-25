@@ -135,6 +135,16 @@ struct LandingView: View {
                 .padding(.vertical, 14)
             }
         }
+        #if DEBUG
+        .onAppear {
+            // SS_DEBUG_SCREEN=auth.login|auth.register → vorhandene fullScreenCover oeffnen
+            switch DebugLaunch.screen {
+            case "auth.login":    showLogin = true
+            case "auth.register": showRegister = true
+            default: break
+            }
+        }
+        #endif
         // ✅ Login als fullScreenCover
         .fullScreenCover(isPresented: $showLogin) {
             NavigationStack {

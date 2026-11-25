@@ -495,6 +495,10 @@ Website (website/, lokal statt Cloudflare):
   _headers, saubere URLs, 404.html). Tests: `node --test scripts/serve-website.test.js`
 • Debug-Build der App oeffnet Website-Links (Privacy/Terms/Guide, Job-Share) ueber `AppConfig.websiteURL`
   dort, Release nutzt https://swipeshift.app
+• UI-Snapshots (Simulator, nur DEBUG): `scripts/ui-snapshot.sh <screen> [email] [KEY=VALUE…] [--no-build]` baut die App,
+  startet sie in einem eigenen Simulator ("SwipeShift-Snapshots") eingeloggt per `SS_DEBUG_TOKEN` (JWT aus
+  `npm run --silent debug:token -- <email>` im Backend) direkt auf `SS_DEBUG_SCREEN` (siehe App/DebugLaunch.swift) und
+  speichert hell/dunkel-PNGs (`SS_DEBUG_APPEARANCE`). Braucht das lokale Backend; Release-Builds enthalten nichts davon.
 
 iOS (swipeShift.xcodeproj):
 • Es existiert noch KEIN XCTest-Target im Xcode-Projekt. Das Anlegen eines Test-Targets per
