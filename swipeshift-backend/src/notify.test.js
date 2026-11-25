@@ -53,7 +53,7 @@ test("pausiertes Konto: jobActivity/messages nein, account ja", async () => {
 
 test("Fehler beim Senden werfen nie; anderer Kanal laeuft weiter", async () => {
   const m = setup(baseUser, { mailFails: true });
-  assert.deepEqual(await m.notify("u", event), { email: false, push: true });
+  assert.deepEqual(await m.notify("u", event), { email: false, push: true, attempted: true, failed: true });
   const p = setup(baseUser, { pushFails: true });
   assert.deepEqual(await p.notify("u", event), { email: true, push: false });
 });

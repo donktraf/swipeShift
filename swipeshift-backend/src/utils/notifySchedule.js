@@ -7,9 +7,12 @@ const HOUR = 60 * MIN;
 const UNREAD_EMAIL_DELAY_MS = 15 * MIN;       // Mail erst, wenn die Nachricht so lange ungelesen ist
 const UNREAD_EMAIL_MAX_AGE_MS = 24 * HOUR;    // aeltere ungelesene Nachrichten loesen keine Mail mehr aus
 const EMAIL_COOLDOWN_MS = HOUR;               // max. 1 Mail pro Konversation und Empfaenger und Stunde
-const REMINDER_WINDOW_FROM_MS = 0;            // Erinnerung, wenn der Start 0–24 h entfernt ist (einmal pro Bewerbung → auch spaete Zusagen)
+const REMINDER_WINDOW_FROM_MS = 0;            // aeusserstes Fenster aller Schicht-Erinnerungen: Start 0–24 h entfernt
 const REMINDER_WINDOW_TO_MS = 24 * HOUR;
+const REMINDER_2H_MS = 2 * HOUR;
 const PAYMENT_OPEN_LOOKBACK_MS = 7 * 24 * HOUR; // nur Jobs, die in den letzten 7 Tagen endeten
+
+const { bookedShifts } = require("./shiftBooking");
 
 const t = (v) => (v ? new Date(v).getTime() : null);
 
@@ -17,6 +20,30 @@ const t = (v) => (v ? new Date(v).getTime() : null);
 function shiftReminderWindow(now = new Date()) {
   const n = new Date(now).getTime();
   return { from: new Date(n + REMINDER_WINDOW_FROM_MS), to: new Date(n + REMINDER_WINDOW_TO_MS) };
+}
+
+// Faellige Schicht-Erinnerungen einer angenommenen Bewerbung (rein, DB-frei).
+//   "24h" faellig, wenn Start - jetzt in (2h, 24h]; "2h" faellig, wenn Start - jetzt in (0, 2h]. Begonnene Schichten: nie.
+//   Spaet Angenommene bekommen nur das, was noch in der Zukunft liegt (1 h vorher → nur "2h").
+//   sent: [{ shiftId, kind }] bereits verschickt (ShiftReminder) → uebersprungen.
+//   legacyReminderSentAt: Apply.reminderSentAt (Altbestand, eine Erinnerung je Bewerbung). Wurde sie innerhalb der 24 h
+//   vor dieser Schicht verschickt, gilt sie als der 24h-Reminder dieser Schicht → kein Duplikat ("2h" kommt trotzdem).
+// → [{ shiftId, kind, startMs, timeRange }] sortiert nach Start, "24h" vor "2h"
+function dueShiftReminders({ job, shiftIds, sent = [], legacyReminderSentAt = null, now = new Date() }) {
+  const n = new Date(now).getTime();
+  const legacy = t(legacyReminderSentAt);
+  const done = new Set((sent ?? []).map((r) => `${r.shiftId}:${r.kind}`));
+  const out = [];
+  for (const sh of bookedShifts(job, shiftIds)) {
+    if (sh.startMs === null) continue;
+    const until = sh.startMs - n;
+    if (until <= 0 || until > REMINDER_WINDOW_TO_MS) continue;
+    const kind = until <= REMINDER_2H_MS ? "2h" : "24h";
+    if (kind === "24h" && legacy !== null && legacy >= sh.startMs - REMINDER_WINDOW_TO_MS && legacy <= sh.startMs) continue;
+    if (done.has(`${sh.id}:${kind}`)) continue;
+    out.push({ shiftId: sh.id, kind, startMs: sh.startMs, timeRange: sh.timeRange });
+  }
+  return out.sort((a, b) => a.startMs - b.startMs);
 }
 
 // Ende-Fenster fuer "Payment open": Job vorbei, aber nicht aelter als 7 Tage
@@ -64,5 +91,5 @@ function pickUnreadMessageEmailTargets(messages, now = new Date()) {
 
 module.exports = {
   UNREAD_EMAIL_DELAY_MS, UNREAD_EMAIL_MAX_AGE_MS, EMAIL_COOLDOWN_MS,
-  shiftReminderWindow, paymentOpenWindow, pickUnreadMessageEmailTargets,
+  shiftReminderWindow, dueShiftReminders, paymentOpenWindow, pickUnreadMessageEmailTargets,
 };

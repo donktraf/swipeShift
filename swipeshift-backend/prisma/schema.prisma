@@ -379,7 +379,8 @@ model Apply {
   acceptedAt DateTime?
   // Zeitpunkt der Zahlung (isPaid = true) → Benachrichtigung "Payment received"
   paidAt DateTime?
-  // Schicht-Erinnerung (Push/Mail, ~24h vorher) bereits verschickt → genau einmal (bedingtes updateMany als Claim)
+  // LEGACY: frueher eine Erinnerung pro Bewerbung. Neue Logik nutzt ShiftReminder; das Feld wird nur noch gelesen
+  // (Altbestand: kein doppelter 24h-Reminder, wenn er < 24 h vor der Schicht gesetzt wurde).
   reminderSentAt DateTime?
 
   // Worker storniert eine ANGENOMMENE Schicht (status = cancelled_by_worker); lateCancellation = weniger als 24 h vor Start
@@ -410,6 +411,7 @@ model Apply {
   workerReview   WorkerReview?
   reviewDraft    ReviewDraft?
   shiftCancellations ShiftCancellation[]
+  shiftReminders     ShiftReminder[]
 
   @@unique([userId, jobId])
   @@index([userId])
@@ -664,4 +666,18 @@ model ShiftCancellation {
 
   @@unique([applyId, shiftId])
   @@index([cancelledAt])
+}
+
+// Versendete Schicht-Erinnerung (je Bewerbung, Schicht und Art "24h" | "2h"). Der Insert ist der Claim:
+// Unique-Konflikt → eine andere Instanz war schneller → nicht senden.
+model ShiftReminder {
+  id      String   @id @default(uuid())
+  applyId String
+  shiftId String
+  kind    String   // "24h" | "2h"
+  sentAt  DateTime @default(now())
+
+  apply Apply @relation(fields: [applyId], references: [id], onDelete: Cascade)
+
+  @@unique([applyId, shiftId, kind])
 }

@@ -63,3 +63,46 @@ test("mehrere Nachrichten → ein Ziel pro Konversation+Empfaenger; kein Employe
   assert.equal(s.pickUnreadMessageEmailTargets([msg({ senderId: "stranger" })], NOW).length, 0);
   assert.deepEqual(s.pickUnreadMessageEmailTargets(null, NOW), []);
 });
+
+// ── dueShiftReminders ──
+const H = 3_600_000;
+const jobWith = (...offsetsH) => ({
+  startTime: null, endTime: null,
+  shifts: offsetsH.map((o, i) => ({
+    id: `s${i + 1}`, timeRange: `r${i + 1}`,
+    startTimeISO: new Date(NOW.getTime() + o * H).toISOString(),
+    endTimeISO: new Date(NOW.getTime() + (o + 4) * H).toISOString(),
+  })),
+});
+const due = (job, extra = {}) => s.dueShiftReminders({ job, shiftIds: [], now: NOW, ...extra }).map((r) => `${r.shiftId}:${r.kind}`);
+
+test("Reminder-Fenster: 24h in (2h,24h], 2h in (0,2h], Grenzen", () => {
+  assert.deepEqual(due(jobWith(24)), ["s1:24h"]);
+  assert.deepEqual(due(jobWith(24.01)), []);
+  assert.deepEqual(due(jobWith(10)), ["s1:24h"]);
+  assert.deepEqual(due(jobWith(2.01)), ["s1:24h"]);
+  assert.deepEqual(due(jobWith(2)), ["s1:2h"]);
+  assert.deepEqual(due(jobWith(1)), ["s1:2h"]);
+  assert.deepEqual(due(jobWith(0)), []);      // beginnt jetzt → nichts
+  assert.deepEqual(due(jobWith(-1)), []);     // begonnen → nichts
+});
+
+test("Reminder: mehrere Schichten einzeln, bereits gesendete uebersprungen, nur gebuchte", () => {
+  const job = jobWith(1, 10, 30);
+  assert.deepEqual(due(job), ["s1:2h", "s2:24h"]);
+  assert.deepEqual(due(job, { sent: [{ shiftId: "s1", kind: "2h" }] }), ["s2:24h"]);
+  assert.deepEqual(due(job, { sent: [{ shiftId: "s2", kind: "24h" }, { shiftId: "s1", kind: "2h" }] }), []);
+  // 24h gesendet, spaeter 2h faellig
+  assert.deepEqual(due(jobWith(1), { sent: [{ shiftId: "s1", kind: "24h" }] }), ["s1:2h"]);
+  // nur gebuchte Schichten (s3 liegt eh ausserhalb; s2 nicht gebucht)
+  assert.deepEqual(s.dueShiftReminders({ job, shiftIds: ["s1", "s3"], now: NOW }).map((r) => r.shiftId), ["s1"]);
+});
+
+test("Reminder Altbestand: reminderSentAt < 24h vor Schicht ersetzt den 24h-Reminder, nicht den 2h", () => {
+  const legacy = (hoursAgo) => new Date(NOW.getTime() - hoursAgo * H);
+  assert.deepEqual(due(jobWith(10), { legacyReminderSentAt: legacy(3) }), []);          // 10h Rest, gesendet vor 3h → innerhalb 24h vor Start
+  assert.deepEqual(due(jobWith(1), { legacyReminderSentAt: legacy(3) }), ["s1:2h"]);
+  assert.deepEqual(due(jobWith(30, 10), { legacyReminderSentAt: legacy(3) }), []);     // s2 abgedeckt, s1 noch nicht im Fenster
+  // Schicht 1 Woche spaeter eines Mehrtages-Jobs: Altmarker liegt weit davor → 24h-Reminder kommt
+  assert.deepEqual(due(jobWith(20), { legacyReminderSentAt: legacy(100) }), ["s1:24h"]);
+});

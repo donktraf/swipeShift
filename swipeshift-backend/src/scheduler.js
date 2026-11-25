@@ -1,7 +1,7 @@
 // src/scheduler.js
 // Kleiner In-Process-Scheduler fuer verzoegerte Benachrichtigungen:
-//   - Schicht-Erinnerung (Start der ersten anstehenden GEBUCHTEN Schicht in 0–24 h, einmal pro Bewerbung via reminderSentAt;
-//     spaetere gebuchte Schichten derselben Bewerbung bekommen keine eigene Erinnerung — ein Marker pro Buchung)
+//   - Schicht-Erinnerung (E-Mail, "Job Activity"): je GEBUCHTER Schicht 24 h und 2 h vorher, jeweils genau einmal
+//     (ShiftReminder, Insert = Claim; Fenster/Altbestand-Regel in utils/notifySchedule.dueShiftReminders)
 //   - Ungelesen-Mail (Chat-Nachricht nach 15 min ungelesen, max. 1/h pro Konversation+Empfaenger)
 //   - "Payment open" (Job vorbei, unbezahlte Worker, einmal pro Job)
 //   - Auto-Anwesenheit (48 h nach Schichtende ohne Employer-Eintrag → "attended", Claim per bedingtem Update)
@@ -14,69 +14,95 @@ const copy = require("./utils/notificationCopy");
 const events = require("./notifyEvents");
 const { runAutoAttendance } = require("./reliability");
 const { purgeExpiredTombstones } = require("./moderation");
-const { nextBookedStart, bookedEnd } = require("./utils/shiftBooking");
+const { bookedEnd } = require("./utils/shiftBooking");
 const { collectPaged } = require("./utils/paged");
 const { attendanceReminderWindow } = require("./utils/reliability");
 const { isBlockedBetween } = require("./utils/safety");
 const { describeBlockedUser } = require("./utils/blockedUsers");
 const {
-  shiftReminderWindow, paymentOpenWindow, pickUnreadMessageEmailTargets,
+  shiftReminderWindow, dueShiftReminders, paymentOpenWindow, pickUnreadMessageEmailTargets,
   UNREAD_EMAIL_DELAY_MS, UNREAD_EMAIL_MAX_AGE_MS, EMAIL_COOLDOWN_MS,
 } = require("./utils/notifySchedule");
 
 const INTERVAL_MS = 5 * 60 * 1000;
 const BATCH = 200;
-const SHIFT_REMINDER_LOOKBACK_MS = 30 * 24 * 3_600_000; // spaetere Schichten eines Mehrtages-Jobs
 const MESSAGE_PAGE_SIZE = 500;
 const MESSAGE_PAGES = 4;
 
+// Fenster/Regeln: utils/notifySchedule.dueShiftReminders (24 h und 2 h vor JEDER gebuchten Schicht, je einmal).
+// Bewusste Randfaelle:
+//  - Wird eine Schicht nach einem gesendeten Reminder umgeplant (neue Zeit), gibt es dafuer KEINEN neuen Reminder
+//    (der Marker haengt an Bewerbung+Schicht+Art).
+//  - Wird ein Job weniger als 2 h vor Start angenommen/neu gestartet, kommt nur der 2h-Reminder.
+//  - Versandfehler (Mail gewollt, sendMail warf): Claim wird zurueckgenommen → Retry im naechsten Tick, solange das
+//    Fenster offen ist. Ist die Einstellung aus, bleibt der Claim (nichts zu wiederholen).
 async function runShiftReminders(now = new Date()) {
-  const { from, to } = shiftReminderWindow(now);
-  // Job.startTime = fruehester Start, Job.endTime = spaetestes Ende (ALLE Schichten). Die gebuchte Schicht kann spaeter
-  // liegen → Rueckschau statt `gte: from`; bereits beendete Jobs (endTime < jetzt) sind raus. Pagination nach id,
-  // die genaue Pruefung (naechste gebuchte Schicht im Fenster) im Speicher.
-  const lookback = new Date(from.getTime() - SHIFT_REMINDER_LOOKBACK_MS);
+  const { to } = shiftReminderWindow(now);
+  // Job.startTime = fruehester Start, Job.endTime = spaetestes Ende ueber ALLE Schichten (spannt sie also auf). Eine
+  // Schicht mit Start in (now, now+24h] gehoert damit immer zu einem Job mit startTime <= now+24h und endTime >= now;
+  // mehr braucht der SQL-Filter nicht (kein pauschaler Lookback). Jobs ohne endTime (Altbestand) bleiben drin.
+  // Pagination nach id, die genaue Pruefung (faellige Schichten, noch nicht gesendet) im Speicher.
   const candidates = await collectPaged({
     limit: BATCH, pageSize: BATCH,
+    onMaxPages: () => console.warn("scheduler: shift reminders hit the page limit; some applies are deferred to the next tick"),
     fetchPage: (cursor, take) => prisma.apply.findMany({
       where: {
-        status: "accepted", reminderSentAt: null,
+        status: "accepted",
         job: {
           status: { in: ["published", "inProgress"] },
-          startTime: { gte: lookback, lte: to },
+          startTime: { lte: to },
           OR: [{ endTime: { gte: now } }, { endTime: null }],
         },
       },
-      select: { id: true, userId: true, jobId: true, shiftIds: true, job: { select: { title: true, company: true, startTime: true, endTime: true, shifts: true, employerId: true } }, conversation: { select: { id: true } } },
+      select: {
+        id: true, userId: true, jobId: true, shiftIds: true, reminderSentAt: true,
+        job: { select: { title: true, company: true, startTime: true, endTime: true, shifts: true, employerId: true } },
+        conversation: { select: { id: true } },
+        shiftReminders: { select: { shiftId: true, kind: true } },
+      },
       orderBy: { id: "asc" },
       take,
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     }),
-    accept: (a) => { const st = nextBookedStart(a.job, a.shiftIds, from); return !!st && st <= to; },
+    accept: (a) => {
+      a.due = dueShiftReminders({ job: a.job, shiftIds: a.shiftIds, sent: a.shiftReminders, legacyReminderSentAt: a.reminderSentAt, now });
+      return a.due.length > 0;
+    },
   });
-  // Erste anstehende gebuchte Schicht im Fenster; baldigste zuerst
-  const applies = candidates
-    .map((a) => ({ ...a, shiftStart: nextBookedStart(a.job, a.shiftIds, from) }))
-    .sort((x, y) => x.shiftStart - y.shiftStart);
+  const work = candidates.flatMap((a) => a.due.map((d) => ({ a, d }))).sort((x, y) => x.d.startMs - y.d.startMs);
+  const blockedCache = new Map();
   let sent = 0;
-  for (const a of applies) {
-    // Claim: nur eine Instanz gewinnt, und nur solange die Bewerbung noch angenommen ist
-    const { count } = await prisma.apply.updateMany({
-      where: { id: a.id, reminderSentAt: null, status: "accepted" },
-      data: { reminderSentAt: now },
-    });
-    if (count !== 1) continue;
+  for (const { a, d } of work) {
     if (a.job.employerId) {
-      const blocks = await prisma.userBlock.findMany({
-        where: { OR: [{ blockerId: a.userId, blockedId: a.job.employerId }, { blockerId: a.job.employerId, blockedId: a.userId }] },
-        select: { blockerId: true, blockedId: true },
-      });
-      if (isBlockedBetween(blocks, a.userId, a.job.employerId)) continue;
+      if (!blockedCache.has(a.id)) {
+        const blocks = await prisma.userBlock.findMany({
+          where: { OR: [{ blockerId: a.userId, blockedId: a.job.employerId }, { blockerId: a.job.employerId, blockedId: a.userId }] },
+          select: { blockerId: true, blockedId: true },
+        });
+        blockedCache.set(a.id, isBlockedBetween(blocks, a.userId, a.job.employerId));
+      }
+      if (blockedCache.get(a.id)) continue;
     }
-    await notify(a.userId, (user) => copy.shiftReminder({
-      jobTitle: a.job.title, company: a.job.company, startTime: a.shiftStart,
-      timeZone: user.timeZone, jobId: a.jobId, conversationId: a.conversation?.id,
+    // Bewerbung/Schicht seit dem Laden noch gueltig? (Storno/Widerruf zwischen Query und Versand)
+    const fresh = await prisma.apply.findUnique({ where: { id: a.id }, select: { status: true, shiftIds: true } });
+    if (!fresh || fresh.status !== "accepted") continue;
+    if (fresh.shiftIds.length && !fresh.shiftIds.includes(d.shiftId)) continue;
+    // Claim = Insert; Unique-Konflikt → andere Instanz (oder Tick) war schneller
+    let claimId;
+    try {
+      claimId = (await prisma.shiftReminder.create({ data: { applyId: a.id, shiftId: d.shiftId, kind: d.kind, sentAt: now } })).id;
+    } catch (err) {
+      if (err?.code !== "P2002") console.error("scheduler: shift reminder claim failed:", err);
+      continue;
+    }
+    const result = await notify(a.userId, (user) => copy.shiftReminder({
+      jobTitle: a.job.title, company: a.job.company, startTime: new Date(d.startMs), kind: d.kind, timeRange: d.timeRange,
+      timeZone: user.timeZone, jobId: a.jobId, conversationId: a.conversation?.id, now,
     }));
+    if (result?.attempted && result?.failed) {
+      await prisma.shiftReminder.deleteMany({ where: { id: claimId } }).catch((err) => console.error("scheduler: shift reminder claim rollback failed:", err));
+      continue;
+    }
     sent += 1;
   }
   return sent;

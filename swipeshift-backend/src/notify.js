@@ -2,6 +2,7 @@
 // Dispatcher fuer Benachrichtigungen (Push + E-Mail) nach den Einstellungen des Empfaengers.
 //
 //   notify(userId, { category, push?: {title, body, data}, email?: {subject, html, text} })
+//   Ergebnis { email, push } (+ attempted/failed: true NUR, wenn die Mail gewollt war und sendMail warf)
 //   event.pausedOk: true → wird auch an pausierte Konten zugestellt (nur "Konto pausiert/fortgesetzt")
 //   notify(userId, (user) => event)   // wenn der Text von Nutzerdaten (z.B. Zeitzone) abhaengt
 //
@@ -27,6 +28,7 @@ function createNotifier({ loadUser, loadDevices, sendMail, sendPush, log = conso
           await sendMail({ to: user.email, subject: event.email.subject, html: event.email.html, text: event.email.text });
           result.email = true;
         } catch (err) {
+          result.attempted = true; result.failed = true; // Zustellung war gewollt, sendMail warf → Aufrufer darf erneut versuchen
           log.error(`notify: email failed (${event.category}):`, err);
         }
       }

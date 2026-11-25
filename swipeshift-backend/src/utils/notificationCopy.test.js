@@ -100,3 +100,32 @@ test("pausedOk nur bei Konto pausiert/fortgesetzt", () => {
   assert.equal(c.accountResumed().pausedOk, true);
   assert.equal(c.reviewReceived({ jobTitle: "T" }).pausedOk, undefined);
 });
+
+test("shiftReminder: Art 24h vs 2h, Schicht genannt, Zeit in Ortszeit", () => {
+  const now = new Date("2026-11-18T20:00:00Z");
+  const start = new Date("2026-11-19T08:00:00Z");
+  const r24 = c.shiftReminder({ jobTitle: "Bar", company: "Co", startTime: start, timeZone: "Europe/Berlin", now, kind: "24h", timeRange: "09:00 - 17:00" });
+  assert.equal(r24.category, "jobActivity");
+  assert.equal(r24.push.body, '"Bar" at Co starts tomorrow at 9:00 AM. Shift: 09:00 - 17:00.');
+  assert.equal(r24.email.subject, "Reminder: Bar starts tomorrow");
+  const r2 = c.shiftReminder({ jobTitle: "Bar", company: "Co", startTime: start, timeZone: "Europe/Berlin", kind: "2h", now: new Date(start.getTime() - 2 * 3_600_000) });
+  assert.equal(r2.push.body, '"Bar" at Co starts in 2 hours, at 9:00 AM.');
+  assert.equal(r2.email.subject, "Reminder: Bar starts in 2 hours");
+  assert.equal(c.shiftReminder({ jobTitle: "Bar", startTime: start, now }).category, "jobActivity"); // Default = 24h
+});
+
+test("shiftReminder 2h: Text und Betreff aus Restzeit", () => {
+  const start = new Date("2026-11-19T08:00:00Z");
+  const at = (min) => new Date(start.getTime() - min * 60000);
+  const r = (min) => c.shiftReminder({ jobTitle: "Bar", company: "Co", startTime: start, timeZone: "Europe/Berlin", now: at(min), kind: "2h" });
+  assert.equal(r(120).push.body, '"Bar" at Co starts in 2 hours, at 9:00 AM.');
+  assert.equal(r(105).email.subject, "Reminder: Bar starts in 2 hours");
+  assert.equal(r(104).email.subject, "Reminder: Bar starts in about an hour");
+  assert.equal(r(60).push.body, '"Bar" at Co starts in about an hour, at 9:00 AM.');
+  assert.equal(r(30).push.body, '"Bar" at Co starts in 30 minutes, at 9:00 AM.');
+  assert.equal(r(30).email.subject, "Reminder: Bar starts in 30 minutes");
+  assert.equal(c.shiftReminder({ jobTitle: "Bar", startTime: start, kind: "2h" }).email.subject, "Reminder: Bar starts soon");
+  // 24h-Betreff aus Tag-Offset
+  const now = new Date("2026-11-18T20:00:00Z");
+  assert.equal(c.shiftReminder({ jobTitle: "Bar", startTime: new Date("2026-11-18T22:00:00Z"), timeZone: "Europe/Berlin", now }).email.subject, "Reminder: Bar starts today");
+});
