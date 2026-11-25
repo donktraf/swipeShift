@@ -38,170 +38,153 @@ struct RadarView: View {
         ))
     }
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Animation nur ohne "Bewegung reduzieren"
+    private func motion(_ m: DS.Motion = .standard) -> Animation? {
+        reduceMotion ? nil : m.animation
+    }
+
     var body: some View {
         GeometryReader { geo in
             let screenHeight = geo.size.height
             let mapHeight = screenHeight * mapHeightFraction
 
-            ZStack {
-                SS.background().ignoresSafeArea()
+            VStack(spacing: 0) {
 
-                VStack(spacing: 0) {
+                // MARK: - Header
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Radar")
+                            .dsFont(.display)
+                            .foregroundStyle(DS.Color.text)
+                        Text("Jobs near you")
+                            .dsFont(.callout)
+                            .foregroundStyle(DS.Color.muted)
+                    }
 
-                    // MARK: - Header
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Radar")
-                                .font(.system(size: 28, weight: .bold))
-                                .foregroundColor(.white)
-                            Text("Jobs near you")
-                                .font(.system(size: 14))
-                                .foregroundColor(.white.opacity(0.7))
+                    Spacer()
+
+                    DSIconButton(systemName: "arrow.clockwise", label: "Refresh") {
+                        Task { await loadJobs() }
+                    }
+                    .disabled(isLoading)
+                    .opacity(isLoading ? 0.45 : 1)
+                }
+                .padding(.horizontal, DS.Spacing.screenEdge)
+                .padding(.top, DS.Spacing.xs)
+                .padding(.bottom, DS.Spacing.sm)
+
+                // MARK: - Map
+                ClusterMapView(
+                    jobs: jobsWithCoords,
+                    pinColor: { pinColor(for: $0) },
+                    selectedJobId: selectedJobId,
+                    onJobTapped: { job in
+                        DS.Haptics.selection()
+                        withAnimation(motion(.snappy)) {
+                            selectedJobId = job.id
+                            mapRegion = MKCoordinateRegion(
+                                center: CLLocationCoordinate2D(latitude: job.lat!, longitude: job.lng!),
+                                span: MKCoordinateSpan(latitudeDelta: 0.05, longitudeDelta: 0.05)
+                            )
                         }
+                    },
+                    region: $mapRegion
+                )
+                .frame(height: mapHeight)
+                .animation(motion(), value: mapHeightFraction)
+                .clipShape(RoundedRectangle(cornerRadius: mapHeightFraction < 0.40 ? DS.Radius.card : 0, style: .continuous))
+                .overlay(alignment: .topTrailing) {
+                    // Radius-Filter oben rechts auf der Karte
+                    DSIconButton(systemName: "slider.horizontal.3", label: "Search radius, \(Int(selectedRadius)) miles") {
+                        showRadiusSheet = true
+                    }
+                    .dsCardShadow()
+                    .padding(DS.Spacing.sm)
+                }
 
-                        Spacer()
+                // MARK: - Legende direkt unter der Karte
+                legend
+                    .padding(.horizontal, DS.Spacing.screenEdge)
+                    .padding(.top, DS.Spacing.xs)
 
-                        Button {
-                            Task { await loadJobs() }
-                        } label: {
-                            Image(systemName: "arrow.clockwise")
-                                .font(.system(size: 18, weight: .semibold))
-                                .foregroundColor(SS.primary)
-                                .padding(10)
-                                .background(Color.white)
-                                .clipShape(Circle())
-                                .shadow(color: .black.opacity(0.06), radius: 4, x: 0, y: 2)
-                                .rotationEffect(.degrees(isLoading ? 360 : 0))
-                                .animation(
-                                    isLoading
-                                        ? .linear(duration: 1).repeatForever(autoreverses: false)
-                                        : .default,
-                                    value: isLoading
+                // MARK: - Counter
+                HStack {
+                    Text("Showing \(jobsWithCoords.count) jobs near you")
+                        .dsFont(.callout)
+                        .foregroundStyle(DS.Color.text2)
+                    Spacer()
+                    Text("within \(Int(selectedRadius)) mi")
+                        .dsFont(.caption)
+                        .foregroundStyle(DS.Color.muted)
+                }
+                .padding(.horizontal, DS.Spacing.screenEdge)
+                .padding(.vertical, DS.Spacing.sm)
+
+                // MARK: - Job List
+                if isLoading {
+                    VStack(spacing: DS.Spacing.sm) {
+                        ForEach(0..<3, id: \.self) { _ in RadarCardSkeleton() }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, DS.Spacing.screenEdge)
+                    .accessibilityLabel("Loading jobs")
+
+                } else if jobStore.nearbyJobs.isEmpty {
+                    emptyView
+
+                } else {
+                    ScrollViewReader { scrollProxy in
+                        ScrollView(showsIndicators: false) {
+                            GeometryReader { inner in
+                                Color.clear.preference(
+                                    key: ScrollOffsetKey.self,
+                                    value: inner.frame(in: .named("radarScroll")).minY
                                 )
-                        }
-                        .disabled(isLoading)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
-                    .padding(.bottom, 10)
-
-                    // MARK: - Map
-                    ClusterMapView(
-                        jobs: jobsWithCoords,
-                        pinColor: { pinColor(for: $0) },
-                        selectedJobId: selectedJobId,
-                        onJobTapped: { job in
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                                selectedJobId = job.id
-                                mapRegion = MKCoordinateRegion(
-                                    center: CLLocationCoordinate2D(latitude: job.lat!, longitude: job.lng!),
-                                    span: MKCoordinateSpan(latitudeDelta: 0.05, longitudeDelta: 0.05)
-                                )
                             }
-                        },
-                        region: $mapRegion
-                    )
-                    .frame(height: mapHeight)
-                    .animation(.spring(response: 0.4, dampingFraction: 0.8), value: mapHeightFraction)
-                    .clipShape(RoundedRectangle(cornerRadius: mapHeightFraction < 0.40 ? 16 : 0))
-                    .overlay(alignment: .bottomLeading) {
-                        HStack(spacing: 10) {
-                            LegendDot(color: SS.primary, label: "Standard")
-                            LegendDot(color: .orange, label: "Starting soon")
-                            LegendDot(color: .green, label: "High pay")
-                        }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(.ultraThinMaterial, in: Capsule())
-                        .padding(10)
-                    }
+                            .frame(height: 0)
 
-                    // MARK: - Counter + Radius Filter
-                    HStack {
-                        Text("Showing \(jobsWithCoords.count) jobs near you")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(.white.opacity(0.85))
-
-                        Spacer()
-
-                        Button {
-                            showRadiusSheet = true
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: "slider.horizontal.3")
-                                Text("\(Int(selectedRadius)) mi")
-                            }
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(SS.primary)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(Color.white)
-                            .clipShape(Capsule())
-                            .shadow(color: .black.opacity(0.06), radius: 4, x: 0, y: 2)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-
-                    // MARK: - Job List
-                    if isLoading {
-                        Spacer()
-                        ProgressView("Loading jobs...")
-                            .foregroundColor(.white)
-                        Spacer()
-
-                    } else if jobStore.nearbyJobs.isEmpty {
-                        emptyView
-
-                    } else {
-                        ScrollViewReader { scrollProxy in
-                            ScrollView(showsIndicators: false) {
-                                GeometryReader { inner in
-                                    Color.clear.preference(
-                                        key: ScrollOffsetKey.self,
-                                        value: inner.frame(in: .named("radarScroll")).minY
-                                    )
-                                }
-                                .frame(height: 0)
-
-                                LazyVStack(spacing: 10) {
-                                    ForEach(jobStore.nearbyJobs) { job in
-                                        NavigationLink {
-                                            JobDetailView(job: job)
-                                        } label: {
-                                            RadarJobCard(job: job, isHighlighted: selectedJobId == job.id)
-                                        }
-                                        .buttonStyle(.plain)
-                                        .id(job.id)
+                            LazyVStack(spacing: DS.Spacing.sm) {
+                                ForEach(jobStore.nearbyJobs) { job in
+                                    NavigationLink {
+                                        JobDetailView(job: job)
+                                    } label: {
+                                        RadarJobCard(job: job, isHighlighted: selectedJobId == job.id)
                                     }
-                                }
-                                .padding(.horizontal, 16)
-                                .padding(.bottom, 32)
-                            }
-                            .refreshable {
-                                await loadJobs()
-                            }
-                            .coordinateSpace(name: "radarScroll")
-                            .onPreferenceChange(ScrollOffsetKey.self) { offset in
-                                let collapsed = offset < -20
-                                let target: CGFloat = collapsed ? 0.25 : 0.45
-                                if abs(target - mapHeightFraction) > 0.01 {
-                                    withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
-                                        mapHeightFraction = target
-                                    }
+                                    .buttonStyle(.dsPressable)
+                                    .id(job.id)
                                 }
                             }
-                            .onChange(of: selectedJobId) { _, newId in
-                                if let id = newId {
-                                    withAnimation(.easeInOut(duration: 0.35)) {
-                                        scrollProxy.scrollTo(id, anchor: .center)
-                                    }
+                            .padding(.horizontal, DS.Spacing.screenEdge)
+                            .padding(.bottom, DS.Spacing.xxl)
+                        }
+                        .ignoresSafeArea(.container, edges: .bottom)
+                        .refreshable {
+                            await loadJobs()
+                        }
+                        .coordinateSpace(name: "radarScroll")
+                        .onPreferenceChange(ScrollOffsetKey.self) { offset in
+                            let collapsed = offset < -20
+                            let target: CGFloat = collapsed ? 0.25 : 0.45
+                            if abs(target - mapHeightFraction) > 0.01 {
+                                withAnimation(motion()) {
+                                    mapHeightFraction = target
+                                }
+                            }
+                        }
+                        .onChange(of: selectedJobId) { _, newId in
+                            if let id = newId {
+                                withAnimation(motion()) {
+                                    scrollProxy.scrollTo(id, anchor: .center)
                                 }
                             }
                         }
                     }
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .dsBackground()
         }
         .task {
             if jobStore.nearbyJobs.isEmpty {
@@ -213,7 +196,7 @@ struct RadarView: View {
             if let id = selectedJobId,
                let job = jobStore.nearbyJobs.first(where: { $0.id == id }),
                let lat = job.lat, let lng = job.lng {
-                withAnimation(.easeInOut(duration: 0.4)) {
+                withAnimation(motion()) {
                     mapRegion = MKCoordinateRegion(
                         center: CLLocationCoordinate2D(latitude: lat, longitude: lng),
                         span: MKCoordinateSpan(latitudeDelta: 0.05, longitudeDelta: 0.05)
@@ -226,53 +209,55 @@ struct RadarView: View {
         }
     }
 
+    // MARK: - Legende
+
+    private var legend: some View {
+        HStack(spacing: DS.Spacing.xs) {
+            LegendChip(color: DS.Color.primary, label: "Standard")
+            LegendChip(color: DS.Color.warning, label: "Starting soon")
+            LegendChip(color: DS.Color.success, label: "High pay")
+            Spacer(minLength: 0)
+        }
+    }
+
     // MARK: - Radius Sheet
 
     private var radiusSheet: some View {
         VStack(spacing: 0) {
             // Handle
             Capsule()
-                .fill(Color.gray.opacity(0.3))
-                .frame(width: 40, height: 4)
-                .padding(.top, 12)
-                .padding(.bottom, 20)
+                .fill(DS.Color.border)
+                .frame(width: 36, height: 4)
+                .padding(.top, DS.Spacing.sm)
+                .padding(.bottom, DS.Spacing.md)
 
             Text("Search Radius")
-                .font(.system(size: 18, weight: .bold))
-                .padding(.bottom, 20)
+                .dsFont(.headline)
+                .foregroundStyle(DS.Color.text)
+                .padding(.bottom, DS.Spacing.md)
 
             VStack(spacing: 0) {
-                ForEach(radiusOptions, id: \.self) { option in
-                    Button {
+                ForEach(Array(radiusOptions.enumerated()), id: \.element) { idx, option in
+                    DSRow("\(Int(option)) mi", showsDivider: idx > 0, action: {
+                        DS.Haptics.selection()
                         selectedRadius = option
                         showRadiusSheet = false
                         Task { await loadJobs() }
-                    } label: {
-                        HStack {
-                            Text("\(Int(option)) mi")
-                                .font(.system(size: 16))
-                                .foregroundColor(.primary)
-                            Spacer()
-                            if selectedRadius == option {
-                                Image(systemName: "checkmark")
-                                    .foregroundColor(SS.primary)
-                                    .font(.system(size: 14, weight: .semibold))
-                            }
+                    }) {
+                        if selectedRadius == option {
+                            Image(systemName: "checkmark")
+                                .font(DS.Font.make(14, .bold, relativeTo: .body))
+                                .foregroundStyle(DS.Color.primary)
+                                .accessibilityLabel("Selected")
                         }
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 16)
-                    }
-                    if option != radiusOptions.last {
-                        Divider().padding(.leading, 20)
                     }
                 }
             }
-            .background(Color(uiColor: .systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-            .padding(.horizontal, 16)
+            .padding(.horizontal, DS.Spacing.screenEdge)
 
             Spacer()
         }
+        .dsBackground()
         .presentationDetents([.fraction(0.42)])
         .presentationDragIndicator(.hidden)
     }
@@ -283,37 +268,26 @@ struct RadarView: View {
         jobStore.nearbyJobs.filter { $0.lat != nil && $0.lng != nil }
     }
 
+    /// Pin-Farben aus DS-Tokens: Standard primary, Starting soon warning, High pay success.
     private func pinColor(for job: Job) -> Color {
         if let start = job.startTime {
             let hoursUntilStart = start.timeIntervalSinceNow / 3600
-            if hoursUntilStart > 0 && hoursUntilStart <= 5 { return .orange }
+            if hoursUntilStart > 0 && hoursUntilStart <= 5 { return DS.Color.warning }
         }
-        if let pay = job.payAmount, pay >= 18 { return .green }
-        return SS.primary
+        if let pay = job.payAmount, pay >= 18 { return DS.Color.success }
+        return DS.Color.primary
     }
 
     private var emptyView: some View {
-        VStack(spacing: 16) {
+        VStack {
             Spacer()
-            Image(systemName: "scope")
-                .font(.system(size: 48))
-                .foregroundColor(.white.opacity(0.3))
-            Text("No jobs nearby")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundColor(.white.opacity(0.7))
-            Text("No jobs found within \(Int(selectedRadius)) miles.")
-                .font(.system(size: 14))
-                .foregroundColor(.white.opacity(0.5))
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
-            Button {
-                Task { await loadJobs() }
-            } label: {
-                Text("Refresh")
-                    .fontWeight(.semibold)
-            }
-            .buttonStyle(SSPrimaryButtonStyle())
-            .padding(.horizontal, 60)
+            DSEmptyState(
+                systemIcon: "scope",
+                title: "No jobs nearby",
+                message: "No jobs found within \(Int(selectedRadius)) miles.",
+                actionTitle: "Refresh",
+                action: { Task { await loadJobs() } }
+            )
             Spacer()
         }
     }
@@ -329,7 +303,7 @@ struct RadarView: View {
         isLoading = true
         await jobStore.loadNearbyJobs(lat: lat, lng: lng, radius: selectedRadius)
 
-        withAnimation {
+        withAnimation(motion()) {
             mapRegion = MKCoordinateRegion(
                 center: CLLocationCoordinate2D(latitude: lat, longitude: lng),
                 span: MKCoordinateSpan(latitudeDelta: 0.8, longitudeDelta: 0.8)
@@ -340,21 +314,26 @@ struct RadarView: View {
     }
 }
 
-// MARK: - LegendDot
+// MARK: - LegendChip
 
-private struct LegendDot: View {
+private struct LegendChip: View {
     let color: Color
     let label: String
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: DS.Spacing.xxs) {
             Circle()
                 .fill(color)
                 .frame(width: 8, height: 8)
             Text(label)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundColor(.primary)
+                .font(DS.Font.make(12, .semibold, relativeTo: .caption))
+                .foregroundStyle(DS.Color.text2)
+                .lineLimit(1)
         }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(DS.Color.surface2, in: Capsule())
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -365,55 +344,63 @@ private struct RadarJobCard: View {
     let isHighlighted: Bool
 
     var body: some View {
-        HStack(spacing: 12) {
-            Text(job.logoEmoji)
-                .font(.system(size: 26))
-                .frame(width: 48, height: 48)
-                .background(Color.gray.opacity(0.07))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+        DSCard {
+            HStack(spacing: DS.Spacing.sm) {
+                DSAvatar(text: job.logoEmoji, size: 48)
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(job.title)
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundColor(.primary)
-                Text(job.company)
-                    .font(.system(size: 13))
-                    .foregroundColor(.secondary)
+                VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
+                    Text(job.title)
+                        .dsFont(.headline)
+                        .foregroundStyle(DS.Color.text)
+                        .lineLimit(1)
+                    Text(job.company)
+                        .dsFont(.caption)
+                        .foregroundStyle(DS.Color.muted)
+                        .lineLimit(1)
 
-                HStack(spacing: 12) {
-                    if !job.distanceText.isEmpty {
-                        Label(job.distanceText, systemImage: "location")
-                            .font(.system(size: 12))
-                            .foregroundColor(.secondary)
+                    HStack(spacing: DS.Spacing.sm) {
+                        if !job.distanceText.isEmpty {
+                            Label(job.distanceText, systemImage: "location")
+                                .dsFont(.caption)
+                                .foregroundStyle(DS.Color.text2)
+                        }
+                        Label(job.payText, systemImage: "banknote")
+                            .dsFont(.caption)
+                            .foregroundStyle(DS.Color.text2)
                     }
-                    Label(job.payText, systemImage: "banknote")
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
+                    .lineLimit(1)
                 }
-                .padding(.top, 1)
+
+                Spacer(minLength: DS.Spacing.xs)
+
+                Image(systemName: "chevron.right")
+                    .font(DS.Font.make(13, .semibold, relativeTo: .caption))
+                    .foregroundStyle(DS.Color.muted)
+                    .accessibilityHidden(true)
             }
-
-            Spacer()
-
-            Image(systemName: "chevron.right")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(.secondary.opacity(0.5))
         }
-        .padding(12)
-        .background(Color.white)
-        .clipShape(RoundedRectangle(cornerRadius: SS.cardRadius, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: SS.cardRadius, style: .continuous)
-                .stroke(
-                    isHighlighted ? SS.primary : Color.gray.opacity(0.12),
-                    lineWidth: isHighlighted ? 2 : 1
-                )
+            RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
+                .strokeBorder(DS.Color.primary, lineWidth: isHighlighted ? 2 : 0)
         )
-        .shadow(
-            color: isHighlighted ? SS.primary.opacity(0.15) : .black.opacity(0.04),
-            radius: isHighlighted ? 8 : 4,
-            x: 0, y: 2
-        )
-        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isHighlighted)
+        .dsAnimation(.snappy, value: isHighlighted)
+    }
+}
+
+// MARK: - Skeleton
+
+private struct RadarCardSkeleton: View {
+    var body: some View {
+        DSCard {
+            HStack(spacing: DS.Spacing.sm) {
+                DSSkeletonBlock(width: 48, height: 48, radius: 14)
+                VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                    DSSkeletonBlock(width: 160, height: 16)
+                    DSSkeletonBlock(width: 100, height: 12)
+                }
+                Spacer(minLength: 0)
+            }
+        }
+        .accessibilityHidden(true)
     }
 }

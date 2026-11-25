@@ -74,51 +74,51 @@ struct ConfirmedShiftCard: View {
     let onDismiss: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
-                ZStack {
-                    Circle().fill(Color.green.opacity(0.15)).frame(width: 40, height: 40)
-                    Image(systemName: "checkmark.seal.fill").foregroundColor(.green)
-                }
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("You're confirmed")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.green)
-                    Text(item.jobTitle)
-                        .font(.system(size: 16, weight: .bold))
-                        .lineLimit(2)
-                    Text(whenText)
-                        .font(.system(size: 13))
-                        .foregroundColor(.secondary)
-                    Text(item.company)
-                        .font(.system(size: 13))
-                        .foregroundColor(.secondary)
-                }
-                Spacer(minLength: 0)
-                Button(action: onDismiss) {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            HStack {
+                Text("You're confirmed")
+                    .font(DS.Font.make(12, .bold, relativeTo: .caption))
+                    .textCase(.uppercase)
+                    .tracking(0.72)
+                    .opacity(0.85)
+                Spacer(minLength: DS.Spacing.sm)
+                Button {
+                    DS.Haptics.light()
+                    onDismiss()
+                } label: {
                     Image(systemName: "xmark")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundColor(.secondary)
-                        .padding(8)
-                        .background(Color.gray.opacity(0.1))
-                        .clipShape(Circle())
+                        .font(DS.Font.make(12, .extrabold, relativeTo: nil))
+                        .frame(width: 28, height: 28)
+                        .background(DS.Color.onPrimary.opacity(0.18), in: Circle())
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.dsPressable)
+                .padding(.vertical, -8)
+                .padding(.trailing, -8)
                 .accessibilityLabel("Dismiss")
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.jobTitle)
+                    .font(DS.Font.make(18, .extrabold, relativeTo: .headline))
+                    .lineLimit(2)
+                Text("\(whenText) · \(item.company)")
+                    .font(DS.Font.make(14, .medium, relativeTo: .callout))
+                    .opacity(0.9)
             }
 
             HStack {
                 if item.conversationId != nil {
                     Button(action: onOpenChat) {
                         Label("Open chat", systemImage: "bubble.left.fill")
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(DS.Font.make(14, .bold, relativeTo: .callout))
                             .padding(.horizontal, 14)
-                            .padding(.vertical, 8)
-                            .background(SS.primary)
-                            .foregroundColor(.white)
-                            .clipShape(Capsule())
+                            .frame(minHeight: 44)
+                            .background(DS.Color.onPrimary.opacity(0.18), in: RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
+                            .contentShape(RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.dsPressable)
                 }
                 Spacer()
                 if more > 0 {
@@ -126,17 +126,19 @@ struct ConfirmedShiftCard: View {
                         JobApplicationsView()
                     } label: {
                         Text("and \(more) more")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(SS.primary)
+                            .font(DS.Font.make(13, .bold, relativeTo: .footnote))
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(.dsPressable)
                 }
             }
         }
-        .padding(14)
-        .background(Color.white)
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
-        .padding(.horizontal, 16)
+        .foregroundStyle(DS.Color.onPrimary)
+        .padding(DS.Spacing.inset)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DS.Color.primary, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .padding(.horizontal, DS.Spacing.screenEdge)
     }
 
     /// Datum/Uhrzeit der naechsten gebuchten Schicht

@@ -33,143 +33,100 @@ struct EmployerRatingSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 24) {
+                VStack(alignment: .leading, spacing: DS.Spacing.xl) {
                     // Header
-                    VStack(spacing: 6) {
-                        Text(companyName)
-                            .font(.system(size: 18, weight: .bold))
-                        Text(jobTitle)
-                            .font(.system(size: 13))
-                            .foregroundColor(.secondary)
+                    HStack(spacing: DS.Spacing.sm) {
+                        DSAvatar(text: DSAvatar.initials(from: companyName), size: 48)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(companyName)
+                                .dsFont(.headline)
+                                .foregroundStyle(DS.Color.text)
+                            Text(jobTitle)
+                                .dsFont(.caption)
+                                .foregroundStyle(DS.Color.muted)
+                        }
+                        Spacer(minLength: 0)
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.top, 8)
 
-                    // Rating categories
-                    VStack(spacing: 0) {
+                    // Rating categories (flach)
+                    DSSection("Your rating") {
                         ratingRow("Communication", value: $communication,
-                                  desc: "Did they respond clearly and on time?")
-                        Divider().padding(.leading, 16)
+                                  desc: "Did they respond clearly and on time?", showsDivider: false)
                         ratingRow("Payment Fairness", value: $paymentFairness,
                                   desc: "Was the pay fair and on time?")
-                        Divider().padding(.leading, 16)
                         ratingRow("Work Environment", value: $workEnvironment,
                                   desc: "How was the atmosphere on site?")
-                        Divider().padding(.leading, 16)
                         ratingRow("Job Description Accuracy", value: $jobDescriptionAccuracy,
                                   desc: "Did the job match what was posted?")
-                        Divider().padding(.leading, 16)
                         ratingRow("Overall Experience", value: $overallExperience,
                                   desc: "How would you rate this employer overall?")
                     }
-                    .background(Color(uiColor: .systemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
-                    .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
-                    .padding(.horizontal, 16)
 
                     // Would work again
-                    VStack(alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: DS.Spacing.xs) {
                         Text("Would you work for this company again?")
-                            .font(.system(size: 14, weight: .semibold))
-                        HStack(spacing: 10) {
+                            .dsFont(.headline)
+                            .foregroundStyle(DS.Color.text)
+                        HStack(spacing: DS.Spacing.xs) {
                             workAgainButton("Yes", icon: "hand.thumbsup.fill", value: true)
                             workAgainButton("No", icon: "hand.thumbsdown.fill", value: false)
                         }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(16)
-                    .background(Color(uiColor: .systemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
-                    .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
-                    .padding(.horizontal, 16)
 
                     // Comment
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Comment (optional)")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(.secondary)
-                            .padding(.horizontal, 16)
-
-                        ZStack(alignment: .topLeading) {
-                            if comment.isEmpty {
-                                Text("Share your experience…")
-                                    .foregroundColor(.secondary.opacity(0.6))
-                                    .font(.system(size: 14))
-                                    .padding(.horizontal, 14)
-                                    .padding(.top, 12)
-                            }
-                            TextEditor(text: $comment)
-                                .font(.system(size: 14))
-                                .frame(minHeight: 90, maxHeight: 160)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .scrollContentBackground(.hidden)
-                        }
-                        .background(Color(uiColor: .systemBackground))
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
-                        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.secondary.opacity(0.15)))
-                        .padding(.horizontal, 16)
-
-                        HStack {
-                            Spacer()
-                            Text("\(comment.count)/400")
-                                .font(.system(size: 11))
-                                .foregroundColor(.secondary)
-                                .padding(.horizontal, 16)
-                        }
-                    }
+                    DSTextEditor(
+                        "Comment (optional)",
+                        placeholder: "Share your experience…",
+                        text: $comment,
+                        minLines: 3, maxLines: 6, maxLength: 400
+                    )
 
                     // Zustimmung zur Veroeffentlichung (Pflicht)
-                    Button { publishConsent.toggle() } label: {
-                        HStack(alignment: .top, spacing: 10) {
+                    Button {
+                        DS.Haptics.selection()
+                        publishConsent.toggle()
+                    } label: {
+                        HStack(alignment: .top, spacing: DS.Spacing.sm) {
                             Image(systemName: publishConsent ? "checkmark.square.fill" : "square")
-                                .font(.system(size: 22))
-                                .foregroundColor(publishConsent ? SS.primary : Color.secondary.opacity(0.5))
+                                .font(DS.Font.make(22, .regular, relativeTo: .title3))
+                                .foregroundStyle(publishConsent ? DS.Color.primary : DS.Color.muted)
                             Text("I confirm this rating is honest and based on my own experience. It will be shown on the company profile.")
-                                .font(.system(size: 13))
-                                .foregroundColor(.primary)
+                                .dsFont(.callout)
+                                .foregroundStyle(DS.Color.text)
                                 .multilineTextAlignment(.leading)
                             Spacer(minLength: 0)
                         }
+                        .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
-                    .padding(.horizontal, 16)
+                    .buttonStyle(.dsPressable)
                     .accessibilityAddTraits(publishConsent ? .isSelected : [])
 
                     // Submit
                     Button {
                         Task { await submit() }
                     } label: {
-                        Group {
-                            if isSubmitting {
-                                ProgressView().tint(.white)
-                            } else {
-                                Text("Submit Review")
-                                    .font(.system(size: 16, weight: .semibold))
-                                    .foregroundColor(.white)
-                            }
+                        if isSubmitting {
+                            ProgressView().tint(DS.Color.onPrimary)
+                        } else {
+                            Text("Submit Review")
                         }
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 52)
-                        .background(isValid ? SS.primary : Color.secondary.opacity(0.3))
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.ds(.primary))
                     .disabled(!isValid || isSubmitting)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 32)
                 }
+                .padding(.horizontal, DS.Spacing.screenEdge)
+                .padding(.top, DS.Spacing.xs)
+                .padding(.bottom, DS.Spacing.xl)
             }
+            .dsBackground()
             .navigationTitle("Rate Employer")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
+                        .tint(DS.Color.primary)
                 }
             }
-        }
-        .onChange(of: comment) { _, new in
-            if new.count > 400 { comment = String(new.prefix(400)) }
         }
         .alert("Could not submit review", isPresented: Binding(
             get: { errorMessage != nil },
@@ -184,47 +141,53 @@ struct EmployerRatingSheet: View {
     private func workAgainButton(_ title: String, icon: String, value: Bool) -> some View {
         let selected = wouldWorkAgain == value
         return Button { wouldWorkAgain = value } label: {
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                Text(title).font(.system(size: 14, weight: .semibold))
-            }
-            .foregroundColor(selected ? .white : .primary)
-            .frame(maxWidth: .infinity).padding(.vertical, 12)
-            .background(selected ? SS.primary : Color.secondary.opacity(0.12))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            Label(title, systemImage: icon)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.ds(selected ? .primary : .secondary, size: .medium))
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     // MARK: - Rating Row
 
-    private func ratingRow(_ label: String, value: Binding<Int>, desc: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+    private func ratingRow(_ label: String, value: Binding<Int>, desc: String, showsDivider: Bool = true) -> some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
             Text(label)
-                .font(.system(size: 14, weight: .semibold))
+                .dsFont(.body)
+                .fontWeight(.semibold)
+                .foregroundStyle(DS.Color.text)
             Text(desc)
-                .font(.system(size: 12))
-                .foregroundColor(.secondary)
-            HStack(spacing: 8) {
+                .dsFont(.caption)
+                .foregroundStyle(DS.Color.muted)
+            HStack(spacing: DS.Spacing.xxs) {
                 ForEach(1...5, id: \.self) { i in
-                    Button { value.wrappedValue = i } label: {
+                    Button {
+                        if value.wrappedValue != i { DS.Haptics.selection() }
+                        value.wrappedValue = i
+                    } label: {
                         Image(systemName: i <= value.wrappedValue ? "star.fill" : "star")
-                            .font(.system(size: 26))
-                            .foregroundColor(i <= value.wrappedValue ? .yellow : Color.secondary.opacity(0.3))
+                            .font(DS.Font.make(26, .regular, relativeTo: .title2))
+                            .foregroundStyle(i <= value.wrappedValue ? DS.Color.warning : DS.Color.border)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.dsPressable)
+                    .accessibilityLabel("\(i) star\(i == 1 ? "" : "s")")
+                    .accessibilityAddTraits(i == value.wrappedValue ? .isSelected : [])
                 }
-                Spacer()
+                Spacer(minLength: 0)
                 if value.wrappedValue > 0 {
                     Text(ratingLabel(value.wrappedValue))
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.secondary)
+                        .dsFont(.caption)
+                        .foregroundStyle(DS.Color.text2)
                 }
             }
+            .dsAnimation(.snappy, value: value.wrappedValue)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
+        .padding(.vertical, DS.Spacing.sm)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .top) {
+            if showsDivider { DSDivider() }
+        }
     }
 
     private func ratingLabel(_ v: Int) -> String {
@@ -257,6 +220,7 @@ struct EmployerRatingSheet: View {
                     comment:               comment.isEmpty ? nil : comment
                 )
             )
+            DS.Haptics.success()
             onSubmitted()
             dismiss()
         } catch {

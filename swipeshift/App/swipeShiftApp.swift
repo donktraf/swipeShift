@@ -21,6 +21,10 @@ struct swipeShiftApp: App {
     // Erscheinungsbild pro Geraet (Einstellungen → App Preferences)
     @AppStorage(AppColorSchemePreference.storageKey) private var colorSchemeRaw = AppColorSchemePreference.system.rawValue
 
+    init() {
+        DS.configureAppearance()
+    }
+
     private var effectiveColorScheme: ColorScheme? {
         #if DEBUG
         if let forced = DebugLaunch.colorScheme { return forced } // SS_DEBUG_APPEARANCE

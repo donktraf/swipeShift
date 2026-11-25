@@ -49,18 +49,19 @@ struct JobSwipeView: View {
     private var topJob:  Job? { filteredSwipeJobs.first }
     private var nextJob: Job? { filteredSwipeJobs.dropFirst().first }
 
+    // Skeleton waehrend des ersten Ladens
+    @State private var isLoadingInitial = false
+
     var body: some View {
         GeometryReader { geo in
-            ZStack(alignment: .bottom) {
-                SS.background().ignoresSafeArea()
-
-                VStack(spacing: 0) {
-                    header
-                    cardArea(geo: geo)
-                    actionBar
-                        .padding(.bottom, 24)
-                }
+            VStack(spacing: 0) {
+                header
+                categoryChips
+                cardArea(geo: geo)
+                actionBar
+                    .padding(.bottom, DS.Spacing.xl)
             }
+            .dsBackground()
         }
         .sheet(isPresented: $showFilterSheet) {
             FilterSheet(filterOptions: $filterOptions)
@@ -75,7 +76,9 @@ struct JobSwipeView: View {
         .sensoryFeedback(.impact(weight: .light), trigger: bookmarkHapticTrigger)
         .task {
             if jobStore.swipeJobs.isEmpty {
+                isLoadingInitial = true
                 await jobStore.loadSwipeJobs()
+                isLoadingInitial = false
             }
             await jobStore.loadSavedJobIds()
         }
@@ -87,43 +90,58 @@ struct JobSwipeView: View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Swipe")
-                    .font(.system(size: 28, weight: .bold))
-                    .foregroundColor(.white)
-                Text("\(filteredSwipeJobs.count) jobs available")
-                    .font(.system(size: 13))
-                    .foregroundColor(.white.opacity(0.7))
+                    .dsFont(.display)
+                    .foregroundStyle(DS.Color.text)
+                Text("\(filteredSwipeJobs.count) jobs left")
+                    .dsFont(.caption)
+                    .foregroundStyle(DS.Color.muted)
             }
             Spacer()
-            Button { showFilterSheet = true } label: {
-                ZStack(alignment: .topTrailing) {
-                    Image(systemName: "slider.horizontal.3")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundColor(SS.primary)
-                        .padding(10)
-                        .background(Color.white)
-                        .clipShape(Circle())
-                        .shadow(color: .black.opacity(0.08), radius: 4, x: 0, y: 2)
-                    if filterOptions.category != nil {
-                        Circle()
-                            .fill(Color.orange)
-                            .frame(width: 9, height: 9)
-                            .offset(x: 1, y: -1)
-                    }
+            ZStack(alignment: .topTrailing) {
+                DSIconButton(systemName: "slider.horizontal.3", label: "Filter") { showFilterSheet = true }
+                if filterOptions.category != nil {
+                    Circle()
+                        .fill(DS.Color.warning)
+                        .frame(width: 10, height: 10)
+                        .offset(x: 3, y: -3)
+                        .accessibilityHidden(true)
                 }
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .padding(.bottom, 14)
+        .padding(.horizontal, DS.Spacing.screenEdge)
+        .padding(.top, DS.Spacing.xs)
+        .padding(.bottom, DS.Spacing.sm)
+    }
+
+    // MARK: - Kategorie-Chips
+
+    private var categoryChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: DS.Spacing.xs) {
+                DSChip("All", isSelected: filterOptions.category == nil) {
+                    filterOptions.category = nil
+                }
+                ForEach(JobCategory.all) { category in
+                    DSChip(category.name, isSelected: filterOptions.category == category.name) {
+                        filterOptions.category = category.name
+                    }
+                }
+            }
+            .padding(.horizontal, DS.Spacing.screenEdge)
+        }
+        .padding(.bottom, DS.Spacing.xs)
     }
 
     // MARK: - Card Area
 
     private func cardArea(geo: GeometryProxy) -> some View {
-        let cardH = geo.size.height * 0.72
+        let cardH = geo.size.height * 0.62
 
         return ZStack {
-            if filteredSwipeJobs.isEmpty {
+            if isLoadingInitial && filteredSwipeJobs.isEmpty {
+                SwipeCardSkeleton()
+                    .frame(height: cardH)
+            } else if filteredSwipeJobs.isEmpty {
                 emptyState
             } else {
                 // Karte 3 (ganz hinten, kaum sichtbar)
@@ -170,23 +188,25 @@ struct JobSwipeView: View {
                 }
             }
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, DS.Spacing.screenEdge)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - Action Bar
 
     private var actionBar: some View {
-        HStack(spacing: 36) {
+        HStack(spacing: DS.Spacing.xl) {
             // Skip (links)
-            circleButton(icon: "xmark", color: .red, size: 58) {
+            circleButton(icon: "xmark", label: "Skip", style: .skip, size: 64) {
                 if let job = topJob { animateSwipe(direction: -1, job: job) }
             }
 
             // Bookmark (speichern)
+            let isSaved = jobStore.savedJobIds.contains(topJob?.id ?? "")
             circleButton(
-                icon: jobStore.savedJobIds.contains(topJob?.id ?? "") ? "bookmark.fill" : "bookmark",
-                color: SS.primary, size: 44
+                icon: isSaved ? "bookmark.fill" : "bookmark",
+                label: isSaved ? "Remove from saved" : "Save job",
+                style: .save, size: 52
             ) {
                 guard let job = topJob else { return }
                 bookmarkHapticTrigger.toggle()
@@ -194,48 +214,50 @@ struct JobSwipeView: View {
             }
 
             // Apply (rechts)
-            circleButton(icon: "checkmark", color: .green, size: 58) {
+            circleButton(icon: "checkmark", label: "Apply", style: .apply, size: 64) {
                 if let job = topJob { animateSwipe(direction: 1, job: job) }
             }
         }
-        .padding(.top, 22)
+        .padding(.top, DS.Spacing.md)
+        .opacity(filteredSwipeJobs.isEmpty ? 0.45 : 1)
+        .disabled(filteredSwipeJobs.isEmpty)
     }
 
-    private func circleButton(icon: String, color: Color, size: CGFloat, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+    private enum CircleStyle { case skip, save, apply }
+
+    private func circleButton(icon: String, label: String, style: CircleStyle, size: CGFloat, action: @escaping () -> Void) -> some View {
+        let foreground: Color = {
+            switch style {
+            case .skip: return DS.Color.danger
+            case .save: return DS.Color.primaryText
+            case .apply: return DS.Color.onPrimary
+            }
+        }()
+        let background: Color = style == .apply ? DS.Color.success : DS.Color.surface
+        return Button(action: action) {
             Image(systemName: icon)
-                .font(.system(size: size * 0.38, weight: .bold))
-                .foregroundColor(color)
+                .font(DS.Font.make(size * 0.36, .bold, relativeTo: nil))
+                .foregroundStyle(foreground)
                 .frame(width: size, height: size)
-                .background(Color.white)
-                .clipShape(Circle())
-                .shadow(color: color.opacity(0.22), radius: 10, x: 0, y: 4)
+                .background(background, in: Circle())
+                .overlay(Circle().strokeBorder(style == .apply ? Color.clear : DS.Color.border, lineWidth: 1))
+                .dsCardShadow()
+                .contentShape(Circle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(DSPressableStyle(scale: 0.92))
+        .accessibilityLabel(label)
     }
 
     // MARK: - Empty State
 
     private var emptyState: some View {
-        VStack(spacing: 18) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 52))
-                .foregroundColor(.white.opacity(0.35))
-            Text("No more jobs")
-                .font(.system(size: 20, weight: .bold))
-                .foregroundColor(.white.opacity(0.8))
-            Text("Expand your search or\ncheck back later.")
-                .font(.system(size: 14))
-                .foregroundColor(.white.opacity(0.5))
-                .multilineTextAlignment(.center)
-            Button {
-                Task { await jobStore.loadJobsAll() }
-            } label: {
-                Text("Refresh")
-            }
-            .buttonStyle(SSPrimaryButtonStyle())
-            .padding(.horizontal, 60)
-        }
+        DSEmptyState(
+            systemIcon: "sparkles",
+            title: "No more jobs",
+            message: "Expand your search or check back later.",
+            actionTitle: "Refresh",
+            action: { Task { await jobStore.loadJobsAll() } }
+        )
     }
 
     // MARK: - Swipe-Logik
@@ -276,8 +298,10 @@ struct JobSwipeView: View {
             try? await Task.sleep(nanoseconds: 280_000_000)
             var failure: ApplyResult?
             if direction > 0 {
-                do { try await jobStore.apply(to: job, shiftIds: ApplyFlowView.singleShiftIds(for: job)) }
-                catch { failure = ApplyFlowView.result(for: error) }
+                do {
+                    try await jobStore.apply(to: job, shiftIds: ApplyFlowView.singleShiftIds(for: job))
+                    DS.Haptics.success()
+                } catch { failure = ApplyFlowView.result(for: error) }
             } else {
                 await jobStore.skip(job)
             }
@@ -300,45 +324,36 @@ private struct SwipeJobCard: View {
     var isDraggingRight: Bool = false
     var isDraggingLeft:  Bool = false
 
+    private let cardShape = RoundedRectangle(cornerRadius: DS.Radius.sheet, style: .continuous)
+
     var body: some View {
-        ZStack(alignment: .topLeading) {
+        ZStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 0) {
                 cardHeader
-                Divider().padding(.horizontal, 16)
-                quickInfoRow
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                Divider().padding(.horizontal, 16)
-                ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 0) {
-                        descriptionBlock
-                        tagsBlock
-                        if let bd = job.reviewBreakdown {
-                            ratingsBlock(bd)
-                        }
-                        if !job.matchReasons.isEmpty {
-                            matchReasonsBlock
-                        }
-                        Spacer(minLength: 12)
-                    }
+                // Inhalt wird nie abgeschnitten: ViewThatFits waehlt die ausfuehrlichste Variante, die passt
+                ViewThatFits(in: .vertical) {
+                    cardContent(showRatings: true, showReasons: true, showTags: true)
+                    cardContent(showRatings: false, showReasons: true, showTags: true)
+                    cardContent(showRatings: false, showReasons: false, showTags: true)
+                    cardContent(showRatings: false, showReasons: false, showTags: false)
                 }
+                .frame(maxHeight: .infinity, alignment: .top)
                 cardFooter
             }
-            .background(Color(uiColor: .systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-            .shadow(color: .black.opacity(0.13), radius: 20, x: 0, y: 8)
+            .background(DS.Color.surface, in: cardShape)
+            .clipShape(cardShape)
+            .overlay(cardShape.strokeBorder(DS.Color.border, lineWidth: 1))
+            .dsCardShadow()
 
-            // APPLY Badge
+            // Stempel: APPLY (rechts oben) / SKIP (links oben)
             if isDraggingRight && dragFraction > 0.08 {
-                badgeView(text: "APPLY ✓", color: .green, rotation: -14)
+                stamp(text: "APPLY", tone: .success, rotation: 12)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
                     .opacity(Double(dragFraction))
             }
-
-            // SKIP Badge
             if isDraggingLeft && dragFraction > 0.08 {
-                badgeView(text: "SKIP ✗", color: .red, rotation: 14)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    .padding(.horizontal, 16)
+                stamp(text: "SKIP", tone: .danger, rotation: -12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .opacity(Double(dragFraction))
             }
         }
@@ -346,259 +361,270 @@ private struct SwipeJobCard: View {
 
     // MARK: Card sections
 
-    private var cardHeader: some View {
-        HStack(spacing: 14) {
-            Text(job.logoEmoji)
-                .font(.system(size: 36))
-                .frame(width: 64, height: 64)
-                .background(Color.gray.opacity(0.07))
-                .clipShape(RoundedRectangle(cornerRadius: 18))
-
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 6) {
-                    Text(job.title)
-                        .font(.system(size: 17, weight: .bold))
-                        .foregroundColor(.primary)
-                        .lineLimit(1)
-                    if job.isVerified == true {
-                        Image(systemName: "checkmark.seal.fill")
-                            .font(.system(size: 13))
-                            .foregroundColor(SS.primary)
-                    }
-                }
-                Text(job.company)
-                    .font(.system(size: 13))
-                    .foregroundColor(.secondary)
-
-                if let cat = job.category {
-                    Text(cat)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(SS.primary)
-                        .clipShape(Capsule())
-                }
+    private func cardContent(showRatings: Bool, showReasons: Bool, showTags: Bool) -> some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            titleBlock
+            chipsRow
+            descriptionBlock
+            if showTags { tagsBlock }
+            if showRatings, let bd = job.reviewBreakdown {
+                ratingsBlock(bd)
             }
-            Spacer()
+            if showReasons && !job.matchReasons.isEmpty {
+                matchReasonsBlock
+            }
         }
-        .padding(16)
+        .padding(DS.Spacing.screenEdge)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
-    private var quickInfoRow: some View {
-        HStack(spacing: 10) {
-            SwipePill(icon: "mappin",    text: job.location)
-            SwipePill(icon: "banknote",  text: job.payText)
-            if let dur = job.duration {
-                SwipePill(icon: "clock", text: dur)
+    /// Getoenter Kopfbereich mit grossem Avatar
+    private var cardHeader: some View {
+        ZStack {
+            DS.Color.primarySoft
+            DSAvatar(text: job.logoEmoji, size: 84, shape: .roundedSquare, tone: .neutral)
+                .background(DS.Color.surface, in: RoundedRectangle(cornerRadius: 84 * 0.3, style: .continuous))
+        }
+        .frame(height: 140)
+        .accessibilityHidden(true)
+    }
+
+    private var titleBlock: some View {
+        HStack(alignment: .top, spacing: DS.Spacing.sm) {
+            VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
+                HStack(spacing: DS.Spacing.xxs) {
+                    Text(job.title)
+                        .dsFont(.title)
+                        .foregroundStyle(DS.Color.text)
+                        .lineLimit(2)
+                    if job.isVerified == true {
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(DS.Font.make(14, .semibold))
+                            .foregroundStyle(DS.Color.primaryText)
+                            .accessibilityLabel("Verified")
+                    }
+                }
+                Text(job.distanceText.isEmpty ? job.company : "\(job.company) · \(job.distanceText)")
+                    .dsFont(.callout)
+                    .foregroundStyle(DS.Color.muted)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: DS.Spacing.xs)
+            Text(job.payText)
+                .font(DS.Font.make(18, .extrabold, relativeTo: .headline))
+                .foregroundStyle(DS.Color.text)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+    }
+
+    private var chipsRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: DS.Spacing.xs) {
+                SwipePill(icon: "mappin", text: job.location)
+                if let dur = job.duration {
+                    SwipePill(icon: "clock", text: dur)
+                }
+                if let cat = job.category {
+                    SwipePill(icon: nil, text: cat)
+                }
             }
         }
     }
 
     private var descriptionBlock: some View {
         Text(job.shortInfo)
-            .font(.system(size: 13))
-            .foregroundColor(.secondary)
+            .dsFont(.callout)
+            .foregroundStyle(DS.Color.text2)
             .lineLimit(3)
-            .padding(.horizontal, 16)
-            .padding(.top, 10)
-            .padding(.bottom, 4)
     }
 
+    @ViewBuilder
     private var tagsBlock: some View {
-        Group {
-            if !job.tags.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(job.tags, id: \.self) { tag in
-                            Text(tag)
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(SS.primary)
-                                .padding(.vertical, 5)
-                                .padding(.horizontal, 10)
-                                .background(SS.primary.opacity(0.1))
-                                .clipShape(Capsule())
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                }
-                .padding(.vertical, 8)
-            }
+        if !job.tags.isEmpty {
+            FlowTagsView(tags: Array(job.tags.prefix(4)))
         }
     }
 
     // MARK: Ratings & Reviews block
 
     private func ratingsBlock(_ bd: JobReviewSummary) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Divider().padding(.horizontal, 16)
-
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+            DSDivider()
             Text("RATINGS & REVIEWS")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(.secondary)
-                .padding(.horizontal, 16)
-                .padding(.top, 10)
+                .dsFont(.sectionLabel)
+                .foregroundStyle(DS.Color.muted)
+                .padding(.top, DS.Spacing.xxs)
 
-            HStack(spacing: 12) {
+            HStack(spacing: DS.Spacing.sm) {
                 VStack(spacing: 2) {
                     Text(String(format: "%.1f", bd.avgRating))
-                        .font(.system(size: 28, weight: .bold))
-                        .foregroundColor(.primary)
+                        .font(DS.Font.make(28, .extrabold, relativeTo: .title))
+                        .foregroundStyle(DS.Color.text)
                     HStack(spacing: 2) {
                         ForEach(1...5, id: \.self) { i in
                             Image(systemName: Double(i) <= bd.avgRating ? "star.fill" : (Double(i) - 0.5 <= bd.avgRating ? "star.leadinghalf.filled" : "star"))
-                                .font(.system(size: 9))
-                                .foregroundColor(.yellow)
+                                .font(DS.Font.make(9, .semibold, relativeTo: .caption2))
+                                .foregroundStyle(DS.Color.warning)
                         }
                     }
-                    Text("Based on \(bd.totalReviews) review\(bd.totalReviews == 1 ? "" : "s")")
-                        .font(.system(size: 9))
-                        .foregroundColor(.secondary)
+                    Text("\(bd.totalReviews) review\(bd.totalReviews == 1 ? "" : "s")")
+                        .font(DS.Font.make(10, .medium, relativeTo: .caption2))
+                        .foregroundStyle(DS.Color.muted)
                 }
-                .padding(.leading, 16)
+                .fixedSize()
 
-                Divider().frame(height: 54)
-
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
                     ratingBar("Communication",   value: bd.communication)
                     ratingBar("Payment",         value: bd.paymentFairness)
                     ratingBar("Work Environment", value: bd.workEnvironment)
                     ratingBar("Job Description", value: bd.jobDescriptionAccuracy)
                     ratingBar("Overall",         value: bd.overallExperience)
                 }
-                .padding(.trailing, 16)
             }
 
             if !bd.tags.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
+                    HStack(spacing: DS.Spacing.xs) {
                         ForEach(bd.tags, id: \.self) { tag in
-                            Text(tag)
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(.green)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 5)
-                                .background(Color.green.opacity(0.1))
-                                .clipShape(Capsule())
+                            DSBadge(tag, .tone(.success))
                         }
                     }
-                    .padding(.horizontal, 16)
                 }
-                .padding(.bottom, 10)
             }
         }
     }
 
     private func ratingBar(_ label: String, value: Double) -> some View {
-        HStack(spacing: 5) {
+        HStack(spacing: DS.Spacing.xs) {
             Text(label)
-                .font(.system(size: 9))
-                .foregroundColor(.secondary)
-                .frame(width: 72, alignment: .leading)
+                .font(DS.Font.make(10, .medium, relativeTo: .caption2))
+                .foregroundStyle(DS.Color.muted)
+                .lineLimit(1)
+                .frame(width: 84, alignment: .leading)
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 2).fill(Color.secondary.opacity(0.12))
-                    RoundedRectangle(cornerRadius: 2).fill(SS.primary.opacity(0.65))
-                        .frame(width: geo.size.width * CGFloat(value / 5.0))
+                    Capsule().fill(DS.Color.surface2)
+                    Capsule().fill(DS.Color.primary)
+                        .frame(width: geo.size.width * CGFloat(min(max(value / 5.0, 0), 1)))
                 }
             }
-            .frame(height: 4)
+            .frame(height: 6)
             Text(String(format: "%.1f", value))
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundColor(.secondary)
-                .frame(width: 22, alignment: .trailing)
+                .font(DS.Font.make(10, .semibold, relativeTo: .caption2))
+                .foregroundStyle(DS.Color.text2)
+                .frame(width: 24, alignment: .trailing)
         }
     }
 
     // MARK: Why you see this Job block
 
     private var matchReasonsBlock: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Divider().padding(.horizontal, 16)
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+            DSDivider()
             Text("WHY YOU SEE THIS JOB")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(.secondary)
-                .padding(.horizontal, 16)
-                .padding(.top, 10)
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(job.matchReasons.prefix(3), id: \.self) { reason in
-                    HStack(spacing: 6) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 12))
-                            .foregroundColor(SS.primary)
-                        Text(reason)
-                            .font(.system(size: 12))
-                            .foregroundColor(.primary)
-                    }
+                .dsFont(.sectionLabel)
+                .foregroundStyle(DS.Color.muted)
+                .padding(.top, DS.Spacing.xxs)
+            ForEach(job.matchReasons.prefix(2), id: \.self) { reason in
+                HStack(spacing: DS.Spacing.xs) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(DS.Font.make(13, .semibold, relativeTo: .caption))
+                        .foregroundStyle(DS.Color.primary)
+                    Text(reason)
+                        .dsFont(.caption)
+                        .foregroundStyle(DS.Color.text)
+                        .lineLimit(1)
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 10)
         }
     }
 
     private var cardFooter: some View {
         HStack {
             Label(job.shiftText, systemImage: "calendar")
-                .font(.system(size: 12))
-                .foregroundColor(.secondary)
+                .dsFont(.caption)
+                .foregroundStyle(DS.Color.muted)
                 .lineLimit(1)
             Spacer()
             if let spots = job.openSpots {
                 Label("\(spots) open", systemImage: "person.2")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.green)
+                    .font(DS.Font.make(12, .bold, relativeTo: .caption))
+                    .foregroundStyle(DS.Color.success)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(Color.gray.opacity(0.04))
-        .clipShape(
-            .rect(
-                bottomLeadingRadius: 28,
-                bottomTrailingRadius: 28,
-                style: .continuous
-            )
-        )
+        .padding(.horizontal, DS.Spacing.screenEdge)
+        .padding(.vertical, DS.Spacing.sm)
+        .frame(maxWidth: .infinity)
+        .background(DS.Color.surface2)
     }
 
-    // MARK: Badge
+    // MARK: Stempel
 
-    private func badgeView(text: String, color: Color, rotation: Double) -> some View {
+    private func stamp(text: String, tone: DS.Tone, rotation: Double) -> some View {
         Text(text)
-            .font(.system(size: 18, weight: .black))
-            .foregroundColor(color)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .font(DS.Font.make(15, .extrabold, relativeTo: nil))
+            .tracking(1)
+            .foregroundStyle(tone.foreground)
+            .padding(.horizontal, 14)
+            .padding(.vertical, DS.Spacing.xs)
+            .background(tone.soft.opacity(0.9), in: RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(color, lineWidth: 2.5)
+                RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
+                    .strokeBorder(tone.foreground, lineWidth: 2.5)
             )
             .rotationEffect(.degrees(rotation))
-            .padding(.horizontal, 16)
-            .padding(.top, 20)
+            .padding(DS.Spacing.md)
+            .accessibilityHidden(true)
+    }
+}
+
+// MARK: - Skeleton
+
+private struct SwipeCardSkeleton: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            DS.Color.surface2.frame(height: 140)
+            VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                DSSkeletonBlock(width: 200, height: 22)
+                DSSkeletonBlock(width: 140, height: 14)
+                DSSkeletonBlock(height: 14)
+                DSSkeletonBlock(height: 14)
+                Spacer()
+            }
+            .padding(DS.Spacing.screenEdge)
+        }
+        .frame(maxWidth: .infinity)
+        .background(DS.Color.surface, in: RoundedRectangle(cornerRadius: DS.Radius.sheet, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.sheet, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: DS.Radius.sheet, style: .continuous)
+                .strokeBorder(DS.Color.border, lineWidth: 1)
+        )
+        .accessibilityLabel("Loading jobs")
     }
 }
 
 // MARK: - SwipePill
 
 private struct SwipePill: View {
-    let icon: String
+    let icon: String?
     let text: String
 
     var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.system(size: 11))
+        HStack(spacing: DS.Spacing.xxs) {
+            if let icon {
+                Image(systemName: icon)
+                    .font(DS.Font.make(11, .semibold, relativeTo: .caption))
+            }
             Text(text)
-                .font(.system(size: 12))
+                .font(DS.Font.make(12, .semibold, relativeTo: .caption))
                 .lineLimit(1)
         }
-        .foregroundColor(.secondary)
-        .padding(.vertical, 5)
-        .padding(.horizontal, 9)
-        .background(Color.gray.opacity(0.08))
-        .clipShape(Capsule())
+        .foregroundStyle(DS.Color.text2)
+        .padding(.vertical, 6)
+        .padding(.horizontal, 10)
+        .background(DS.Color.surface2, in: Capsule())
     }
 }
 

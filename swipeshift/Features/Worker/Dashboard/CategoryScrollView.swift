@@ -29,43 +29,48 @@ struct CategoryScrollView: View {
     // Callback wenn User auf eine Kategorie tippt
     let onSelect: (JobCategory) -> Void
 
+    private static let tones: [DS.Tone] = [.primary, .success, .warning, .neutral]
+
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 16) {
-                ForEach(JobCategory.all) { category in
-                    CategoryItemView(category: category)
-                        .onTapGesture {
-                            onSelect(category)
-                        }
+            HStack(alignment: .top, spacing: DS.Spacing.xs) {
+                ForEach(Array(JobCategory.all.enumerated()), id: \.element.id) { index, category in
+                    Button {
+                        DS.Haptics.selection()
+                        onSelect(category)
+                    } label: {
+                        CategoryItemView(category: category, tone: Self.tones[index % Self.tones.count])
+                    }
+                    .buttonStyle(.dsPressable)
+                    .accessibilityLabel(category.name)
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
+            .padding(.horizontal, DS.Spacing.screenEdge)
         }
     }
 }
 
-// NEU
+/// Getöntes Rundquadrat (64x64) mit Icon + Name darunter.
 struct CategoryItemView: View {
     let category: JobCategory
+    var tone: DS.Tone = .primary
 
     var body: some View {
-        VStack(spacing: 8) {
-            Circle()
-                .fill(Color.white)
+        VStack(spacing: DS.Spacing.xs) {
+            Image(systemName: category.icon)
+                .font(DS.Font.make(24, .semibold, relativeTo: nil))
+                .foregroundStyle(tone.foreground)
                 .frame(width: 64, height: 64)
-                .shadow(color: .black.opacity(0.08), radius: 6, x: 0, y: 2)
-                .overlay(
-                    Image(systemName: category.icon)
-                        .font(.system(size: 26, weight: .semibold))
-                        .foregroundColor(SS.primary)
-                )
+                .background(tone.soft, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
 
             Text(category.name)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(.primary)
+                .font(DS.Font.make(12, .semibold, relativeTo: .caption))
+                .foregroundStyle(DS.Color.text2)
                 .multilineTextAlignment(.center)
-                .frame(width: 72)
+                .lineLimit(2)
+                .frame(width: 80)
         }
+        .frame(width: 84)
+        .contentShape(Rectangle())
     }
 }

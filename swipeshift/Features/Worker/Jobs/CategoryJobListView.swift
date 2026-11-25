@@ -18,59 +18,49 @@ struct CategoryJobListView: View {
     @State private var errorMessage: String? = nil
 
     var body: some View {
-        ZStack {
-            SS.background().ignoresSafeArea()
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: DS.Spacing.sm) {
+                if isLoading && jobs.isEmpty {
+                    ForEach(0..<4, id: \.self) { _ in DashboardJobCardSkeleton() }
 
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 12) {
-                    if isLoading {
-                        ProgressView()
-                            .tint(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, 60)
+                } else if let err = errorMessage {
+                    DSEmptyState(
+                        systemIcon: "wifi.exclamationmark",
+                        title: "Something went wrong",
+                        message: err,
+                        actionTitle: "Retry",
+                        action: { Task { await load() } }
+                    )
+                    .padding(.top, DS.Spacing.xxl)
 
-                    } else if let err = errorMessage {
-                        VStack(spacing: 12) {
-                            Text(err)
-                                .font(.system(size: 13))
-                                .foregroundColor(.white.opacity(0.5))
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal, 24)
-                            Button("Retry") { Task { await load() } }
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(SS.primary)
+                } else if jobs.isEmpty {
+                    DSEmptyState(
+                        systemIcon: category.icon,
+                        title: "No \(category.name) jobs right now.",
+                        message: "Check back later or explore other categories."
+                    )
+                    .padding(.top, DS.Spacing.xxl)
+
+                } else {
+                    ForEach(jobs) { job in
+                        NavigationLink {
+                            JobDetailView(job: job)
+                        } label: {
+                            DashboardJobCard(job: job)
                         }
-                        .padding(.top, 60)
-
-                    } else if jobs.isEmpty {
-                        VStack(spacing: 16) {
-                            Image(systemName: category.icon)
-                                .font(.system(size: 48))
-                                .foregroundColor(.secondary.opacity(0.3))
-                            Text("No \(category.name) jobs right now.")
-                                .font(.system(size: 16))
-                                .foregroundColor(.secondary)
-                            Text("Check back later or explore other categories.")
-                                .font(.system(size: 14))
-                                .foregroundColor(.secondary.opacity(0.7))
-                                .multilineTextAlignment(.center)
-                        }
-                        .padding(.top, 60)
-                        .padding(.horizontal, 32)
-
-                    } else {
-                        ForEach(jobs) { job in
-                            NavigationLink {
-                                JobDetailView(job: job)
-                            } label: {
-                                DashboardJobCard(job: job)
-                            }
-                            .buttonStyle(.plain)
-                        }
+                        .buttonStyle(.dsPressable)
                     }
                 }
-                .padding(16)
             }
+            .padding(.horizontal, DS.Spacing.screenEdge)
+            .padding(.top, DS.Spacing.sm)
+            .padding(.bottom, DS.Spacing.xxl)
+        }
+        .dsBackground()
+        .refreshable {
+            async let reloaded: Void = load()
+            async let saved: Void = jobStore.loadSavedJobIds()
+            _ = await (reloaded, saved)
         }
         .navigationTitle(category.name)
         .navigationBarTitleDisplayMode(.large)

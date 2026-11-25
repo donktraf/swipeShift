@@ -29,26 +29,25 @@ struct LocationMapPreview: View {
 
     var body: some View {
         if let coordinate {
-            VStack(spacing: 0) {
+            VStack(spacing: DS.Spacing.xs) {
                 Map(initialPosition: .region(MKCoordinateRegion(
                     center: coordinate,
                     span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
                 )), interactionModes: []) {
-                    Marker(title, coordinate: coordinate).tint(SS.primary)
+                    Marker(title, coordinate: coordinate).tint(DS.Color.primary)
                 }
                 .frame(height: height)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-                .padding(.horizontal, 14)
+                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
+                        .strokeBorder(DS.Color.border, lineWidth: 1)
+                )
                 .allowsHitTesting(false)
 
                 Button { openInMaps(coordinate) } label: {
                     Label("Open in Maps", systemImage: "map")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(SS.primary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.ds(.soft, size: .medium))
             }
         }
     }

@@ -11,6 +11,8 @@ struct CompanyProfileView: View {
     let companyName: String
     let logoEmoji:   String         // Sofort sichtbar während API lädt
 
+    @Environment(\.dismiss) private var dismiss
+
     @State private var profile:         CompanyProfileDTO? = nil
     @State private var isLoading        = true
     @State private var errorMsg:        String? = nil
@@ -20,47 +22,89 @@ struct CompanyProfileView: View {
     @State private var isSaveLoading    = false
 
     var body: some View {
-        SubScreenShell(title: "Company Profile", trailing: { bookmarkButton }) {
+        VStack(spacing: 0) {
+            topBar
+
             if isLoading {
-                VStack { Spacer(); ProgressView(); Spacer() }
+                loadingView
             } else if let errorMsg {
-                VStack(spacing: 12) {
+                VStack {
                     Spacer()
-                    Image(systemName: "exclamationmark.circle").font(.system(size: 40)).foregroundColor(.secondary)
-                    Text(errorMsg).font(.subheadline).foregroundColor(.secondary).multilineTextAlignment(.center)
-                        .padding(.horizontal, 32)
+                    DSEmptyState(
+                        systemIcon: "exclamationmark.circle",
+                        title: "Something went wrong",
+                        message: errorMsg
+                    )
                     Spacer()
                 }
             } else if let p = profile {
-                VStack(spacing: 20) {
-                    companyHeader(p)
-                    if !p.businessAreas.isEmpty { areasSection(p) }
-                    if let about = p.about, !about.isEmpty { aboutSection(about) }
-                    ratingsSection(p)
-                    if !p.locations.isEmpty { locationsSection(p) }
-                    if p.hasAddress { CompanyAddressCard(company: p) }
-                    if p.hasContactPerson || p.hasSocialLinks { CompanyPeopleAndLinksCard(company: p) }
-                    if hasContact(p) { contactSection(p) }
-                    viewOpenJobsButton(p)
-                    Spacer().frame(height: 20)
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: DS.Spacing.xl) {
+                        companyHeader(p)
+                        if !p.businessAreas.isEmpty { areasSection(p) }
+                        if let about = p.about, !about.isEmpty { aboutSection(about) }
+                        ratingsSection(p)
+                        if !p.locations.isEmpty { locationsSection(p) }
+                        if p.hasAddress { CompanyAddressCard(company: p) }
+                        if p.hasContactPerson || p.hasSocialLinks { CompanyPeopleAndLinksCard(company: p) }
+                        if hasContact(p) { contactSection(p) }
+                        viewOpenJobsButton(p)
+                    }
+                    .padding(.horizontal, DS.Spacing.screenEdge)
+                    .padding(.top, DS.Spacing.xs)
+                    .padding(.bottom, DS.Spacing.xxl)
                 }
+                .transition(.opacity)
             }
         }
+        .dsBackground()
+        .navigationBarHidden(true)
         .task { await load() }
     }
 
-    // MARK: - Bookmark Button
+    // MARK: - Top Bar
+
+    private var topBar: some View {
+        HStack {
+            DSIconButton(systemName: "chevron.left", label: "Back") { dismiss() }
+            Spacer()
+            Text("Company Profile")
+                .dsFont(.headline)
+                .foregroundStyle(DS.Color.text)
+                .accessibilityAddTraits(.isHeader)
+            Spacer()
+            bookmarkButton
+        }
+        .padding(.horizontal, DS.Spacing.screenEdge)
+        .padding(.vertical, DS.Spacing.xs)
+    }
 
     private var bookmarkButton: some View {
-        Button { toggleSave() } label: {
-            Image(systemName: isSaved ? "bookmark.fill" : "bookmark")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundColor(isSaved ? SS.primary : .white)
-                .padding(10)
-                .background(Color.white.opacity(0.15))
-                .clipShape(Circle())
-        }
+        DSIconButton(
+            systemName: isSaved ? "bookmark.fill" : "bookmark",
+            label: isSaved ? "Remove from saved" : "Save company"
+        ) { toggleSave() }
         .disabled(isSaveLoading)
+    }
+
+    // MARK: - Skeleton beim Laden
+
+    private var loadingView: some View {
+        VStack(spacing: DS.Spacing.md) {
+            DSAvatar(text: logoEmoji, size: 88)
+            DSSkeletonBlock(width: 180, height: 22)
+            DSSkeletonBlock(width: 120, height: 14)
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: DS.Spacing.xs) {
+                ForEach(0..<4, id: \.self) { _ in
+                    DSSkeletonBlock(height: 76, radius: DS.Radius.tile)
+                }
+            }
+            .padding(.top, DS.Spacing.xs)
+            Spacer()
+        }
+        .padding(.horizontal, DS.Spacing.screenEdge)
+        .padding(.top, DS.Spacing.md)
+        .accessibilityLabel("Loading company profile")
     }
 
     // MARK: - Load
@@ -102,33 +146,17 @@ struct CompanyProfileView: View {
     // MARK: - Header
 
     private func companyHeader(_ p: CompanyProfileDTO) -> some View {
-        VStack(spacing: 14) {
-            ZStack(alignment: .bottomTrailing) {
-                Text(p.logoEmoji)
-                    .font(.system(size: 48))
-                    .frame(width: 90, height: 90)
-                    .background(Color.white.opacity(0.2))
-                    .clipShape(RoundedRectangle(cornerRadius: 22))
-                if p.isVerified {
-                    Image(systemName: "checkmark.seal.fill")
-                        .font(.system(size: 20))
-                        .foregroundColor(SS.primary)
-                        .background(Color.white.clipShape(Circle()))
-                        .offset(x: 4, y: 4)
-                }
-            }
+        VStack(spacing: DS.Spacing.md) {
+            VStack(spacing: DS.Spacing.xs) {
+                DSAvatar(text: p.logoEmoji, size: 88)
 
-            VStack(spacing: 6) {
-                HStack(spacing: 6) {
+                HStack(spacing: DS.Spacing.xs) {
                     Text(p.name)
-                        .font(.system(size: 22, weight: .bold))
-                        .foregroundColor(.white)
+                        .dsFont(.title)
+                        .foregroundStyle(DS.Color.text)
+                        .multilineTextAlignment(.center)
                     if p.isVerified {
-                        Text("Verified")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 8).padding(.vertical, 3)
-                            .background(SS.primary).clipShape(Capsule())
+                        DSBadge("Verified", .tone(.primary))
                     }
                 }
                 if p.hasTaglineInfo {
@@ -136,265 +164,223 @@ struct CompanyProfileView: View {
                 }
                 if let loc = p.locations.first {
                     Label(loc, systemImage: "mappin")
-                        .font(.system(size: 13))
-                        .foregroundColor(.white.opacity(0.7))
+                        .dsFont(.callout)
+                        .foregroundStyle(DS.Color.muted)
                 }
                 if let replyText = ResponseTimeText.make(hours: p.typicalResponseHours, fallback: p.replyTime) {
                     Label(replyText, systemImage: "clock")
-                        .font(.system(size: 12))
-                        .foregroundColor(.white.opacity(0.7))
+                        .dsFont(.caption)
+                        .foregroundStyle(DS.Color.muted)
                 }
                 // UX-Notiz (Notion): bei wenig Daten "New on platform" statt wackeliger Zahlen
                 if p.responseRate == nil && p.typicalResponseHours == nil {
-                    Text("New on platform")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(Color.white.opacity(0.2)).clipShape(Capsule())
+                    DSBadge("New on platform", .tone(.neutral))
                         .accessibilityHint("Not enough applications yet to show response statistics")
                 }
             }
+            .frame(maxWidth: .infinity)
 
-            HStack(spacing: 0) {
-                CompanyStatCell(value: "\(p.completedJobs)+", label: "Jobs Done")
+            // Kennzahlen als getoente Kacheln
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: DS.Spacing.xs), GridItem(.flexible())], spacing: DS.Spacing.xs) {
+                DSTile(label: "Jobs done", value: "\(p.completedJobs)+", tone: .primary)
                 if let rating = p.rating {
-                    Divider().frame(height: 30).background(Color.white.opacity(0.3))
-                    CompanyStatCell(value: String(format: "%.1f", rating), label: "Rating")
+                    DSTile(label: "Rating", value: String(format: "%.1f", rating), tone: .warning)
                 }
                 if let rate = p.responseRate {
-                    Divider().frame(height: 30).background(Color.white.opacity(0.3))
-                    CompanyStatCell(value: "\(Int((rate * 100).rounded()))%", label: "Response Rate")
+                    DSTile(label: "Response rate", value: "\(Int((rate * 100).rounded()))%", tone: .success)
                 }
-                Divider().frame(height: 30).background(Color.white.opacity(0.3))
-                CompanyStatCell(value: "\(p.activeJobs)", label: "Open Jobs")
+                DSTile(label: "Open jobs", value: "\(p.activeJobs)", tone: .neutral)
             }
-            .padding(.horizontal, 16).padding(.vertical, 12)
-            .background(Color.white.opacity(0.15))
-            .clipShape(RoundedRectangle(cornerRadius: 14))
-            .padding(.horizontal, 16)
         }
-        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Areas
 
     private func areasSection(_ p: CompanyProfileDTO) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(p.businessAreas, id: \.self) { area in
-                    Text(area)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 12).padding(.vertical, 7)
-                        .background(Color.white.opacity(0.18))
-                        .clipShape(Capsule())
-                }
-            }
-            .padding(.horizontal, 16)
-        }
+        FlowTagsView(tags: p.businessAreas)
     }
 
     // MARK: - About
 
     private func aboutSection(_ about: String) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("ABOUT THE COMPANY")
-                .font(.system(size: 11, weight: .semibold)).foregroundColor(.secondary)
-                .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
+        DSSection("About the company", ruled: false) {
             Text(about)
-                .font(.system(size: 14)).foregroundColor(.primary).lineSpacing(3)
-                .padding(.horizontal, 14).padding(.bottom, 14)
+                .dsFont(.body)
+                .foregroundStyle(DS.Color.text2)
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, DS.Spacing.xxs)
         }
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .padding(.horizontal, 16)
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
     }
 
     // MARK: - Ratings
 
+    private func starName(_ i: Int, _ rating: Double) -> String {
+        Double(i) <= rating ? "star.fill" : (Double(i) - 0.5 <= rating ? "star.leadinghalf.filled" : "star")
+    }
+
     private func ratingsSection(_ p: CompanyProfileDTO) -> some View {
-        VStack(spacing: 0) {
-            // Overall score header
-            if let rating = p.rating {
-                HStack(spacing: 14) {
-                    VStack(spacing: 4) {
-                        Text(String(format: "%.1f", rating))
-                            .font(.system(size: 40, weight: .bold))
-                            .foregroundColor(.primary)
-                        HStack(spacing: 2) {
-                            ForEach(1...5, id: \.self) { i in
-                                Image(systemName: Double(i) <= rating ? "star.fill" : (Double(i) - 0.5 <= rating ? "star.leadinghalf.filled" : "star"))
-                                    .font(.system(size: 12)).foregroundColor(.yellow)
+        DSSection("Ratings & Reviews", ruled: false) {
+            VStack(alignment: .leading, spacing: DS.Spacing.md) {
+                // Overall score + Balken
+                if let rating = p.rating {
+                    HStack(spacing: DS.Spacing.md) {
+                        VStack(spacing: DS.Spacing.xxs) {
+                            Text(String(format: "%.1f", rating))
+                                .font(DS.Font.make(40, .extrabold, relativeTo: .largeTitle))
+                                .foregroundStyle(DS.Color.text)
+                            HStack(spacing: 2) {
+                                ForEach(1...5, id: \.self) { i in
+                                    Image(systemName: starName(i, rating))
+                                        .font(DS.Font.make(12, .semibold, relativeTo: .caption))
+                                        .foregroundStyle(DS.Color.warning)
+                                }
+                            }
+                            .accessibilityHidden(true)
+                            if let bd = p.reviewBreakdown {
+                                Text("\(bd.totalReviews) review\(bd.totalReviews == 1 ? "" : "s")")
+                                    .dsFont(.caption)
+                                    .foregroundStyle(DS.Color.muted)
                             }
                         }
+                        .fixedSize()
+
                         if let bd = p.reviewBreakdown {
-                            Text("\(bd.totalReviews) review\(bd.totalReviews == 1 ? "" : "s")")
-                                .font(.system(size: 11)).foregroundColor(.secondary)
+                            VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                                breakdownBar("Communication",    value: bd.communication)
+                                breakdownBar("Payment",          value: bd.paymentFairness)
+                                breakdownBar("Work Environment", value: bd.workEnvironment)
+                                breakdownBar("Job Description",  value: bd.jobDescriptionAccuracy)
+                                breakdownBar("Overall",          value: bd.overallExperience)
+                            }
                         }
                     }
-                    .padding(.leading, 14)
+                    .accessibilityElement(children: .combine)
+                } else {
+                    VStack(spacing: DS.Spacing.xs) {
+                        Image(systemName: "star.slash")
+                            .font(DS.Font.make(28, .regular, relativeTo: .title))
+                            .foregroundStyle(DS.Color.muted)
+                        Text("No reviews yet")
+                            .dsFont(.callout)
+                            .foregroundStyle(DS.Color.muted)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, DS.Spacing.md)
+                }
 
-                    if let bd = p.reviewBreakdown {
-                        Divider().frame(height: 70)
-                        VStack(alignment: .leading, spacing: 5) {
-                            breakdownBar("Communication",       value: bd.communication)
-                            breakdownBar("Payment",             value: bd.paymentFairness)
-                            breakdownBar("Work Environment",    value: bd.workEnvironment)
-                            breakdownBar("Job Description",     value: bd.jobDescriptionAccuracy)
-                            breakdownBar("Overall",             value: bd.overallExperience)
+                // Anteil "would work here again" (Backend blendet bei < 3 Antworten aus)
+                if let percent = p.wouldWorkAgainPercent {
+                    HStack(spacing: DS.Spacing.xs) {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .foregroundStyle(DS.Color.success)
+                        Text("\(percent)% would work here again")
+                            .dsFont(.callout)
+                            .foregroundStyle(DS.Color.text)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(DS.Spacing.inset)
+                    .background(DS.Color.successSoft, in: RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
+                }
+
+                // Rating-Tags (Backend: nur bei >= 3 Bewertungen und Kategorie-Schnitt >= 4.5)
+                if let tags = p.ratingTags, !tags.isEmpty {
+                    FlowTagsView(tags: tags)
+                }
+
+                // Einzelne Bewertungen
+                if let reviews = p.workerReviews, !reviews.isEmpty {
+                    let shown = expandedReviews ? reviews : Array(reviews.prefix(2))
+                    VStack(spacing: DS.Spacing.sm) {
+                        ForEach(shown, id: \.id) { r in
+                            reviewCard(r)
                         }
-                        .padding(.trailing, 14)
                     }
-                    Spacer()
-                }
-                .padding(.vertical, 14)
-            } else {
-                VStack(spacing: 6) {
-                    Image(systemName: "star.slash")
-                        .font(.system(size: 28)).foregroundColor(.secondary.opacity(0.4))
-                    Text("No reviews yet")
-                        .font(.system(size: 13)).foregroundColor(.secondary)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 20)
-            }
 
-            // Anteil "would work here again" (Backend blendet bei < 3 Antworten aus)
-            if let percent = p.wouldWorkAgainPercent {
-                Divider().padding(.horizontal, 14)
-                HStack(spacing: 8) {
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                        .font(.system(size: 13)).foregroundColor(SS.primary)
-                    Text("\(percent)% would work here again")
-                        .font(.system(size: 13, weight: .semibold)).foregroundColor(.primary)
-                    Spacer()
-                }
-                .padding(.horizontal, 14).padding(.vertical, 12)
-            }
-
-            // Rating-Tags (Backend: nur bei >= 3 Bewertungen und Kategorie-Schnitt >= 4.5)
-            if let tags = p.ratingTags, !tags.isEmpty {
-                Divider().padding(.horizontal, 14)
-                FlowTagsView(tags: tags)
-                    .padding(.horizontal, 14).padding(.vertical, 12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            // Individual review cards
-            if let reviews = p.workerReviews, !reviews.isEmpty {
-                Divider().padding(.horizontal, 14)
-                Text("REVIEWS")
-                    .font(.system(size: 11, weight: .semibold)).foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 4)
-
-                let shown = expandedReviews ? reviews : Array(reviews.prefix(2))
-                ForEach(Array(shown.enumerated()), id: \.element.id) { i, r in
-                    if i > 0 { Divider().padding(.leading, 14) }
-                    reviewCard(r)
-                }
-
-                if reviews.count > 2 {
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.2)) { expandedReviews.toggle() }
-                    } label: {
-                        Text(expandedReviews ? "Show less" : "View all \(reviews.count) reviews")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(SS.primary)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
+                    if reviews.count > 2 {
+                        Button(expandedReviews ? "Show less" : "View all \(reviews.count) reviews") {
+                            expandedReviews.toggle()
+                        }
+                        .buttonStyle(.ds(.soft, size: .medium))
                     }
-                    .buttonStyle(.plain)
                 }
             }
+            .dsAnimation(.standard, value: expandedReviews)
         }
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .padding(.horizontal, 16)
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
     }
 
     private func breakdownBar(_ label: String, value: Double) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: DS.Spacing.xs) {
             Text(label)
-                .font(.system(size: 10)).foregroundColor(.secondary)
-                .frame(width: 80, alignment: .leading)
+                .font(DS.Font.make(11, .medium, relativeTo: .caption2))
+                .foregroundStyle(DS.Color.muted)
+                .lineLimit(1)
+                .frame(width: 92, alignment: .leading)
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 3).fill(Color.secondary.opacity(0.12))
-                    RoundedRectangle(cornerRadius: 3).fill(SS.primary.opacity(0.7))
-                        .frame(width: geo.size.width * CGFloat(value / 5.0))
+                    Capsule().fill(DS.Color.surface2)
+                    Capsule().fill(DS.Color.primary)
+                        .frame(width: geo.size.width * CGFloat(min(max(value / 5.0, 0), 1)))
                 }
             }
-            .frame(height: 5)
+            .frame(height: 6)
             Text(String(format: "%.1f", value))
-                .font(.system(size: 10, weight: .semibold)).foregroundColor(.secondary)
+                .font(DS.Font.make(11, .semibold, relativeTo: .caption2))
+                .foregroundStyle(DS.Color.text2)
                 .frame(width: 26, alignment: .trailing)
         }
     }
 
     private func reviewCard(_ r: WorkerReviewDTO) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                ZStack {
-                    Circle().fill(SS.primary.opacity(0.1)).frame(width: 34, height: 34)
-                    Text(String(r.workerName.prefix(1)))
-                        .font(.system(size: 14, weight: .bold)).foregroundColor(SS.primary)
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(r.workerName).font(.system(size: 13, weight: .semibold))
-                    HStack(spacing: 2) {
-                        ForEach(1...5, id: \.self) { i in
-                            Image(systemName: i <= r.overallExperience ? "star.fill" : "star")
-                                .font(.system(size: 10)).foregroundColor(.yellow)
+        DSCard {
+            VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                HStack(spacing: DS.Spacing.xs) {
+                    DSAvatar(text: String(r.workerName.prefix(1)).uppercased(), size: 36, shape: .circle)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(r.workerName)
+                            .dsFont(.callout)
+                            .foregroundStyle(DS.Color.text)
+                        HStack(spacing: 2) {
+                            ForEach(1...5, id: \.self) { i in
+                                Image(systemName: i <= r.overallExperience ? "star.fill" : "star")
+                                    .font(DS.Font.make(10, .semibold, relativeTo: .caption2))
+                                    .foregroundStyle(DS.Color.warning)
+                            }
                         }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("\(r.overallExperience) of 5 stars")
                     }
+                    Spacer(minLength: DS.Spacing.xs)
+                    Text(r.createdAt, style: .date)
+                        .dsFont(.caption)
+                        .foregroundStyle(DS.Color.muted)
                 }
-                Spacer()
-                Text(r.createdAt, style: .date)
-                    .font(.system(size: 11)).foregroundColor(.secondary)
-            }
-            if let c = r.comment, !c.isEmpty {
-                Text(c)
-                    .font(.system(size: 13)).foregroundColor(.primary).lineSpacing(2)
-                    .fixedSize(horizontal: false, vertical: true)
+                if let c = r.comment, !c.isEmpty {
+                    Text(c)
+                        .dsFont(.callout)
+                        .foregroundStyle(DS.Color.text2)
+                        .lineSpacing(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
-        .padding(.horizontal, 14).padding(.vertical, 12)
     }
 
     // MARK: - Locations
 
     private func locationsSection(_ p: CompanyProfileDTO) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("LOCATIONS")
-                .font(.system(size: 11, weight: .semibold)).foregroundColor(.secondary)
-                .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 4)
-
+        DSSection("Locations") {
             ForEach(p.locations.indices, id: \.self) { i in
-                HStack(spacing: 12) {
-                    Image(systemName: i == 0 ? "building.2.fill" : "mappin.circle")
-                        .font(.system(size: 16))
-                        .foregroundColor(i == 0 ? SS.primary : .secondary)
-                        .frame(width: 28).padding(.leading, 14)
-                    Text(p.locations[i])
-                        .font(.system(size: 14)).foregroundColor(.primary)
-                    if i == 0 {
-                        Text("HQ").font(.system(size: 10, weight: .bold)).foregroundColor(.white)
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(SS.primary).clipShape(Capsule())
-                    }
-                    Spacer()
+                DSRow(
+                    p.locations[i],
+                    systemIcon: i == 0 ? "building.2.fill" : "mappin.circle",
+                    iconTone: i == 0 ? .primary : .neutral,
+                    showsDivider: i > 0
+                ) {
+                    if i == 0 { DSBadge("HQ", .tone(.primary)) }
                 }
-                .padding(.vertical, 12)
-                if i < p.locations.count - 1 { Divider().padding(.leading, 52) }
             }
         }
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .padding(.horizontal, 16)
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
     }
 
     // MARK: - Contact
@@ -410,44 +396,29 @@ struct CompanyProfileView: View {
 
     private func contactSection(_ p: CompanyProfileDTO) -> some View {
         let rows: [ContactRow] = [
-            nonEmpty(p.phone).map { ContactRow(icon: "phone.fill", text: $0, url: ContactLink.phone($0)) },
-            nonEmpty(p.email).map { ContactRow(icon: "envelope.fill", text: $0, url: ContactLink.email($0)) },
-            nonEmpty(p.website).map { ContactRow(icon: "globe", text: $0, url: ContactLink.website($0)) }
+            nonEmpty(p.phone).map { ContactRow(icon: "phone.fill", kind: "Phone", text: $0, url: ContactLink.phone($0)) },
+            nonEmpty(p.email).map { ContactRow(icon: "envelope.fill", kind: "Email", text: $0, url: ContactLink.email($0)) },
+            nonEmpty(p.website).map { ContactRow(icon: "globe", kind: "Website", text: $0, url: ContactLink.website($0)) }
         ].compactMap { $0 }
 
-        return VStack(alignment: .leading, spacing: 0) {
-            Text("CONTACT")
-                .font(.system(size: 11, weight: .semibold)).foregroundColor(.secondary)
-                .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 4)
+        return DSSection("Contact") {
             ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
-                if index > 0 { Divider().padding(.leading, 56) }
-                contactRow(icon: row.icon, text: row.text, url: row.url)
+                contactRow(row, showsDivider: index > 0)
             }
         }
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .padding(.horizontal, 16)
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
     }
 
     @ViewBuilder
-    private func contactRow(icon: String, text: String, url: URL?) -> some View {
-        let label = HStack(spacing: 14) {
-            Image(systemName: icon)
-                .font(.system(size: 15)).foregroundColor(SS.primary)
-                .frame(width: 28).padding(.leading, 14)
-            Text(text)
-                .font(.system(size: 14)).foregroundColor(url == nil ? .primary : SS.primary)
-                .lineLimit(1)
-            Spacer()
-        }
-        .padding(.vertical, 12)
-        .contentShape(Rectangle())
-
-        if let url {
-            Link(destination: url) { label }
+    private func contactRow(_ row: ContactRow, showsDivider: Bool) -> some View {
+        let content = DSRow(
+            row.kind, value: row.text, accentValue: row.url != nil,
+            systemIcon: row.icon, showsDivider: showsDivider
+        )
+        if let url = row.url {
+            Link(destination: url) { content }
+                .buttonStyle(.dsPressable)
         } else {
-            label
+            content
         }
     }
 
@@ -458,31 +429,8 @@ struct CompanyProfileView: View {
             JobListView(companyFilter: p.name)
         } label: {
             Label("View Open Jobs (\(p.activeJobs))", systemImage: "briefcase.fill")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 15)
-                .background(SS.primary)
-                .clipShape(RoundedRectangle(cornerRadius: 14))
         }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 16)
-    }
-}
-
-// MARK: - Sub-Views
-
-private struct CompanyStatCell: View {
-    let value: String
-    let label: String
-
-    var body: some View {
-        VStack(spacing: 3) {
-            Text(value).font(.system(size: 18, weight: .bold)).foregroundColor(.white)
-            Text(label).font(.system(size: 11)).foregroundColor(.white.opacity(0.7))
-                .lineLimit(1).minimumScaleFactor(0.8) // 4 Kennzahlen nebeneinander
-        }
-        .frame(maxWidth: .infinity)
+        .buttonStyle(.ds(.primary))
     }
 }
 
@@ -490,6 +438,7 @@ private struct CompanyStatCell: View {
 
 private struct ContactRow {
     let icon: String
+    let kind: String
     let text: String
     let url: URL?
 }

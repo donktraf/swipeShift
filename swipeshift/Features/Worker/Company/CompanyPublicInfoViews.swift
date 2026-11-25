@@ -19,19 +19,18 @@ struct CompanyTaglineView: View {
     let yearFounded: Int?
 
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: DS.Spacing.xxs) {
             if let t = clean(tagline) {
                 Text(t)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(.white.opacity(0.9))
+                    .dsFont(.callout)
+                    .foregroundStyle(DS.Color.text2)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal, 24)
             }
             if let y = yearFounded {
                 // Ohne Tausendertrennzeichen ("2015", nicht "2.015")
                 Label("Founded \(String(y))", systemImage: "calendar")
-                    .font(.system(size: 12))
-                    .foregroundColor(.white.opacity(0.7))
+                    .dsFont(.caption)
+                    .foregroundStyle(DS.Color.muted)
             }
         }
     }
@@ -49,57 +48,43 @@ struct CompanySocialLinksView: View {
     let links: SocialLinksDTO
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: DS.Spacing.sm) {
             ForEach(links.items, id: \.name) { item in
                 Link(destination: item.url) {
                     Image(systemName: item.icon)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(SS.primary)
-                        .frame(width: 42, height: 42)
-                        .background(SS.primary.opacity(0.1))
-                        .clipShape(Circle())
+                        .font(DS.Font.make(16, .semibold, relativeTo: .body))
+                        .foregroundStyle(DS.Color.primaryText)
+                        .frame(width: 44, height: 44)
+                        .background(DS.Color.primarySoft, in: Circle())
                 }
+                .buttonStyle(.dsPressable)
                 .accessibilityLabel(item.name)
             }
             Spacer()
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(.vertical, DS.Spacing.xs)
     }
 }
 
-/// Karte "Online & Contact person": Social-Links + oeffentlicher Ansprechpartner
+/// Abschnitt "Connect": Ansprechpartner + Social-Links
 struct CompanyPeopleAndLinksCard: View {
     let company: CompanyProfileDTO
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("CONNECT")
-                .font(.system(size: 11, weight: .semibold)).foregroundColor(.secondary)
-                .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 4)
+        DSSection("Connect") {
             if let name = clean(company.contactName) {
-                HStack(spacing: 14) {
-                    Image(systemName: "person.crop.circle.fill")
-                        .font(.system(size: 18)).foregroundColor(SS.primary)
-                        .frame(width: 28).padding(.leading, 14)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Contact").font(.system(size: 11)).foregroundColor(.secondary)
-                        Text([name, clean(company.contactRole)].compactMap { $0 }.joined(separator: ", "))
-                            .font(.system(size: 14)).foregroundColor(.primary)
-                    }
-                    Spacer()
-                }
-                .padding(.vertical, 12)
+                DSRow(
+                    "Contact",
+                    value: [name, clean(company.contactRole)].compactMap { $0 }.joined(separator: ", "),
+                    systemIcon: "person.crop.circle.fill",
+                    showsDivider: false
+                )
             }
             if let links = company.socialLinks, company.hasSocialLinks {
-                if company.hasContactPerson { Divider().padding(.leading, 56) }
+                DSDivider().opacity(company.hasContactPerson ? 1 : 0)
                 CompanySocialLinksView(links: links)
             }
         }
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .padding(.horizontal, 16)
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
     }
 }
 
@@ -112,24 +97,10 @@ struct CompanyAddressCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("ADDRESS")
-                .font(.system(size: 11, weight: .semibold)).foregroundColor(.secondary)
-                .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 4)
-            HStack(spacing: 14) {
-                Image(systemName: "mappin.and.ellipse")
-                    .font(.system(size: 16)).foregroundColor(SS.primary)
-                    .frame(width: 28).padding(.leading, 14)
-                Text(addressText).font(.system(size: 14)).foregroundColor(.primary)
-                Spacer()
-            }
-            .padding(.vertical, 12)
-
+        DSSection("Address", ruled: false) {
+            DSRow(addressText, systemIcon: "mappin.and.ellipse", showsDivider: false)
             LocationMapPreview(lat: company.addressLat, lng: company.addressLng, title: company.name)
+                .padding(.top, DS.Spacing.xs)
         }
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .padding(.horizontal, 16)
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
     }
 }

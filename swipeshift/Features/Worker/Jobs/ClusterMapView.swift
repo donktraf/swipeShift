@@ -9,6 +9,13 @@
 import SwiftUI
 import MapKit
 
+// MARK: - DS-Farben fuer UIKit (hell/dunkel aufgeloest)
+
+/// Loest ein DS-Token fuer die aktuelle Trait-Collection auf (Pins werden als Bild gerendert).
+private func dsUIColor(_ color: Color, _ traits: UITraitCollection) -> UIColor {
+    UIColor(color).resolvedColor(with: traits)
+}
+
 // MARK: - Job Annotation (MKAnnotation)
 
 final class JobAnnotation: NSObject, MKAnnotation {
@@ -39,20 +46,25 @@ final class JobAnnotationView: MKAnnotationView {
         frame = CGRect(x: 0, y: 0, width: size, height: size)
         centerOffset = .zero
         render()
+        // Pins neu zeichnen, wenn zwischen Hell/Dunkel gewechselt wird
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (view: JobAnnotationView, _: UITraitCollection) in
+            view.render()
+        }
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
-    private func render() {
+    fileprivate func render() {
         guard let ann = annotation as? JobAnnotation else { return }
         let s = size
+        let tc = traitCollection
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: s, height: s))
         image = renderer.image { _ in
             // Farbiger Kreis
-            ann.pinUIColor.setFill()
+            ann.pinUIColor.resolvedColor(with: tc).setFill()
             UIBezierPath(ovalIn: CGRect(x: 2, y: 2, width: s - 4, height: s - 4)).fill()
-            // Weißer Rand
-            UIColor.white.setStroke()
+            // Rand in Flaechenfarbe
+            dsUIColor(DS.Color.surface, tc).setStroke()
             let border = UIBezierPath(ovalIn: CGRect(x: 2, y: 2, width: s - 4, height: s - 4))
             border.lineWidth = 2
             border.stroke()
@@ -74,23 +86,28 @@ final class SelectedJobAnnotationView: MKAnnotationView {
         frame = CGRect(x: 0, y: 0, width: size + 14, height: size + 14)
         centerOffset = .zero
         render()
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (view: SelectedJobAnnotationView, _: UITraitCollection) in
+            view.render()
+        }
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
-    private func render() {
+    fileprivate func render() {
         guard let ann = annotation as? JobAnnotation else { return }
         let total: CGFloat = size + 14
+        let tc = traitCollection
+        let pin = ann.pinUIColor.resolvedColor(with: tc)
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: total, height: total))
         image = renderer.image { _ in
             // Pulsring
-            ann.pinUIColor.withAlphaComponent(0.25).setFill()
+            pin.withAlphaComponent(0.25).setFill()
             UIBezierPath(ovalIn: CGRect(x: 0, y: 0, width: total, height: total)).fill()
             // Hauptkreis
-            ann.pinUIColor.setFill()
+            pin.setFill()
             let inner = (total - size) / 2
             UIBezierPath(ovalIn: CGRect(x: inner, y: inner, width: size, height: size)).fill()
-            UIColor.white.setStroke()
+            dsUIColor(DS.Color.surface, tc).setStroke()
             let border = UIBezierPath(ovalIn: CGRect(x: inner, y: inner, width: size, height: size))
             border.lineWidth = 2.5
             border.stroke()
@@ -110,17 +127,21 @@ final class JobClusterAnnotationView: MKAnnotationView {
         super.init(annotation: annotation, reuseIdentifier: reuseIdentifier)
         frame = CGRect(x: 0, y: 0, width: size, height: size)
         render()
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (view: JobClusterAnnotationView, _: UITraitCollection) in
+            view.render()
+        }
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
-    private func render() {
+    fileprivate func render() {
         guard let cluster = annotation as? MKClusterAnnotation else { return }
         let count = cluster.memberAnnotations.count
 
         // Dominante Farbe aus Member-Annotations bestimmen
         let colors = cluster.memberAnnotations.compactMap { ($0 as? JobAnnotation)?.pinUIColor }
-        let dominantColor: UIColor = colors.first ?? UIColor(red: 91/255, green: 92/255, blue: 230/255, alpha: 1)
+        let tc = traitCollection
+        let dominantColor: UIColor = (colors.first ?? UIColor(DS.Color.primary)).resolvedColor(with: tc)
 
         let s = size
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: s, height: s))
@@ -129,7 +150,7 @@ final class JobClusterAnnotationView: MKAnnotationView {
             dominantColor.setFill()
             UIBezierPath(ovalIn: CGRect(x: 2, y: 2, width: s - 4, height: s - 4)).fill()
             // Weißer Rand
-            UIColor.white.setStroke()
+            dsUIColor(DS.Color.surface, tc).setStroke()
             let border = UIBezierPath(ovalIn: CGRect(x: 2, y: 2, width: s - 4, height: s - 4))
             border.lineWidth = 2
             border.stroke()
@@ -137,8 +158,9 @@ final class JobClusterAnnotationView: MKAnnotationView {
             let text = "\(count)"
             let fontSize: CGFloat = count > 9 ? 11 : 13
             let attrs: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: fontSize, weight: .bold),
-                .foregroundColor: UIColor.white,
+                .font: UIFont(name: "PlusJakartaSans-Bold", size: fontSize)
+                    ?? UIFont.systemFont(ofSize: fontSize, weight: .bold),
+                .foregroundColor: dsUIColor(DS.Color.onPrimary, tc),
             ]
             let attrStr = NSAttributedString(string: text, attributes: attrs)
             let ts = attrStr.size()

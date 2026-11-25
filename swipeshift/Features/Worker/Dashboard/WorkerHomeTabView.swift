@@ -29,47 +29,74 @@ struct WorkerHomeTabView: View {
     let onGoToRadar: () -> Void
     let onGoToSwipe: () -> Void
 
+    // Skeleton nur beim ersten Laden (nicht beim Pull-to-refresh)
+    @State private var hasLoaded = false
+
+    private var greetingLine: String {
+        let name = userStore.currentUser?.firstName ?? "there"
+        if let location = userStore.currentUser?.location, !location.isEmpty {
+            return "Hi \(name) · \(location)"
+        }
+        return "Hi \(name)"
+    }
+
+    private func reload() async {
+        if let location = userStore.currentUser?.location {
+            jobStore.selectedLocation = location
+        }
+        // Basis-Jobs + alle Dashboard-Sektionen parallel laden
+        // Wenn kein Standort gesetzt → alle Jobs laden als Fallback
+        async let base     = jobStore.selectedLocation != nil
+                                ? jobStore.loadJobs()
+                                : jobStore.loadJobsAll()
+        async let sections = jobStore.loadDashboardSections()
+        async let saved    = jobStore.loadSavedJobIds()
+        _ = await (base, sections, saved)
+        hasLoaded = true
+    }
+
     var body: some View {
         ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: DS.Spacing.xl) {
 
                 // MARK: - Header
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .top, spacing: DS.Spacing.sm) {
+                    VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
+                        Text(greetingLine)
+                            .font(DS.Font.make(13, .semibold, relativeTo: .footnote))
+                            .foregroundStyle(DS.Color.muted)
+                            .lineLimit(1)
+
                         Text("Your Personal Job Dashboard")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(.secondary)
-                            .textCase(.uppercase)
-                            .tracking(0.5)
-
-                        Text("Hey \(userStore.currentUser?.firstName ?? "there")!")
-                            .font(.system(size: 26, weight: .bold))
-
-                        if let location = userStore.currentUser?.location {
-                            Label(location, systemImage: "mappin.and.ellipse")
-                                .font(.system(size: 14))
-                                .foregroundColor(.secondary)
-                        }
+                            .dsFont(.display)
+                            .foregroundStyle(DS.Color.text)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityAddTraits(.isHeader)
                     }
 
-                    Spacer()
+                    Spacer(minLength: DS.Spacing.xs)
 
-                    // Notification Bell
+                    // Notification Bell (Look wie DSIconButton, Ziel = NavigationLink)
                     NavigationLink {
                         NotificationsView()
                     } label: {
                         Image(systemName: "bell")
-                            .font(.system(size: 20, weight: .semibold))
-                            .foregroundColor(.primary)
-                            .padding(10)
-                            .background(Color.gray.opacity(0.08))
-                            .clipShape(Circle())
+                            .font(DS.Font.make(17, .semibold))
+                            .foregroundStyle(DS.Color.text)
+                            .frame(width: 44, height: 44)
+                            .background(DS.Color.surface, in: RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
+                                    .strokeBorder(DS.Color.border, lineWidth: 1)
+                            )
                             .notificationBadge(badge.unreadCount)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.dsPressable)
+                    .simultaneousGesture(TapGesture().onEnded { DS.Haptics.light() })
+                    .accessibilityLabel(badge.unreadCount > 0 ? "Notifications, \(badge.unreadCount) unread" : "Notifications")
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
+                .padding(.horizontal, DS.Spacing.screenEdge)
+                .padding(.top, DS.Spacing.xs)
 
                 // MARK: - Confirmed-Karte (naechste angenommene Schicht)
                 let confirmed = confirmedModel.visible(dismissedRaw: dismissedConfirmedRaw, now: now)
@@ -87,65 +114,76 @@ struct WorkerHomeTabView: View {
                     )
                 }
 
-                // MARK: - View All Jobs Button
+                // MARK: - View All Jobs
                 NavigationLink {
                     JobListView()
                 } label: {
-                    HStack {
-                        Image(systemName: "magnifyingglass")
-                        Text("View All Available Jobs")
-                            .fontWeight(.semibold)
+                    DSCard {
+                        HStack(spacing: DS.Spacing.sm) {
+                            DSIconTile(systemName: "magnifyingglass", tone: .primary)
+                            Text("View All Available Jobs")
+                                .font(DS.Font.make(15, .bold))
+                                .foregroundStyle(DS.Color.text)
+                            Spacer(minLength: DS.Spacing.xs)
+                            if !jobStore.jobs.isEmpty {
+                                Text("\(jobStore.jobs.count)")
+                                    .font(DS.Font.make(13, .semibold, relativeTo: .footnote))
+                                    .foregroundStyle(DS.Color.muted)
+                            }
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(DS.Color.muted)
+                                .accessibilityHidden(true)
+                        }
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(Color.white)
-                    .foregroundColor(.primary)
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(Color.gray.opacity(0.2), lineWidth: 1.5)
-                    )
                 }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 16)
+                .buttonStyle(.dsPressable)
+                .padding(.horizontal, DS.Spacing.screenEdge)
 
                 // MARK: - Category Discovery
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: DS.Spacing.sm) {
                     Text("Category Discovery")
-                        .font(.system(size: 18, weight: .bold))
-                        .padding(.horizontal, 16)
+                        .font(DS.Font.make(17, .bold, relativeTo: .headline))
+                        .foregroundStyle(DS.Color.text)
+                        .accessibilityAddTraits(.isHeader)
+                        .padding(.horizontal, DS.Spacing.screenEdge)
 
                     CategoryScrollView(onSelect: onCategorySelected)
                 }
 
                 // MARK: - Job Sections (echte Backend-Filter)
+                let loading = !hasLoaded
 
                 JobSectionView(
                     title: "Recommended for You",
                     jobs: jobStore.recommendedJobs,
+                    isLoading: loading,
                     onViewAll: onViewAllJobs
                 )
 
                 JobSectionView(
                     title: "Quick Money Jobs",
                     jobs: jobStore.quickMoneyJobs,
+                    isLoading: loading,
                     onViewAll: onViewAllJobs
                 )
 
                 JobSectionView(
                     title: "Starting Soon",
                     jobs: jobStore.startingSoonJobs,
+                    isLoading: loading,
                     onViewAll: onViewAllJobs
                 )
 
                 JobSectionView(
                     title: "Popular This Week",
                     jobs: jobStore.popularJobs,
+                    isLoading: loading,
                     onViewAll: onViewAllJobs
                 )
 
                 // Alle Jobs als Fallback-Sektion wenn andere leer sind
-                if jobStore.recommendedJobs.isEmpty && jobStore.quickMoneyJobs.isEmpty {
+                if hasLoaded && jobStore.recommendedJobs.isEmpty && jobStore.quickMoneyJobs.isEmpty {
                     JobSectionView(
                         title: "Here are jobs you might like today",
                         jobs: jobStore.jobs,
@@ -153,65 +191,24 @@ struct WorkerHomeTabView: View {
                     )
                 }
 
-                // MARK: - Bottom CTAs
-                VStack(spacing: 10) {
-                    Button(action: onGoToRadar) {
-                        HStack {
-                            Image(systemName: "location.circle.fill")
-                                .foregroundColor(SS.primary)
-                            Text("Looking for nearby jobs?")
-                                .font(.system(size: 14))
-                                .foregroundColor(.primary)
-                            Spacer()
-                            Text("Go to Radar →")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(SS.primary)
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 14)
-                        .background(Color(uiColor: .systemBackground))
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
-                    }
-                    .buttonStyle(.plain)
-
-                    Button(action: onGoToSwipe) {
-                        HStack {
-                            Image(systemName: "hand.draw.fill")
-                                .foregroundColor(SS.primary)
-                            Text("Want to decide fast?")
-                                .font(.system(size: 14))
-                                .foregroundColor(.primary)
-                            Spacer()
-                            Text("Try Swipe →")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(SS.primary)
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 14)
-                        .background(Color(uiColor: .systemBackground))
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
-                    }
-                    .buttonStyle(.plain)
+                // MARK: - Bottom CTAs (Kacheln)
+                HStack(spacing: DS.Spacing.sm) {
+                    ctaTile(label: "Nearby jobs?", title: "Go to Radar →", tone: .success, action: onGoToRadar)
+                    ctaTile(label: "Decide fast?", title: "Try Swipe →", tone: .primary, action: onGoToSwipe)
                 }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 24)
+                .padding(.horizontal, DS.Spacing.screenEdge)
+                .padding(.bottom, DS.Spacing.xl)
             }
         }
-        .task {
-            if let location = userStore.currentUser?.location {
-                jobStore.selectedLocation = location
-            }
-            // Basis-Jobs + alle Dashboard-Sektionen parallel laden
-            // Wenn kein Standort gesetzt → alle Jobs laden als Fallback
-            async let base     = jobStore.selectedLocation != nil
-                                    ? jobStore.loadJobs()
-                                    : jobStore.loadJobsAll()
-            async let sections = jobStore.loadDashboardSections()
-            async let saved    = jobStore.loadSavedJobIds()
-            _ = await (base, sections, saved)
+        .dsTabBarInset()
+        .dsBackground()
+        .refreshable {
+            async let reloaded: Void = reload()
+            async let badgeRefresh: Void = badge.refresh()
+            async let confirmed: Void = confirmedModel.load()
+            _ = await (reloaded, badgeRefresh, confirmed)
         }
+        .task { await reload() }
         // Glocken-Badge: beim Erscheinen und beim Zurueckkommen in den Vordergrund
         .task { await badge.refresh() }
         .task { await confirmedModel.load() }
@@ -227,5 +224,29 @@ struct WorkerHomeTabView: View {
         // Karte verschwindet nach Schichtende, ohne dass neu geladen werden muss
         .onReceive(minuteTicker) { now = $0 }
         .applicationNavigation(applicationNavigation)
+    }
+}
+
+extension WorkerHomeTabView {
+    /// Getönte Kachel für die Bottom-CTAs.
+    fileprivate func ctaTile(label: String, title: String, tone: DS.Tone, action: @escaping () -> Void) -> some View {
+        Button {
+            DS.Haptics.light()
+            action()
+        } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(label)
+                    .font(DS.Font.make(12, .bold, relativeTo: .caption))
+                    .foregroundStyle(tone.foreground)
+                Text(title)
+                    .font(DS.Font.make(15, .extrabold))
+                    .foregroundStyle(DS.Color.text)
+            }
+            .padding(DS.Spacing.inset)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(tone.soft, in: RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous))
+        }
+        .buttonStyle(.dsPressable)
     }
 }

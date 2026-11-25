@@ -48,11 +48,11 @@ struct NotificationBadgeModifier: ViewModifier {
         content.overlay(alignment: .topTrailing) {
             if count > 0 {
                 Text(NotificationBadgeStore.label(for: count))
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundColor(.white)
+                    .font(DS.Font.make(11, .extrabold, relativeTo: nil))
+                    .foregroundStyle(DS.Color.onPrimary)
                     .padding(.horizontal, 5)
                     .frame(minWidth: 18, minHeight: 18)
-                    .background(Capsule().fill(Color.red))
+                    .background(Capsule().fill(DS.Color.danger))
                     .offset(x: 6, y: -4)
                     .accessibilityLabel("\(count) unread notifications")
             }

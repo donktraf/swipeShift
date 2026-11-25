@@ -23,34 +23,30 @@ struct JobDetailView: View {
     private var isBookmarked: Bool { jobStore.savedJobIds.contains(job.id) }
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            Color(uiColor: .systemGroupedBackground).ignoresSafeArea()
-
-            // MARK: - Scrollbarer Inhalt
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 0) {
-
-                    headerCard
-                    quickInfoRow
-                    categoryAndTagsSection
-                    descriptionSection
-                    tasksSection
-                    requirementsSection
-                    payDetailsSection
-                    cancellationSection
-                    employerNotesSection
-                    locationSection
-                    companySection
-                    whatHappensNextSection
-
-                    // Abstand für sticky Button
-                    Spacer().frame(height: 100)
-                }
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: DS.Spacing.xl) {
+                headerSection
+                keyFacts
+                categoryAndTagsSection
+                timeInfoSection
+                shiftsSection
+                descriptionSection
+                tasksSection
+                requirementsSection
+                payDetailsSection
+                cancellationSection
+                employerNotesSection
+                locationSection
+                companySection
+                whatHappensNextSection
             }
-
-            // MARK: - Sticky Apply Button
-            stickyApplyBar
+            .padding(.horizontal, DS.Spacing.screenEdge)
+            .padding(.top, DS.Spacing.xs)
+            .padding(.bottom, DS.Spacing.xl)
         }
+        .dsBackground()
+        // Sticky Apply-Leiste (beachtet die Safe Area)
+        .safeAreaInset(edge: .bottom, spacing: 0) { stickyApplyBar }
         .navigationBarHidden(true)
         .task {
             await jobStore.loadSavedJobIds()
@@ -77,22 +73,12 @@ struct JobDetailView: View {
         }
     }
 
-    // MARK: - Header Card
-    private var headerCard: some View {
-        VStack(spacing: 0) {
-            // Navigations-Leiste
-            HStack {
-                Button { dismiss() } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(.primary)
-                        .frame(width: 36, height: 36)
-                        .background(Color(uiColor: .systemBackground))
-                        .clipShape(Circle())
-                        .shadow(color: .black.opacity(0.06), radius: 4, x: 0, y: 2)
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                }
+    // MARK: - Header
+    private var headerSection: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.md) {
+            // Navigations-Leiste: Close links, Share + Bookmark rechts
+            HStack(spacing: DS.Spacing.xs) {
+                DSIconButton(systemName: "xmark", label: "Close") { dismiss() }
 
                 Spacer()
 
@@ -103,219 +89,207 @@ struct JobDetailView: View {
                     message: Text(JobShareContent.message(for: job))
                 ) {
                     Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(.primary)
-                        .frame(width: 36, height: 36)
-                        .background(Color(uiColor: .systemBackground))
-                        .clipShape(Circle())
-                        .shadow(color: .black.opacity(0.06), radius: 4, x: 0, y: 2)
+                        .font(DS.Font.make(17, .semibold))
+                        .foregroundStyle(DS.Color.text)
                         .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
+                        .background(DS.Color.surface, in: RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
+                                .strokeBorder(DS.Color.border, lineWidth: 1)
+                        )
+                        .contentShape(RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
                 }
+                .buttonStyle(.dsPressable)
                 .accessibilityLabel("Share job")
 
-                Button {
+                DSIconButton(
+                    systemName: isBookmarked ? "bookmark.fill" : "bookmark",
+                    label: isBookmarked ? "Remove from saved" : "Save job"
+                ) {
                     Task { await jobStore.toggleSaveJob(job.id) }
-                } label: {
-                    Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(isBookmarked ? SS.primary : .primary)
-                        .frame(width: 36, height: 36)
-                        .background(Color(uiColor: .systemBackground))
-                        .clipShape(Circle())
-                        .shadow(color: .black.opacity(0.06), radius: 4, x: 0, y: 2)
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 56)
-            .padding(.bottom, 16)
 
-            // Logo + Titel
-            HStack(alignment: .top, spacing: 14) {
-                // Company Logo (Emoji Placeholder)
-                Text(job.logoEmoji)
-                    .font(.system(size: 36))
-                    .frame(width: 64, height: 64)
-                    .background(Color(uiColor: .secondarySystemGroupedBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16)
-                            .stroke(Color.gray.opacity(0.12), lineWidth: 1)
-                    )
+            // Logo (tippbar -> Firmenprofil) + Titel
+            HStack(alignment: .top, spacing: DS.Spacing.sm) {
+                NavigationLink {
+                    CompanyProfileView(companyName: job.company, logoEmoji: job.logoEmoji)
+                } label: {
+                    DSAvatar(text: job.logoEmoji, size: 64, shape: .roundedSquare)
+                        .frame(minWidth: 64, minHeight: 64)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.dsPressable)
+                .accessibilityLabel("Open company profile")
+                .accessibilityHidden(false)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
+                VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
+                    HStack(alignment: .firstTextBaseline, spacing: DS.Spacing.xxs) {
                         Text(job.title)
-                            .font(.system(size: 20, weight: .bold))
-                            .foregroundColor(.primary)
-
+                            .dsFont(.title)
+                            .foregroundStyle(DS.Color.text)
+                            .fixedSize(horizontal: false, vertical: true)
                         if job.isVerified == true {
                             Image(systemName: "checkmark.seal.fill")
-                                .foregroundColor(SS.primary)
-                                .font(.system(size: 14))
+                                .font(DS.Font.make(14, .semibold))
+                                .foregroundStyle(DS.Color.primaryText)
+                                .accessibilityLabel("Verified")
                         }
                     }
 
                     Text(job.company)
-                        .font(.system(size: 15))
-                        .foregroundColor(.secondary)
+                        .dsFont(.body)
+                        .foregroundStyle(DS.Color.muted)
 
                     if job.isUrgent || job.instantMatch {
-                        HStack(spacing: 6) {
-                            if job.isUrgent { DetailBadge(text: "Urgent", icon: "flame.fill", color: .red) }
-                            if job.instantMatch { DetailBadge(text: "Instant Match", icon: "bolt.fill", color: SS.primary) }
+                        HStack(spacing: DS.Spacing.xs) {
+                            if job.isUrgent { DSBadge("Urgent", .tone(.danger)) }
+                            if job.instantMatch { DSBadge("Instant Match", .tone(.primary)) }
                         }
-                        .padding(.vertical, 2)
+                        .padding(.top, DS.Spacing.xxs)
                     }
 
                     if let rating = job.companyRating {
-                        HStack(spacing: 3) {
+                        HStack(spacing: DS.Spacing.xxs) {
                             Image(systemName: "star.fill")
-                                .font(.system(size: 11))
-                                .foregroundColor(.orange)
+                                .font(DS.Font.make(11, .semibold))
+                                .foregroundStyle(DS.Color.warning)
                             Text(String(format: "%.1f", rating))
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(.secondary)
+                                .dsFont(.caption)
+                                .foregroundStyle(DS.Color.text2)
                         }
                     }
                 }
-
-                Spacer()
+                Spacer(minLength: 0)
             }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 20)
         }
-        .background(Color(uiColor: .systemBackground))
     }
 
-    // MARK: - Quick-Info Zeile
-    private var quickInfoRow: some View {
-        VStack(spacing: 0) {
-            Divider()
-            HStack(spacing: 0) {
-                QuickInfoCell(icon: "mappin", value: job.location, label: "Location")
-                Divider().frame(height: 36)
-                QuickInfoCell(icon: "banknote", value: job.payText, label: "Hourly Rate")
-                Divider().frame(height: 36)
-                QuickInfoCell(icon: "clock", value: job.duration ?? "–", label: "Duration")
-                Divider().frame(height: 36)
-                QuickInfoCell(icon: "person.2", value: job.openSpots.map { "\($0)" } ?? "–", label: "Spots")
-            }
-            .padding(.vertical, 12)
-            Divider()
+    // MARK: - Kennzahlen-Kacheln
+    private var keyFacts: some View {
+        HStack(spacing: DS.Spacing.xs) {
+            DSTile(label: "Pay", value: job.payText, tone: .primary)
+            DSTile(label: "Distance", value: job.distanceText.isEmpty ? "—" : job.distanceText, tone: .neutral)
+            DSTile(
+                label: "Open spots",
+                value: job.openSpots.map { "\($0)" } ?? "–",
+                tone: .success
+            )
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
 
-            // Schicht-Zeit + Distanz
-            HStack(spacing: 16) {
-                Label(job.shiftText, systemImage: "calendar")
-                    .font(.system(size: 13))
-                    .foregroundColor(.secondary)
-                Spacer()
-                Label(job.distanceText, systemImage: "location")
-                    .font(.system(size: 13))
-                    .foregroundColor(.secondary)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            Divider()
-
-            // Pause + Standorttyp (nur wenn angegeben)
-            if job.breakIncluded || job.locationType == "multiple" {
-                HStack(spacing: 16) {
-                    if job.breakIncluded {
-                        Label(job.breakMinutes.map { "\($0) min break" } ?? "Break included", systemImage: "cup.and.saucer")
-                            .font(.system(size: 13))
-                            .foregroundColor(.secondary)
-                    }
-                    if job.locationType == "multiple" {
-                        Label("Multiple locations", systemImage: "mappin.and.ellipse")
-                            .font(.system(size: 13))
-                            .foregroundColor(.secondary)
-                    }
-                    Spacer()
+    // MARK: - Zeit + Details (flach)
+    private var timeInfoSection: some View {
+        DSSection("When") {
+            if let summary = multiShiftSummary {
+                DSRow("Shifts", value: summary, systemIcon: "calendar")
+            } else {
+                DSRow("Shift", value: job.shiftText, systemIcon: "calendar")
+                if let duration = job.duration {
+                    DSRow("Duration", value: duration, systemIcon: "clock")
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-                Divider()
+            }
+            if job.breakIncluded {
+                DSRow("Break", value: job.breakMinutes.map { "\($0) min" } ?? "Included", systemIcon: "cup.and.saucer")
+            }
+            if job.locationType == "multiple" {
+                DSRow("Locations", value: "Multiple", systemIcon: "mappin.and.ellipse")
             }
         }
-        .background(Color(uiColor: .systemBackground))
+    }
+
+    /// "3 shifts · Nov 25–27" bei mehreren Schichten, sonst nil
+    private var multiShiftSummary: String? {
+        guard let shifts = job.shifts, shifts.count > 1 else { return nil }
+        var text = "\(shifts.count) shifts"
+        let dates = shifts.compactMap(\.startDate)
+        if let first = dates.min(), let last = dates.max() {
+            let cal = Calendar.current
+            let month = first.formatted(.dateTime.month(.abbreviated).day())
+            if cal.isDate(first, inSameDayAs: last) {
+                text += " · \(month)"
+            } else if cal.component(.month, from: first) == cal.component(.month, from: last) {
+                text += " · \(month)–\(last.formatted(.dateTime.day()))"
+            } else {
+                text += " · \(month)–\(last.formatted(.dateTime.month(.abbreviated).day()))"
+            }
+        }
+        return text
     }
 
     // MARK: - Kategorie + Tags
+    @ViewBuilder
     private var categoryAndTagsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if let category = job.category {
-                HStack {
-                    Text(category)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(SS.primary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .background(SS.primary.opacity(0.1))
-                        .clipShape(Capsule())
-                    Spacer()
+        if job.category != nil || !job.tags.isEmpty {
+            DSFlowLayout(spacing: DS.Spacing.xs) {
+                if let category = job.category {
+                    DSBadge(category, .tone(.primary))
+                }
+                ForEach(job.tags, id: \.self) { tag in
+                    DSBadge(tag, .completed)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
 
-            if !job.tags.isEmpty {
-                FlowTagsView(tags: job.tags)
+    // MARK: - Schichten
+    @ViewBuilder
+    private var shiftsSection: some View {
+        if let shifts = job.shifts, !shifts.isEmpty {
+            DSSection("Shifts") {
+                ForEach(shifts) { shift in
+                    DSRow(
+                        shift.date,
+                        subtitle: "\(shift.timeRange) · \(shift.duration)",
+                        value: shift.totalPay
+                    )
+                }
             }
         }
-        .padding(16)
-        .background(Color(uiColor: .systemBackground))
-        .padding(.top, 8)
     }
 
     // MARK: - Beschreibung
+    @ViewBuilder
     private var descriptionSection: some View {
-        Group {
-            if let desc = job.jobDescription, !desc.isEmpty {
-                DetailSection(title: "Job Description") {
-                    Text(desc)
-                        .font(.system(size: 15))
-                        .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+        if let desc = job.jobDescription, !desc.isEmpty {
+            DSSection("Job Description", ruled: false) {
+                bodyText(desc)
             }
         }
     }
 
+    private func bodyText(_ text: String) -> some View {
+        Text(text)
+            .dsFont(.body)
+            .foregroundStyle(DS.Color.text2)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.top, DS.Spacing.xxs)
+    }
+
     // MARK: - Aufgaben
+    @ViewBuilder
     private var tasksSection: some View {
-        Group {
-            if let tasks = job.tasks, !tasks.isEmpty {
-                DetailSection(title: "Tasks") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(tasks, id: \.self) { task in
-                            HStack(alignment: .top, spacing: 10) {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .font(.system(size: 14))
-                                    .foregroundColor(SS.primary)
-                                    .padding(.top, 1)
-                                Text(task)
-                                    .font(.system(size: 14))
-                                    .foregroundColor(.primary)
-                            }
-                        }
-                    }
+        if let tasks = job.tasks, !tasks.isEmpty {
+            DSSection("Tasks") {
+                ForEach(Array(tasks.enumerated()), id: \.offset) { idx, task in
+                    DSRow(task, systemIcon: "checkmark", iconTone: .success, showsDivider: idx > 0)
                 }
             }
         }
     }
 
     // MARK: - Anforderungen
+    @ViewBuilder
     private var requirementsSection: some View {
-        DetailSection(title: "Requirements") {
-            VStack(spacing: 0) {
-                ForEach(Array(requirementRows.enumerated()), id: \.offset) { idx, row in
-                    if idx > 0 { Divider().padding(.leading, 16) }
-                    RequirementRow(label: row.label, value: row.value)
+        let rows = requirementRows
+        if !rows.isEmpty {
+            DSSection("Requirements") {
+                ForEach(Array(rows.enumerated()), id: \.offset) { idx, row in
+                    DSRow(row.label, value: row.value, showsDivider: idx > 0)
                 }
             }
-            .background(Color(uiColor: .secondarySystemGroupedBackground))
-            .clipShape(RoundedRectangle(cornerRadius: SS.cardRadius))
         }
     }
 
@@ -334,31 +308,24 @@ struct JobDetailView: View {
         return rows
     }
 
-    // MARK: - Vergütung & Vertrag
+    // MARK: - Verguetung & Vertrag
     private var payDetailsSection: some View {
-        DetailSection(title: "Pay & Contract") {
-            VStack(spacing: 0) {
-                RequirementRow(label: "Hourly Rate", value: job.payText)
-                Divider().padding(.leading, 16)
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+            DSSection("Pay & Contract") {
+                DSRow("Hourly Rate", value: job.payText, showsDivider: false)
                 if let method = job.paymentMethod {
-                    RequirementRow(label: "Payment Method", value: method)
-                    Divider().padding(.leading, 16)
+                    DSRow("Payment Method", value: method)
                 }
                 if let type_ = job.contractType {
-                    RequirementRow(label: "Contract Type", value: type_)
+                    DSRow("Contract Type", value: type_)
                 }
                 ForEach(extraPayRows, id: \.label) { row in
-                    Divider().padding(.leading, 16)
-                    RequirementRow(label: row.label, value: row.value)
+                    DSRow(row.label, value: row.value)
                 }
             }
-            .background(Color(uiColor: .secondarySystemGroupedBackground))
-            .clipShape(RoundedRectangle(cornerRadius: SS.cardRadius))
-
             Text("You earn the full hourly rate — no fees deducted.")
-                .font(.system(size: 12))
-                .foregroundColor(.secondary)
-                .padding(.top, 6)
+                .dsFont(.caption)
+                .foregroundStyle(DS.Color.muted)
         }
     }
 
@@ -381,131 +348,96 @@ struct JobDetailView: View {
     }
 
     // MARK: - Stornierung
+    @ViewBuilder
     private var cancellationSection: some View {
-        Group {
-            let notes = job.cancellationNotes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            if job.cancellationPolicyLabel != nil || !notes.isEmpty {
-                DetailSection(title: "Cancellation") {
-                    VStack(spacing: 0) {
-                        if let label = job.cancellationPolicyLabel {
-                            RequirementRow(label: "Policy", value: label)
-                        }
-                        if job.cancellationPolicyLabel != nil && !notes.isEmpty {
-                            Divider().padding(.leading, 16)
-                        }
-                        if !notes.isEmpty {
-                            RequirementRow(label: "Notes", value: notes)
-                        }
-                    }
-                    .background(Color(uiColor: .secondarySystemGroupedBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: SS.cardRadius))
+        let notes = job.cancellationNotes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if job.cancellationPolicyLabel != nil || !notes.isEmpty {
+            DSSection("Cancellation") {
+                if let label = job.cancellationPolicyLabel {
+                    DSRow("Policy", value: label, showsDivider: false)
+                }
+                if !notes.isEmpty {
+                    DSRow("Notes", value: notes, showsDivider: job.cancellationPolicyLabel != nil)
                 }
             }
         }
     }
 
     // MARK: - Hinweise vom Arbeitgeber
+    @ViewBuilder
     private var employerNotesSection: some View {
-        Group {
-            if let notes = job.jobNotes?.trimmingCharacters(in: .whitespacesAndNewlines), !notes.isEmpty {
-                DetailSection(title: "Notes from the employer") {
-                    Text(notes)
-                        .font(.system(size: 15))
-                        .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+        if let notes = job.jobNotes?.trimmingCharacters(in: .whitespacesAndNewlines), !notes.isEmpty {
+            DSSection("Notes from the employer", ruled: false) {
+                bodyText(notes)
             }
         }
     }
 
     // MARK: - Adresse + Kartenvorschau
     private var locationSection: some View {
-        DetailSection(title: "Location") {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: "mappin.and.ellipse")
-                        .foregroundColor(SS.primary).frame(width: 20)
-                    Text(job.location)
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(.primary)
-                    Spacer()
-                }
-                .padding(14)
-                // Nur mit gueltigen Koordinaten; geteilt mit dem Firmenprofil
-                LocationMapPreview(lat: job.lat, lng: job.lng, title: job.company)
-            }
-            .background(Color(uiColor: .secondarySystemGroupedBackground))
-            .clipShape(RoundedRectangle(cornerRadius: SS.cardRadius))
+        DSSection("Location", ruled: false) {
+            DSRow(job.location, systemIcon: "mappin.and.ellipse", showsDivider: false)
+            // Nur mit gueltigen Koordinaten; geteilt mit dem Firmenprofil
+            LocationMapPreview(lat: job.lat, lng: job.lng, title: job.company)
+                .padding(.top, DS.Spacing.xs)
         }
     }
 
-    // MARK: - Unternehmen
+    // MARK: - Unternehmen (Karte)
     private var companySection: some View {
-        DetailSection(title: "Company") {
-            HStack(spacing: 14) {
-                Text(job.logoEmoji)
-                    .font(.system(size: 28))
-                    .frame(width: 50, height: 50)
-                    .background(Color(uiColor: .secondarySystemGroupedBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+        DSSection("Company", ruled: false) {
+            NavigationLink {
+                CompanyProfileView(companyName: job.company, logoEmoji: job.logoEmoji)
+            } label: {
+                DSCard {
+                    HStack(spacing: DS.Spacing.sm) {
+                        DSAvatar(text: job.logoEmoji, size: 48)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        Text(job.company)
-                            .font(.system(size: 15, weight: .semibold))
-                        if job.isVerified == true {
-                            Image(systemName: "checkmark.seal.fill")
-                                .font(.system(size: 12))
-                                .foregroundColor(SS.primary)
-                        }
-                    }
-
-                    if let rating = job.companyRating {
-                        HStack(spacing: 3) {
-                            ForEach(0..<5) { i in
-                                Image(systemName: Double(i) < rating ? "star.fill" : "star")
-                                    .font(.system(size: 11))
-                                    .foregroundColor(.orange)
+                        VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
+                            HStack(spacing: DS.Spacing.xxs) {
+                                Text(job.company)
+                                    .dsFont(.headline)
+                                    .foregroundStyle(DS.Color.text)
+                                if job.isVerified == true {
+                                    Image(systemName: "checkmark.seal.fill")
+                                        .font(DS.Font.make(12, .semibold))
+                                        .foregroundStyle(DS.Color.primaryText)
+                                        .accessibilityLabel("Verified")
+                                }
                             }
-                            Text(String(format: "%.1f", rating))
-                                .font(.system(size: 12))
-                                .foregroundColor(.secondary)
+
+                            if let rating = job.companyRating {
+                                HStack(spacing: DS.Spacing.xxs) {
+                                    ForEach(0..<5) { i in
+                                        Image(systemName: Double(i) < rating ? "star.fill" : "star")
+                                            .font(DS.Font.make(11, .semibold))
+                                            .foregroundStyle(DS.Color.warning)
+                                    }
+                                    Text(String(format: "%.1f", rating))
+                                        .dsFont(.caption)
+                                        .foregroundStyle(DS.Color.muted)
+                                }
+                                .accessibilityElement(children: .combine)
+                            }
+
+                            if let reply = job.replyTime {
+                                Text(reply).dsFont(.caption).foregroundStyle(DS.Color.muted)
+                            }
+                            if let facts = companyFacts {
+                                Text(facts).dsFont(.caption).foregroundStyle(DS.Color.muted)
+                            }
                         }
-                    }
 
-                    if let reply = job.replyTime {
-                        Text(reply)
-                            .font(.system(size: 12))
-                            .foregroundColor(.secondary)
-                    }
+                        Spacer(minLength: DS.Spacing.xs)
 
-                    if let facts = companyFacts {
-                        Text(facts)
-                            .font(.system(size: 12))
-                            .foregroundColor(.secondary)
+                        Image(systemName: "chevron.right")
+                            .font(DS.Font.make(13, .semibold))
+                            .foregroundStyle(DS.Color.muted)
+                            .accessibilityHidden(true)
                     }
                 }
-
-                Spacer()
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.secondary.opacity(0.4))
             }
-            .padding(12)
-            .background(Color(uiColor: .secondarySystemGroupedBackground))
-            .clipShape(RoundedRectangle(cornerRadius: SS.cardRadius))
-            .overlay {
-                // NavigationLink unsichtbar über die gesamte Karte
-                NavigationLink {
-                    CompanyProfileView(
-                        companyName: job.company,
-                        logoEmoji:   job.logoEmoji
-                    )
-                } label: {
-                    Color.clear
-                }
-            }
+            .buttonStyle(.dsPressable)
         }
     }
 
@@ -522,185 +454,84 @@ struct JobDetailView: View {
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
-    // MARK: - Was passiert als Nächstes?
+    // MARK: - Was passiert als Naechstes? (getoenter Block)
     private var whatHappensNextSection: some View {
-        DetailSection(title: "What happens next?") {
-            VStack(spacing: 12) {
-                NextStepRow(number: "1", text: "The employer reviews your profile and availability.")
-                NextStepRow(number: "2", text: "You receive a reply directly in the chat.")
-                NextStepRow(number: "3", text: "No commitment until final confirmation.")
-            }
-            .padding(14)
-            .background(SS.primary.opacity(0.05))
-            .clipShape(RoundedRectangle(cornerRadius: SS.cardRadius))
-            .overlay(
-                RoundedRectangle(cornerRadius: SS.cardRadius)
-                    .stroke(SS.primary.opacity(0.15), lineWidth: 1)
-            )
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            Text("What happens next?")
+                .dsFont(.headline)
+                .foregroundStyle(DS.Color.text)
+            NextStepRow(number: "1", text: "The employer reviews your profile and availability.")
+            NextStepRow(number: "2", text: "You receive a reply directly in the chat.")
+            NextStepRow(number: "3", text: "No commitment until final confirmation.")
         }
+        .padding(DS.Spacing.inset)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DS.Color.primarySoft, in: RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
     }
 
-    // MARK: - Sticky Apply Bar
+    // MARK: - Sticky Apply-Leiste
     private var stickyApplyBar: some View {
         VStack(spacing: 0) {
-            Divider()
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 1) {
+            DSDivider()
+            HStack(spacing: DS.Spacing.sm) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text(job.payText)
-                        .font(.system(size: 17, weight: .bold))
-                        .foregroundColor(.primary)
+                        .dsFont(.headline)
+                        .foregroundStyle(DS.Color.text)
                     Text(job.openSpots.map { "\($0) spot\($0 == 1 ? "" : "s") available" } ?? "– spots available")
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
+                        .dsFont(.caption)
+                        .foregroundStyle(DS.Color.muted)
                 }
+                .layoutPriority(1)
 
-                Button {
+                Button("Apply Now") {
                     showApplySheet = true
-                } label: {
-                    Text("Apply Now")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(SS.primary)
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
                 }
+                .buttonStyle(.ds(.primary))
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 12)
-            .padding(.bottom, 28)
-            .background(Color(uiColor: .systemBackground))
+            .padding(.horizontal, DS.Spacing.screenEdge)
+            .padding(.vertical, DS.Spacing.sm)
         }
+        .background(DS.Color.surface.ignoresSafeArea(edges: .bottom))
     }
 }
 
 // MARK: - Hilfs-Views
-
-private struct QuickInfoCell: View {
-    let icon: String
-    let value: String
-    let label: String
-
-    var body: some View {
-        VStack(spacing: 3) {
-            Image(systemName: icon)
-                .font(.system(size: 15))
-                .foregroundColor(SS.primary)
-            Text(value)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(.primary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-            Text(label)
-                .font(.system(size: 10))
-                .foregroundColor(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-    }
-}
-
-private struct DetailBadge: View {
-    let text: String
-    let icon: String
-    let color: Color
-
-    var body: some View {
-        HStack(spacing: 3) {
-            Image(systemName: icon).font(.system(size: 9, weight: .bold))
-            Text(text).font(.system(size: 11, weight: .semibold))
-        }
-        .foregroundColor(color)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 3)
-        .background(color.opacity(0.12))
-        .clipShape(Capsule())
-    }
-}
-
-private struct RequirementRow: View {
-    let label: String
-    let value: String
-
-    var body: some View {
-        HStack {
-            Text(label)
-                .font(.system(size: 14))
-                .foregroundColor(.secondary)
-            Spacer()
-            Text(value)
-                .font(.system(size: 14, weight: .medium))
-                .foregroundColor(.primary)
-                .multilineTextAlignment(.trailing)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-    }
-}
-
-private struct DetailSection<Content: View>: View {
-    let title: String
-    let content: Content
-
-    init(title: String, @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.content = content()
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(title)
-                .font(.system(size: 17, weight: .bold))
-                .foregroundColor(.primary)
-            content
-        }
-        .padding(16)
-        .background(Color(uiColor: .systemBackground))
-        .padding(.top, 8)
-    }
-}
 
 private struct NextStepRow: View {
     let number: String
     let text: String
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: DS.Spacing.sm) {
             Text(number)
-                .font(.system(size: 13, weight: .bold))
-                .foregroundColor(.white)
-                .frame(width: 22, height: 22)
-                .background(SS.primary)
-                .clipShape(Circle())
+                .font(DS.Font.make(13, .bold, relativeTo: .caption))
+                .foregroundStyle(DS.Color.onPrimary)
+                .frame(width: 24, height: 24)
+                .background(DS.Color.primary, in: Circle())
+                .accessibilityHidden(true)
 
             Text(text)
-                .font(.system(size: 14))
-                .foregroundColor(.primary)
+                .dsFont(.callout)
+                .foregroundStyle(DS.Color.text)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Spacer()
+            Spacer(minLength: 0)
         }
     }
 }
 
-/// Flow-Layout für Tags (umbrechend)
+/// Flow-Layout fuer Tags (umbrechend), auch im Firmenprofil und Swipe genutzt
 struct FlowTagsView: View {
     let tags: [String]
 
     var body: some View {
-        LazyVGrid(
-            columns: [GridItem(.adaptive(minimum: 90, maximum: 160), spacing: 8)],
-            spacing: 8
-        ) {
+        DSFlowLayout(spacing: DS.Spacing.xs) {
             ForEach(tags, id: \.self) { tag in
-                Text(tag)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(SS.primary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(SS.primary.opacity(0.1))
-                    .clipShape(Capsule())
+                DSBadge(tag, .completed)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

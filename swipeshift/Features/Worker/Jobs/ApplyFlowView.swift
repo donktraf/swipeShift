@@ -100,14 +100,34 @@ struct ApplyFlowView: View {
         return shifts.count == 1 ? [shifts[0].id] : nil
     }
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var stepAnimation: Animation? { reduceMotion ? nil : DS.Motion.standard.animation }
+
+    /// Fortschritt nur im Mehrschicht-Flow (Schicht-Auswahl → Bestaetigung)
+    private var progressIndex: Int? {
+        guard ApplyFlowView.needsShiftSelection(job) else { return nil }
+        switch step {
+        case .selectShifts: return 0
+        case .confirm: return 1
+        default: return nil
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // Drag Handle
             Capsule()
-                .fill(Color.gray.opacity(0.3))
+                .fill(DS.Color.border)
                 .frame(width: 36, height: 4)
-                .padding(.top, 12)
-                .padding(.bottom, 4)
+                .padding(.top, DS.Spacing.sm)
+                .padding(.bottom, DS.Spacing.xxs)
+
+            if let progressIndex {
+                DSProgressSteps(steps: ["Shifts", "Confirm"], current: progressIndex)
+                    .padding(.horizontal, DS.Spacing.screenEdge)
+                    .padding(.top, DS.Spacing.xs)
+            }
 
             switch step {
             case .selectShifts:
@@ -115,7 +135,7 @@ struct ApplyFlowView: View {
                     job: job,
                     selectedShiftIds: $selectedShiftIds,
                     onNext: {
-                        withAnimation(.easeInOut(duration: 0.25)) { step = .confirm }
+                        withAnimation(stepAnimation) { step = .confirm }
                     },
                     onDismiss: { dismiss() }
                 )
@@ -128,7 +148,7 @@ struct ApplyFlowView: View {
                     onBack: {
                         let hasMultipleShifts = ApplyFlowView.needsShiftSelection(job)
                         if hasMultipleShifts {
-                            withAnimation(.easeInOut(duration: 0.25)) { step = .selectShifts }
+                            withAnimation(stepAnimation) { step = .selectShifts }
                         } else {
                             dismiss()
                         }
@@ -159,7 +179,7 @@ struct ApplyFlowView: View {
                 )
             }
         }
-        .background(Color(uiColor: .systemGroupedBackground))
+        .dsBackground()
         .presentationDetents(presentationDetent)
         .presentationDragIndicator(.hidden)
     }
@@ -192,15 +212,88 @@ struct ApplyFlowView: View {
 
     @MainActor
     private func submitApplication() async {
-        withAnimation { step = .loading }
+        withAnimation(stepAnimation) { step = .loading }
 
         do {
             try await Task.sleep(nanoseconds: 900_000_000) // 0.9s UX-Feedback
             let autoAccepted = try await jobStore.apply(to: job, shiftIds: shiftIdsToBook)
-            withAnimation { step = .result(autoAccepted ? .booked : .submitted) }
+            withAnimation(stepAnimation) { step = .result(autoAccepted ? .booked : .submitted) }
         } catch {
-            withAnimation { step = .result(ApplyFlowView.result(for: error)) }
+            withAnimation(stepAnimation) { step = .result(ApplyFlowView.result(for: error)) }
         }
+    }
+}
+
+// MARK: - Gemeinsame Bausteine
+
+/// Sheet-Kopf: runder Icon-Button links, Titel mittig
+private struct ApplySheetHeader: View {
+    let title: String
+    let systemIcon: String
+    let iconLabel: String
+    let action: () -> Void
+
+    var body: some View {
+        HStack {
+            DSIconButton(systemName: systemIcon, label: iconLabel, action: action)
+            Spacer()
+            Text(title)
+                .dsFont(.headline)
+                .foregroundStyle(DS.Color.text)
+                .accessibilityAddTraits(.isHeader)
+            Spacer()
+            Color.clear.frame(width: 44, height: 44)
+        }
+        .padding(.horizontal, DS.Spacing.screenEdge)
+        .padding(.vertical, DS.Spacing.xs)
+    }
+}
+
+/// Job-Kurzinfo (nicht antippbar)
+private struct ApplyJobSummary: View {
+    let job: Job
+    var showsPay: Bool = false
+
+    var body: some View {
+        DSCard {
+            HStack(spacing: DS.Spacing.sm) {
+                DSAvatar(text: job.logoEmoji, size: 48)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(job.title).dsFont(.headline).foregroundStyle(DS.Color.text)
+                    Text(job.company).dsFont(.caption).foregroundStyle(DS.Color.muted)
+                }
+                Spacer(minLength: DS.Spacing.xs)
+                if showsPay {
+                    Text(job.payText)
+                        .font(DS.Font.make(15, .bold))
+                        .foregroundStyle(DS.Color.primaryText)
+                }
+            }
+        }
+    }
+}
+
+/// Getoenter Hinweisblock mit Icon
+private struct ApplyNotice: View {
+    let systemIcon: String
+    let tone: DS.Tone
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: DS.Spacing.sm) {
+            Image(systemName: systemIcon)
+                .font(DS.Font.make(15, .semibold))
+                .foregroundStyle(tone.foreground)
+                .accessibilityHidden(true)
+            Text(text)
+                .dsFont(.caption)
+                .foregroundStyle(DS.Color.text)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(DS.Spacing.inset)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(tone.soft, in: RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
     }
 }
 
@@ -216,95 +309,46 @@ private struct ShiftSelectionView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header
-            HStack {
-                Button { onDismiss() } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(.primary)
-                        .frame(width: 32, height: 32)
-                        .background(Color(uiColor: .secondarySystemGroupedBackground))
-                        .clipShape(Circle())
-                }
-
-                Spacer()
-
-                Text("Select Shifts")
-                    .font(.system(size: 17, weight: .semibold))
-
-                Spacer()
-                Color.clear.frame(width: 32, height: 32)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-
-            Divider()
+            ApplySheetHeader(title: "Select Shifts", systemIcon: "xmark", iconLabel: "Close", action: onDismiss)
 
             ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 16) {
-                    // Job-Kurzinfo
-                    HStack(spacing: 12) {
-                        Text(job.logoEmoji)
-                            .font(.system(size: 24))
-                            .frame(width: 44, height: 44)
-                            .background(Color(uiColor: .secondarySystemGroupedBackground))
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(job.title)
-                                .font(.system(size: 15, weight: .semibold))
-                            Text(job.company)
-                                .font(.system(size: 13))
-                                .foregroundColor(.secondary)
-                        }
-                        Spacer()
-                        Text(job.payText)
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundColor(SS.primary)
-                    }
-                    .padding(12)
-                    .background(Color(uiColor: .systemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-
-                    Text("Select one or more shifts:")
-                        .font(.system(size: 14))
-                        .foregroundColor(.secondary)
+                VStack(alignment: .leading, spacing: DS.Spacing.lg) {
+                    ApplyJobSummary(job: job, showsPay: true)
 
                     // Schicht-Checkboxen
-                    VStack(spacing: 10) {
-                        ForEach(shifts) { shift in
+                    DSSection("Select one or more shifts") {
+                        ForEach(Array(shifts.enumerated()), id: \.element.id) { idx, shift in
                             ShiftCheckboxRow(
                                 shift: shift,
+                                showsDivider: idx > 0,
                                 isSelected: selectedShiftIds.contains(shift.id),
                                 onToggle: {
-                                    withAnimation(.spring(response: 0.2, dampingFraction: 0.8)) {
-                                        if selectedShiftIds.contains(shift.id) {
-                                            selectedShiftIds.remove(shift.id)
-                                        } else {
-                                            selectedShiftIds.insert(shift.id)
-                                        }
+                                    DS.Haptics.selection()
+                                    if selectedShiftIds.contains(shift.id) {
+                                        selectedShiftIds.remove(shift.id)
+                                    } else {
+                                        selectedShiftIds.insert(shift.id)
                                     }
                                 }
                             )
                         }
                     }
 
-                    // Ausgewählt-Zähler
+                    // Ausgewaehlt-Zaehler
                     if !selectedShiftIds.isEmpty {
-                        HStack {
+                        HStack(spacing: DS.Spacing.xs) {
                             Image(systemName: "checkmark.circle.fill")
-                                .foregroundColor(SS.primary)
                             Text("\(selectedShiftIds.count) shift\(selectedShiftIds.count == 1 ? "" : "s") selected")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(SS.primary)
                         }
-                        .padding(.top, 4)
+                        .dsFont(.callout)
+                        .foregroundStyle(DS.Color.primaryText)
+                        .transition(.opacity)
                     }
                 }
-                .padding(16)
+                .padding(DS.Spacing.screenEdge)
+                .dsAnimation(.snappy, value: selectedShiftIds)
             }
 
-            // Footer
             applyFooter(
                 buttonLabel: "Next",
                 isEnabled: canProceed,
@@ -318,64 +362,29 @@ private struct ShiftSelectionView: View {
 // MARK: - Schicht-Checkbox-Zeile
 private struct ShiftCheckboxRow: View {
     let shift: JobShift
+    let showsDivider: Bool
     let isSelected: Bool
     let onToggle: () -> Void
 
     var body: some View {
-        Button(action: onToggle) {
-            HStack(spacing: 14) {
-                // Checkbox
-                ZStack {
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke(isSelected ? SS.primary : Color.gray.opacity(0.35), lineWidth: 2)
-                        .frame(width: 22, height: 22)
-
-                    if isSelected {
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(SS.primary)
-                            .frame(width: 22, height: 22)
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundColor(.white)
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(shift.date)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(.primary)
-                    HStack(spacing: 8) {
-                        Label(shift.timeRange, systemImage: "clock")
-                            .font(.system(size: 13))
-                            .foregroundColor(.secondary)
-                        Text("·")
-                            .foregroundColor(.secondary)
-                        Text(shift.duration)
-                            .font(.system(size: 13))
-                            .foregroundColor(.secondary)
-                    }
-                }
-
-                Spacer()
-
-                Text(shift.totalPay)
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundColor(isSelected ? SS.primary : .secondary)
-            }
-            .padding(14)
-            .background(Color(uiColor: .systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 14))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14)
-                    .stroke(isSelected ? SS.primary : Color.gray.opacity(0.15), lineWidth: isSelected ? 2 : 1)
-            )
+        DSRow(
+            shift.date,
+            subtitle: "\(shift.timeRange) · \(shift.duration)",
+            value: shift.totalPay,
+            accentValue: isSelected,
+            showsDivider: showsDivider,
+            action: onToggle
+        ) {
+            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                .font(DS.Font.make(22, .regular, relativeTo: nil))
+                .foregroundStyle(isSelected ? DS.Color.primary : DS.Color.border)
+                .dsAnimation(.snappy, value: isSelected)
         }
-        .buttonStyle(.plain)
-        .animation(.spring(response: 0.25, dampingFraction: 0.8), value: isSelected)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 
-// MARK: - Schritt 2: Bestätigung
+// MARK: - Schritt 2: Bestaetigung
 private struct ConfirmationView: View {
     let job: Job
     let selectedShifts: [JobShift]
@@ -384,123 +393,56 @@ private struct ConfirmationView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header
-            HStack {
-                Button { onBack() } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(.primary)
-                        .frame(width: 32, height: 32)
-                        .background(Color(uiColor: .secondarySystemGroupedBackground))
-                        .clipShape(Circle())
-                }
-
-                Spacer()
-
-                Text("Confirm Application")
-                    .font(.system(size: 17, weight: .semibold))
-
-                Spacer()
-                Color.clear.frame(width: 32, height: 32)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-
-            Divider()
+            ApplySheetHeader(title: "Confirm Application", systemIcon: "chevron.left", iconLabel: "Back", action: onBack)
 
             ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 16) {
-
-                    // Job-Kurzinfo
-                    HStack(spacing: 12) {
-                        Text(job.logoEmoji)
-                            .font(.system(size: 28))
-                            .frame(width: 52, height: 52)
-                            .background(Color(uiColor: .secondarySystemGroupedBackground))
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(job.title)
-                                .font(.system(size: 16, weight: .bold))
-                            Text(job.company)
-                                .font(.system(size: 13))
-                                .foregroundColor(.secondary)
-                        }
-                        Spacer()
-                    }
-                    .padding(14)
-                    .background(Color(uiColor: .systemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                VStack(alignment: .leading, spacing: DS.Spacing.lg) {
+                    ApplyJobSummary(job: job)
 
                     // Schicht-Details
                     if !selectedShifts.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Selected Shifts")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundColor(.secondary)
-                                .padding(.leading, 2)
-
-                            VStack(spacing: 0) {
-                                ForEach(Array(selectedShifts.enumerated()), id: \.element.id) { idx, shift in
-                                    ConfirmShiftRow(shift: shift)
-                                    if idx < selectedShifts.count - 1 {
-                                        Divider().padding(.leading, 16)
-                                    }
-                                }
+                        DSSection("Selected Shifts") {
+                            ForEach(Array(selectedShifts.enumerated()), id: \.element.id) { idx, shift in
+                                DSRow(
+                                    shift.date,
+                                    subtitle: "\(shift.timeRange) · \(shift.duration)",
+                                    value: shift.totalPay,
+                                    accentValue: true,
+                                    showsDivider: idx > 0
+                                )
                             }
-                            .background(Color(uiColor: .systemBackground))
-                            .clipShape(RoundedRectangle(cornerRadius: 14))
                         }
                     } else {
                         // Kein shifts-Array (Single-Shift via shiftText)
-                        VStack(spacing: 0) {
-                            ConfirmDetailRow(icon: "calendar", label: "Shift", value: job.shiftText)
-                            Divider().padding(.leading, 44)
-                            ConfirmDetailRow(icon: "mappin", label: "Location", value: job.location)
-                            Divider().padding(.leading, 44)
-                            ConfirmDetailRow(icon: "banknote", label: "Pay", value: job.payText)
+                        DSSection("Details") {
+                            DSRow("Shift", value: job.shiftText, systemIcon: "calendar", showsDivider: false)
+                            DSRow("Location", value: job.location, systemIcon: "mappin")
+                            DSRow("Pay", value: job.payText, systemIcon: "banknote")
                             if let method = job.paymentMethod {
-                                Divider().padding(.leading, 44)
-                                ConfirmDetailRow(icon: "creditcard", label: "Payment", value: method)
+                                DSRow("Payment", value: method, systemIcon: "creditcard")
                             }
                         }
-                        .background(Color(uiColor: .systemBackground))
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
                     }
 
                     // Instant Match: Hinweis auf sofortige Buchung
                     if job.instantMatch {
-                        HStack(alignment: .top, spacing: 10) {
-                            Image(systemName: "bolt.fill")
-                                .foregroundColor(SS.primary)
-                                .font(.system(size: 15))
-                                .padding(.top, 1)
-                            Text("You'll be booked immediately — no waiting for approval.")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(.primary)
-                        }
-                        .padding(12)
-                        .background(SS.primary.opacity(0.08))
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        ApplyNotice(
+                            systemIcon: "bolt.fill",
+                            tone: .primary,
+                            text: "You'll be booked immediately — no waiting for approval."
+                        )
                     }
 
                     // Rechtlicher Hinweis
-                    HStack(alignment: .top, spacing: 10) {
-                        Image(systemName: "info.circle.fill")
-                            .foregroundColor(.orange)
-                            .font(.system(size: 15))
-                            .padding(.top, 1)
-                        Text(job.instantMatch
-                             ? "Spots are limited. If all spots are filled by the time you apply, your application stays pending and the employer will review it."
-                             : "Applying does not commit you to anything until confirmed. The employer will review your profile and get back to you via chat.")
-                            .font(.system(size: 12))
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(12)
-                    .background(Color.orange.opacity(0.07))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    ApplyNotice(
+                        systemIcon: "info.circle.fill",
+                        tone: .warning,
+                        text: job.instantMatch
+                            ? "Spots are limited. If all spots are filled by the time you apply, your application stays pending and the employer will review it."
+                            : "Applying does not commit you to anything until confirmed. The employer will review your profile and get back to you via chat."
+                    )
                 }
-                .padding(16)
+                .padding(DS.Spacing.screenEdge)
             }
 
             applyFooter(
@@ -513,78 +455,22 @@ private struct ConfirmationView: View {
     }
 }
 
-private struct ConfirmShiftRow: View {
-    let shift: JobShift
-
-    var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(shift.date)
-                    .font(.system(size: 14, weight: .semibold))
-                HStack(spacing: 6) {
-                    Text(shift.timeRange)
-                        .font(.system(size: 13))
-                        .foregroundColor(.secondary)
-                    Text("·")
-                        .foregroundColor(.secondary)
-                    Text(shift.duration)
-                        .font(.system(size: 13))
-                        .foregroundColor(.secondary)
-                }
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-
-            Spacer()
-
-            Text(shift.totalPay)
-                .font(.system(size: 14, weight: .bold))
-                .foregroundColor(SS.primary)
-                .padding(.trailing, 14)
-        }
-    }
-}
-
-private struct ConfirmDetailRow: View {
-    let icon: String
-    let label: String
-    let value: String
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 14))
-                .foregroundColor(SS.primary)
-                .frame(width: 20)
-                .padding(.leading, 14)
-            Text(label)
-                .font(.system(size: 14))
-                .foregroundColor(.secondary)
-            Spacer()
-            Text(value)
-                .font(.system(size: 14, weight: .medium))
-                .foregroundColor(.primary)
-                .padding(.trailing, 14)
-        }
-        .padding(.vertical, 11)
-    }
-}
-
 // MARK: - Schritt 3a: Laden
 private struct LoadingApplyView: View {
     var body: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: DS.Spacing.md) {
             Spacer()
             ProgressView()
-                .scaleEffect(1.3)
+                .controlSize(.large)
+                .tint(DS.Color.primary)
             Text("Submitting application…")
-                .font(.system(size: 15))
-                .foregroundColor(.secondary)
+                .dsFont(.body)
+                .foregroundStyle(DS.Color.text2)
             Spacer()
         }
         .frame(maxWidth: .infinity)
         .frame(height: 160)
-        .padding()
+        .padding(DS.Spacing.md)
     }
 }
 
@@ -597,11 +483,12 @@ struct ApplyResultView: View {
     var onExitToJobList: () -> Void = {}
 
     @State private var showCalendarSheet = false
+    @State private var iconVisible = false
 
     private var config: ResultConfig { ResultConfig(result: result, job: job) }
 
-    /// Primär-Button-Aktion: je nach Ergebniszustand navigiert/handelt der Button tatsächlich,
-    /// statt immer nur das Sheet zu schließen (dismiss)
+    /// Primaer-Button-Aktion: je nach Ergebniszustand navigiert/handelt der Button tatsaechlich,
+    /// statt immer nur das Sheet zu schliessen (dismiss)
     private func primaryAction() {
         switch result {
         case .submitted, .booked:
@@ -621,58 +508,57 @@ struct ApplyResultView: View {
         VStack(spacing: 0) {
             Spacer()
 
-            VStack(spacing: 20) {
-                // Icon
-                ZStack {
-                    Circle()
-                        .fill(config.iconBackground)
-                        .frame(width: 80, height: 80)
-                    Image(systemName: config.iconName)
-                        .font(.system(size: 34, weight: .semibold))
-                        .foregroundColor(config.iconColor)
-                }
+            VStack(spacing: DS.Spacing.md) {
+                // Icon im getoenten Kreis
+                Image(systemName: config.iconName)
+                    .font(DS.Font.make(34, .semibold, relativeTo: nil))
+                    .foregroundStyle(config.tone.foreground)
+                    .frame(width: 80, height: 80)
+                    .background(config.tone.soft, in: Circle())
+                    .scaleEffect(iconVisible ? 1 : 0.7)
+                    .opacity(iconVisible ? 1 : 0)
+                    .accessibilityHidden(true)
 
-                VStack(spacing: 8) {
+                VStack(spacing: DS.Spacing.xs) {
                     Text(config.title)
-                        .font(.system(size: 20, weight: .bold))
+                        .dsFont(.title)
+                        .foregroundStyle(DS.Color.text)
                         .multilineTextAlignment(.center)
 
                     Text(config.message)
-                        .font(.system(size: 14))
-                        .foregroundColor(.secondary)
+                        .dsFont(.body)
+                        .foregroundStyle(DS.Color.text2)
                         .multilineTextAlignment(.center)
-                        .padding(.horizontal, 24)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .padding(.horizontal, 24)
+            .padding(.horizontal, DS.Spacing.screenEdge)
 
             Spacer()
 
-            VStack(spacing: 10) {
-                // Primär-Aktion
+            VStack(spacing: DS.Spacing.xs) {
+                // Primaer-Aktion
                 Button(config.primaryActionLabel) { primaryAction() }
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(config.primaryActionColor)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .buttonStyle(.ds(.primary))
 
-                // Sekundär-Aktion (nur bei Fehlern) — schließt immer nur das Apply-Sheet
+                // Sekundaer-Aktion (nur bei Fehlern) — schliesst immer nur das Apply-Sheet
                 if let secondaryLabel = config.secondaryActionLabel {
                     Button(secondaryLabel) { onDone() }
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundColor(.secondary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
+                        .buttonStyle(.ds(.secondary, size: .medium))
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 32)
+            .padding(.horizontal, DS.Spacing.screenEdge)
+            .padding(.bottom, DS.Spacing.md)
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, 12)
+        .padding(.top, DS.Spacing.sm)
+        .onAppear {
+            switch result {
+            case .submitted, .booked: DS.Haptics.success()
+            default: DS.Haptics.warning()
+            }
+            withAnimation(DS.Motion.standard.animation) { iconVisible = true }
+        }
         .sheet(isPresented: $showCalendarSheet) {
             WorkerCalendarView()
         }
@@ -682,94 +568,76 @@ struct ApplyResultView: View {
 // MARK: - Result Config
 private struct ResultConfig {
     let iconName: String
-    let iconColor: Color
-    let iconBackground: Color
+    let tone: DS.Tone
     let title: String
     let message: String
     let primaryActionLabel: String
-    let primaryActionColor: Color
     let secondaryActionLabel: String?
 
     init(result: ApplyResult, job: Job) {
         switch result {
         case .submitted:
             iconName        = "checkmark.circle.fill"
-            iconColor       = .white
-            iconBackground  = SS.primary
+            tone            = .success
             title           = "Application Submitted!"
             message         = "Your application to \(job.company) was successfully submitted. You'll receive a reply in chat."
             primaryActionLabel   = "Done"
-            primaryActionColor   = SS.primary
             secondaryActionLabel = nil
 
         case .booked:
             iconName        = "bolt.circle.fill"
-            iconColor       = .white
-            iconBackground  = SS.primary
+            tone            = .success
             title           = "You're booked!"
             message         = "\(job.company) uses Instant Match, so your spot is confirmed. Find the details in your chat and calendar."
             primaryActionLabel   = "Done"
-            primaryActionColor   = SS.primary
             secondaryActionLabel = nil
 
         case .connectionLost:
             iconName        = "wifi.slash"
-            iconColor       = .orange
-            iconBackground  = Color.orange.opacity(0.1)
+            tone            = .warning
             title           = "Connection Lost"
             message         = "Your application could not be sent. Please check your internet connection and try again."
             primaryActionLabel   = "Try Again"
-            primaryActionColor   = .orange
             secondaryActionLabel = "Cancel"
 
         case .shiftAlreadyTaken:
             iconName        = "person.fill.xmark"
-            iconColor       = .red
-            iconBackground  = Color.red.opacity(0.1)
+            tone            = .danger
             title           = "Shift Already Taken"
             message         = "Unfortunately this shift has already been taken by someone else."
             primaryActionLabel   = "View Other Shifts"
-            primaryActionColor   = SS.primary
             secondaryActionLabel = "Back to Overview"
 
         case .shiftUnavailable:
             iconName        = "calendar.badge.minus"
-            iconColor       = .red
-            iconBackground  = Color.red.opacity(0.1)
+            tone            = .danger
             title           = "Shift Unavailable"
             message         = "This shift is no longer available. The employer may have removed it."
             primaryActionLabel   = "View Other Jobs"
-            primaryActionColor   = SS.primary
             secondaryActionLabel = "Back"
 
         case .schedulingConflict:
             iconName        = "exclamationmark.triangle.fill"
-            iconColor       = .orange
-            iconBackground  = Color.orange.opacity(0.1)
+            tone            = .warning
             title           = "Scheduling Conflict Detected"
             message         = "You already have another job at this time. Check your calendar before applying."
             primaryActionLabel   = "View My Calendar"
-            primaryActionColor   = .orange
             secondaryActionLabel = "Go Back Anyway"
 
         case .accountPaused:
             iconName        = "pause.circle.fill"
-            iconColor       = .orange
-            iconBackground  = Color.orange.opacity(0.1)
+            tone            = .warning
             title           = "Your Account Is Paused"
             message         = "You can't apply while your account is paused. Resume it under Account Settings → Privacy & Data."
             primaryActionLabel   = "OK"
-            primaryActionColor   = SS.primary
             secondaryActionLabel = nil
 
         case .blocked:
             iconName        = "hand.raised.fill"
-            iconColor       = .orange
-            iconBackground  = Color.orange.opacity(0.1)
+            tone            = .warning
             title           = "Can't Apply"
             message         = "You can't apply to this employer."
             primaryActionLabel   = "OK"
-            primaryActionColor   = SS.primary
             secondaryActionLabel = nil
         }
     }
@@ -783,30 +651,18 @@ private func applyFooter(
     onDismiss: @escaping () -> Void
 ) -> some View {
     VStack(spacing: 0) {
-        Divider()
-        HStack(spacing: 12) {
+        DSDivider()
+        HStack(spacing: DS.Spacing.sm) {
             Button("Cancel") { onDismiss() }
-                .font(.system(size: 15, weight: .medium))
-                .foregroundColor(.secondary)
+                .buttonStyle(.ds(.secondary, fullWidth: false))
                 .frame(width: 100)
-                .padding(.vertical, 14)
-                .background(Color.gray.opacity(0.09))
-                .clipShape(RoundedRectangle(cornerRadius: 14))
 
-            Button(action: action) {
-                Text(buttonLabel)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-            }
-            .background(isEnabled ? SS.primary : Color.gray.opacity(0.35))
-            .clipShape(RoundedRectangle(cornerRadius: 14))
-            .disabled(!isEnabled)
+            Button(buttonLabel, action: action)
+                .buttonStyle(.ds(.primary))
+                .disabled(!isEnabled)
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 12)
-        .padding(.bottom, 28)
-        .background(Color(uiColor: .systemGroupedBackground))
+        .padding(.horizontal, DS.Spacing.screenEdge)
+        .padding(.vertical, DS.Spacing.sm)
     }
+    .background(DS.Color.surface.ignoresSafeArea(edges: .bottom))
 }

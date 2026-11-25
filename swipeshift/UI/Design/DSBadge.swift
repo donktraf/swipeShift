@@ -127,9 +127,19 @@ struct DSAvatar: View {
         return parts.compactMap { $0.first.map(String.init) }.joined().uppercased()
     }
 
+    /// Emoji haben in Plus Jakarta Sans keine Glyphen -> Systemschrift.
+    static func containsEmoji(_ text: String) -> Bool {
+        text.unicodeScalars.contains { $0.properties.isEmojiPresentation || ($0.properties.isEmoji && $0.value > 0x238C) }
+    }
+
+    private var textFont: Font {
+        if Self.containsEmoji(text) { return .system(size: size * 0.5) }
+        return DS.Font.make(size * 0.35, .extrabold, relativeTo: nil)
+    }
+
     var body: some View {
         Text(text)
-            .font(DS.Font.make(size * 0.35, .extrabold, relativeTo: nil))
+            .font(textFont)
             .foregroundStyle(tone.foreground)
             .lineLimit(1)
             .minimumScaleFactor(0.6)
