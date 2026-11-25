@@ -8,6 +8,7 @@ const { sendMail } = require("./mailer");
 const { removeDevicesForSessions } = require("./pushDevices");
 const { renderEmail, plainLine } = require("./utils/emailTemplate");
 const m = require("./utils/moderation");
+const tomb = require("./utils/tombstones");
 
 const SAFETY_FOOTER = "You are receiving this email because of an account safety matter. Questions? support@swipeshift.app";
 
@@ -111,6 +112,9 @@ async function applyReportAction({ report, target: targetHint, adminId, value, n
   let result;
   try {
     result = await prisma.$transaction(async (tx) => {
+      // Zeilensperre (wie DELETE /auth/me): Ban und Konto-Loeschung serialisieren. Fehlende Zeile = Konto schon geloescht.
+      const locked = await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${targetHint.id} FOR UPDATE`;
+      if (!locked.length) throw new ModerationError(409, "This account was deleted.", "ACCOUNT_DELETED_RACE");
       // Zustand frisch lesen (Race mit parallelem Admin/Auto-Sperre)
       target = await tx.user.findUnique({
         where: { id: targetHint.id },
@@ -148,7 +152,8 @@ async function applyReportAction({ report, target: targetHint, adminId, value, n
       return { reporterIds: [...new Set(open.map((r) => r.reporterId))], closedCount: claimed.count };
     });
   } catch (err) {
-    if (err instanceof ModerationError) return { ok: false, status: err.status, error: err.error, code: err.code };
+    if (err instanceof ModerationError) return { ok: false, status: err.status, error: err.error, code: err.code, gone: err.code === "ACCOUNT_DELETED_RACE" };
+    if (err?.code === "P2025") return { ok: false, status: 409, error: "This account was deleted.", code: "ACCOUNT_DELETED_RACE", gone: true };
     throw err;
   }
 
@@ -165,6 +170,94 @@ async function applyReportAction({ report, target: targetHint, adminId, value, n
   return { ok: true, closedCount: result.closedCount };
 }
 
+// Aktion gegen ein GELOESCHTES Konto (nur dismiss/ban, siehe m.planDeletedAction). Schliesst alle offenen Reports
+// gegen die alte ID; ban setzt DeletedAccount.bannedAt (greift ueber isBannedEmailAlias auf die E-Mail samt Aliasen).
+async function applyDeletedReportAction({ report, adminId, value, now = new Date() }) {
+  const resolution = m.resolutionFor(value.action);
+  let result;
+  try {
+    result = await prisma.$transaction(async (tx) => {
+      const tomb = await tx.deletedAccount.findUnique({ where: { id: report.reportedUserId } });
+      const plan = m.planDeletedAction(value, tomb, now);
+      if (!plan.ok) throw new ModerationError(plan.status, plan.error, plan.code);
+      const open = await tx.userReport.findMany({
+        where: { reportedUserId: report.reportedUserId, status: "open" },
+        select: { id: true, reporterId: true },
+      });
+      const handleCheck = m.canHandleReport(adminId, report, open);
+      if (!handleCheck.ok) throw new ModerationError(handleCheck.status, handleCheck.error);
+      if (!open.some((r) => r.id === report.id)) throw new ModerationError(409, "This report was already handled.", "ALREADY_RESOLVED");
+      const claimed = await tx.userReport.updateMany({
+        where: { id: { in: open.map((r) => r.id) }, status: "open" },
+        data: { status: "closed", resolution, resolvedAt: now, resolvedById: adminId },
+      });
+      if (claimed.count !== open.length) throw new ModerationError(409, "This report was already handled.", "ALREADY_RESOLVED");
+      if (plan.banUpdate) {
+        // updateMany statt update: wurde der Tombstone parallel entfernt, sauber abbrechen statt P2025/500
+        const banned = await tx.deletedAccount.updateMany({ where: { id: tomb.id }, data: plan.banUpdate });
+        if (banned.count !== 1) throw new ModerationError(409, "This account was deleted.", "ACCOUNT_DELETED");
+      }
+      await tx.moderationAction.create({
+        data: { reportId: report.id, targetUserId: report.reportedUserId, adminId, action: value.action, note: value.note },
+      });
+      return { reporterIds: [...new Set(open.map((r) => r.reporterId))], closedCount: claimed.count };
+    });
+  } catch (err) {
+    if (err instanceof ModerationError) return { ok: false, status: err.status, error: err.error, code: err.code };
+    throw err;
+  }
+  await notifyReporters(result.reporterIds, resolution);
+  return { ok: true, closedCount: result.closedCount };
+}
+
+// Retention: abgelaufene Tombstones loeschen (siehe utils/tombstones.js). Rueckgabe: Anzahl geloeschter Eintraege.
+async function purgeExpiredTombstones(now = new Date()) {
+  const cutoff = tomb.retentionCutoff(now);
+  const candidates = await prisma.deletedAccount.findMany({
+    // Vorfilter wie selectExpiredTombstones, damit dauerhaft nicht loeschbare Eintraege nicht die ersten 1000 Plaetze belegen
+    where: {
+      bannedAt: null,
+      deletedAt: { lte: cutoff },
+      AND: [
+        { OR: [{ unbannedAt: null }, { unbannedAt: { lte: cutoff } }] },
+        { OR: [{ suspendedUntil: null }, { suspendedUntil: { lte: now } }] },
+      ],
+    },
+    select: { id: true, deletedAt: true, unbannedAt: true, bannedAt: true, suspendedUntil: true },
+    orderBy: { deletedAt: "asc" },
+    take: 1000,
+  });
+  if (!candidates.length) return 0;
+  const open = await prisma.userReport.findMany({
+    where: { status: "open", reportedUserId: { in: candidates.map((c) => c.id) } },
+    select: { reportedUserId: true },
+  });
+  const ids = tomb.selectExpiredTombstones(candidates, open.map((o) => o.reportedUserId), now);
+  if (!ids.length) return 0;
+  // bannedAt-Guard erneut in der DB (parallel gesetzter Bann gewinnt)
+  const res = await prisma.deletedAccount.deleteMany({ where: { id: { in: ids }, bannedAt: null } });
+  return res.count;
+}
+
+// Admin entbannt die E-Mail eines geloeschten Kontos: bannedAt = null, unbannedAt = jetzt, ModerationAction "lift".
+async function unbanDeletedAccount({ id, adminId, now = new Date() }) {
+  try {
+    await prisma.$transaction(async (tx) => {
+      const t = await tx.deletedAccount.findUnique({ where: { id } });
+      const reporters = t ? await tx.userReport.findMany({ where: { reportedUserId: id }, select: { reporterId: true } }) : [];
+      const can = tomb.canUnbanDeleted(adminId, t, reporters.map((r) => r.reporterId));
+      if (!can.ok) throw new ModerationError(can.status, can.error, can.code);
+      const upd = await tx.deletedAccount.updateMany({ where: { id, bannedAt: { not: null } }, data: { bannedAt: null, unbannedAt: now } });
+      if (upd.count !== 1) throw new ModerationError(409, "This email address is not banned.", "NOT_BANNED");
+      await tx.moderationAction.create({ data: { targetUserId: id, adminId, action: "lift", note: "Email unbanned (deleted account)" } });
+    });
+  } catch (err) {
+    if (err instanceof ModerationError) return { ok: false, status: err.status, error: err.error, code: err.code };
+    throw err;
+  }
+  return { ok: true };
+}
+
 async function liftRestriction({ target, adminId }) {
   await prisma.$transaction([
     prisma.user.update({ where: { id: target.id }, data: { suspendedUntil: null, bannedAt: null, suspensionReason: null } }),
@@ -173,4 +266,4 @@ async function liftRestriction({ target, adminId }) {
   await notifyTarget(target.email, "lift", {});
 }
 
-module.exports = { revokeAllSessions, autoSuspendIfNeeded, applyReportAction, liftRestriction, sendSafetyMail };
+module.exports = { revokeAllSessions, autoSuspendIfNeeded, applyReportAction, applyDeletedReportAction, purgeExpiredTombstones, unbanDeletedAccount, liftRestriction, sendSafetyMail };

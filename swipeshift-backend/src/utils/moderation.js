@@ -175,6 +175,40 @@ function withVisibleApplicants(where = {}, now = new Date()) {
   return { AND: [where, visibleApplyFilter(now)] };
 }
 
+// Tombstone beim Loeschen anlegen? Nur bei Meldungen gegen den Nutzer, Moderationshistorie oder bestehender Sperre/Verwarnung.
+function shouldCreateTombstone({ reportCount = 0, actionCount = 0, bannedAt = null, suspendedUntil = null } = {}) {
+  return reportCount > 0 || actionCount > 0 || !!bannedAt || !!suspendedUntil;
+}
+
+// Feste Admin-Sperre in den Tombstone uebernehmen; die Auto-Sperre ("pending_review", ohne Ende) nicht
+// (ueber sie entscheidet der Admin per dismiss/ban am offenen Report).
+function tombstoneSuspendedUntil(user, now = new Date()) {
+  if (!user?.suspendedUntil || user.suspensionReason === PENDING_REVIEW) return null;
+  return toMs(user.suspendedUntil) > toMs(now) ? new Date(toMs(user.suspendedUntil)) : null;
+}
+
+// "Vorname N." fuer die Admin-Anzeige (kein Klarname/keine Mail)
+function tombstoneDisplayName(firstName, lastName) {
+  const f = (firstName || "").trim();
+  const l = (lastName || "").trim();
+  if (!f && !l) return null;
+  return l ? `${f} ${l[0].toUpperCase()}.`.trim() : f;
+}
+
+// Aktion gegen ein geloeschtes Konto: nur dismiss und ban (ban braucht Tombstone mit Hash).
+// -> { ok:true, banUpdate: { bannedAt } | null } oder { ok:false, status, code, error }
+function planDeletedAction(value, tombstone, now = new Date()) {
+  switch (value.action) {
+    case "dismiss":
+      return { ok: true, banUpdate: null };
+    case "ban":
+      if (!tombstone) return { ok: false, status: 409, code: "NO_EMAIL_ON_FILE", error: "No email on file for this deleted account." };
+      return { ok: true, banUpdate: { bannedAt: tombstone.bannedAt ? new Date(toMs(tombstone.bannedAt)) : new Date(toMs(now)) } };
+    default:
+      return { ok: false, status: 409, code: "ACCOUNT_DELETED", error: "This account was deleted." };
+  }
+}
+
 function resolutionFor(action) {
   return action === "dismiss" ? "dismissed" : "action_taken";
 }
@@ -261,5 +295,6 @@ module.exports = {
   ACTIONS, SUSPEND_DAYS, AUTO_SUSPEND_THRESHOLD, MAX_NOTE_LENGTH, FAR_FUTURE, PENDING_REVIEW,
   restrictionState, isRestricted, restrictedWhere, restrictionResponse,
   validateAction, canModerate, isReportHiddenFrom, canHandleReport, reportsVisibleWhere, disputeVisibleWhere, disputeConflict, planUserUpdate, userUpdateFor, hiddenPendingClause, visibleApplyFilter, withVisibleApplicants, resolutionFor,
+  shouldCreateTombstone, tombstoneSuspendedUntil, tombstoneDisplayName, planDeletedAction,
   distinctOpenReporters, shouldAutoSuspend, reporterFeedback, reasonLabel, targetNotice,
 };

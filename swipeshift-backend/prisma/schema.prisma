@@ -612,6 +612,27 @@ model UserReport {
   @@index([reportedUserId, status])
 }
 
+// Tombstone eines geloeschten Kontos, NUR wenn Meldungen/Moderation vorlagen (Datensparsamkeit, Missbrauchsschutz:
+// sonst koennte man durch Loeschen + Neuregistrierung einer Sperre entgehen). Keine Klartext-Mail: nur ein
+// gepefferter HMAC (EMAIL_BAN_PEPPER) der kanonischen Adresse (src/emailBan.js). displayName nur fuer die Admin-Anzeige.
+// TODO: in der Privacy Policy erwaehnen (Aufbewahrung zum Schutz vor Missbrauch).
+model DeletedAccount {
+  id                 String    @id // = alte User-ID (Reports/ModerationAction referenzieren sie weiter)
+  emailCanonicalHash String
+  hashVersion        Int       @default(1) // Pepper-Generation; noch nicht ausgewertet (Pruefung gegen EMAIL_BAN_PEPPER + _PREV), Platzhalter fuer spaeteres Neu-Hashen
+  appleSubHash       String?   // HMAC der Apple-Subject-ID (kein Google-Sub im User-Modell gespeichert)
+  emailVerified      Boolean   @default(false)
+  role               String?
+  displayName        String?
+  deletedAt          DateTime  @default(now())
+  bannedAt           DateTime?
+  suspendedUntil     DateTime? // nur feste Admin-Sperre (keine Auto-Sperre "pending_review")
+  unbannedAt         DateTime? // Admin hat die E-Mail entbannt → Retention (90 Tage) rechnet ab hier
+
+  @@index([emailCanonicalHash, bannedAt])
+  @@index([appleSubHash])
+}
+
 // Protokoll aller Moderationsentscheidungen (adminId null = System, z.B. Auto-Sperre)
 model ModerationAction {
   id           String   @id @default(uuid())

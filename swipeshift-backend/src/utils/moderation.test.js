@@ -200,3 +200,42 @@ test("planUserUpdate: suspend/ban against admins forbidden, warn/dismiss allowed
   assert.equal(m.planUserUpdate({ action: "dismiss" }, now, admin).ok, true);
   assert.equal(m.planUserUpdate({ action: "ban" }, now, { isAdmin: false }).ok, true);
 });
+
+test("shouldCreateTombstone: only with reports, moderation history or restriction", () => {
+  assert.equal(m.shouldCreateTombstone({}), false);
+  assert.equal(m.shouldCreateTombstone({ reportCount: 1 }), true);
+  assert.equal(m.shouldCreateTombstone({ actionCount: 2 }), true);
+  assert.equal(m.shouldCreateTombstone({ bannedAt: now }), true);
+  assert.equal(m.shouldCreateTombstone({ suspendedUntil: now }), true);
+});
+
+test("tombstoneDisplayName: first name + last initial", () => {
+  assert.equal(m.tombstoneDisplayName("Anna", "Meier"), "Anna M.");
+  assert.equal(m.tombstoneDisplayName("Anna", ""), "Anna");
+  assert.equal(m.tombstoneDisplayName(null, null), null);
+});
+
+test("planDeletedAction: dismiss ok, ban needs tombstone, others 409", () => {
+  assert.equal(m.planDeletedAction({ action: "dismiss" }, null, now).ok, true);
+  const noTomb = m.planDeletedAction({ action: "ban" }, null, now);
+  assert.equal(noTomb.status, 409);
+  assert.equal(noTomb.error, "No email on file for this deleted account.");
+  const ban = m.planDeletedAction({ action: "ban" }, { id: "x" }, now);
+  assert.equal(ban.ok, true);
+  assert.equal(+ban.banUpdate.bannedAt, +now);
+  const earlier = new Date(+now - day);
+  assert.equal(+m.planDeletedAction({ action: "ban" }, { bannedAt: earlier }, now).banUpdate.bannedAt, +earlier);
+  for (const action of ["warn", "suspend", "lift"]) {
+    const r = m.planDeletedAction({ action }, { id: "x" }, now);
+    assert.equal(r.status, 409);
+    assert.equal(r.error, "This account was deleted.");
+  }
+});
+
+test("tombstoneSuspendedUntil: fixed admin suspension only", () => {
+  const future = new Date(+now + day);
+  assert.equal(+m.tombstoneSuspendedUntil({ suspendedUntil: future, suspensionReason: "admin" }, now), +future);
+  assert.equal(m.tombstoneSuspendedUntil({ suspendedUntil: m.FAR_FUTURE, suspensionReason: m.PENDING_REVIEW }, now), null);
+  assert.equal(m.tombstoneSuspendedUntil({ suspendedUntil: new Date(+now - 1), suspensionReason: "admin" }, now), null);
+  assert.equal(m.tombstoneSuspendedUntil({}, now), null);
+});

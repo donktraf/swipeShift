@@ -107,6 +107,8 @@ const DEV_ENVS = new Set(["development", "test"]);
 function assertTotpConfig(env = process.env) {
   getKeyring(env);
   getBackupPepper(env);
+  getEmailBanPepper(env);
+  getEmailBanPepperPrev(env);
 }
 
 // Format: v1.<kid>.<iv b64>.<tag b64>.<ciphertext b64>; AAD = userId (Secret ist an den User gebunden)
@@ -168,6 +170,27 @@ function getBackupPepper(env = process.env) {
   return parseKey(raw, { allowPassphrase: dev, name: "BACKUP_CODE_PEPPER" });
 }
 
+// Pepper fuer die E-Mail-/Apple-Hashes geloeschter Konten (DeletedAccount). NIE rotieren ohne EMAIL_BAN_PEPPER_PREV
+// (sonst greifen bestehende Banns nicht mehr). Pflicht ausserhalb von development/test; Dev-Fallback aus JWT_SECRET.
+function getEmailBanPepper(env = process.env) {
+  const dev = DEV_ENVS.has(env.NODE_ENV);
+  const raw = env.EMAIL_BAN_PEPPER;
+  if (!raw) {
+    if (!dev) {
+      throw new Error("EMAIL_BAN_PEPPER is required unless NODE_ENV is development or test (32 bytes, e.g. `openssl rand -hex 32`).");
+    }
+    return crypto.createHash("sha256").update("email-ban-pepper-dev:" + (env.JWT_SECRET || "dev_secret_change_me")).digest();
+  }
+  return parseKey(raw, { allowPassphrase: dev, name: "EMAIL_BAN_PEPPER" });
+}
+
+// Optional: vorheriger Pepper waehrend einer Rotation (Check gegen beide); sonst null
+function getEmailBanPepperPrev(env = process.env) {
+  const raw = env.EMAIL_BAN_PEPPER_PREV;
+  if (!raw) return null;
+  return parseKey(raw, { allowPassphrase: DEV_ENVS.has(env.NODE_ENV), name: "EMAIL_BAN_PEPPER_PREV" });
+}
+
 function hashBackupCode(input, pepper) {
   const n = normalizeBackupCode(input);
   if (!n) return null;
@@ -195,7 +218,7 @@ module.exports = {
   DIGITS, PERIOD_S, WINDOW, ISSUER, BACKUP_CODE_COUNT,
   base32Encode, base32Decode, generateSecret,
   hotp, timeStep, totpAt, verifyTotp, otpauthUri,
-  parseKey, kidOf, getKeyring, assertTotpConfig, encryptSecret, decryptSecret, payloadKid, needsReencrypt, reencryptPayload,
+  parseKey, kidOf, getKeyring, assertTotpConfig, getEmailBanPepper, getEmailBanPepperPrev, encryptSecret, decryptSecret, payloadKid, needsReencrypt, reencryptPayload,
   PENDING_TTL_MS, isPendingFresh,
   generateBackupCodes, normalizeBackupCode, getBackupPepper, hashBackupCode, findBackupCodeHash, looksLikeTotpCode,
 };

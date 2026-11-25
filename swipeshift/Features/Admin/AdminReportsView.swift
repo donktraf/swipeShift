@@ -80,7 +80,9 @@ struct AdminReportsView: View {
                         pill("\(r.openReportCount) report\(r.openReportCount == 1 ? "" : "s") · \(r.openReporterCount) reporter\(r.openReporterCount == 1 ? "" : "s")",
                              color: r.openReporterCount >= 3 ? .red : .orange)
                     }
-                    if r.reported.restriction.isRestricted {
+                    if r.reported.isDeleted {
+                        pill(r.reported.isEmailBanned ? "Deleted account · email banned" : "Deleted account", color: r.reported.isEmailBanned ? .red : .gray)
+                    } else if r.reported.restriction.isRestricted {
                         pill(r.reported.restriction.label, color: .red)
                     }
                 }
@@ -133,6 +135,7 @@ struct AdminReportDetailView: View {
     @State private var note = ""
     @State private var pending: AdminModerationAction?
     @State private var showLiftConfirm = false
+    @State private var showUnbanConfirm = false
     @State private var isWorking = false
     @State private var actionError: String?
 
@@ -163,8 +166,18 @@ struct AdminReportDetailView: View {
                 Task { await perform(action) }
             }
             Button("Cancel", role: .cancel) {}
-        } message: { _ in
-            Text("This closes all open reports against this user and notifies the reporters.")
+        } message: { action in
+            if action == .ban, detail?.report.reported.isDeleted == true {
+                Text("This blocks the email address (including aliases) from registering again and closes all open reports.\(detail?.report.reported.emailVerified == false ? " This email address was never verified." : "")")
+            } else {
+                Text("This closes all open reports against this user and notifies the reporters.")
+            }
+        }
+        .confirmationDialog("Unban email address?", isPresented: $showUnbanConfirm, titleVisibility: .visible) {
+            Button("Unban email") { Task { await unbanEmail() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This email address (including aliases) can be used to register again. The deleted account stays deleted.")
         }
         .confirmationDialog("Lift restriction?", isPresented: $showLiftConfirm, titleVisibility: .visible) {
             Button("Lift restriction") { Task { await lift() } }
@@ -179,7 +192,7 @@ struct AdminReportDetailView: View {
         case .warn: return "Send a warning?"
         case .suspend7: return "Suspend for 7 days?"
         case .suspend30: return "Suspend for 30 days?"
-        case .ban: return "Ban permanently?"
+        case .ban: return detail?.report.reported.isDeleted == true ? "Ban email address?" : "Ban permanently?"
         case .dismiss: return "Dismiss report?"
         case nil: return ""
         }
@@ -190,7 +203,7 @@ struct AdminReportDetailView: View {
         case .warn: return "Warn"
         case .suspend7: return "Suspend 7 days"
         case .suspend30: return "Suspend 30 days"
-        case .ban: return "Ban permanently"
+        case .ban: return detail?.report.reported.isDeleted == true ? "Ban email address" : "Ban permanently"
         case .dismiss: return "Dismiss"
         }
     }
@@ -205,9 +218,16 @@ struct AdminReportDetailView: View {
                     Text(r.reported.name).font(.system(size: 16, weight: .semibold))
                     Text("\(r.reported.roleLabel) · reported for \(r.reasonLabel.lowercased())")
                         .font(.system(size: 12)).foregroundColor(.secondary)
-                    Text(r.reported.restriction.label)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(r.reported.restriction.isRestricted ? .red : .green)
+                    if r.reported.isDeleted {
+                        let when = r.reported.deletedAt.map { " on \($0.formatted(date: .abbreviated, time: .omitted))" } ?? ""
+                        Text("Deleted account\(r.reported.deletedName.map { " (\($0))" } ?? "")\(when)")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.secondary)
+                    } else {
+                        Text(r.reported.restriction.label)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(r.reported.restriction.isRestricted ? .red : .green)
+                    }
                 }
                 Spacer()
             }
@@ -277,8 +297,16 @@ struct AdminReportDetailView: View {
                     .background(Color(uiColor: .secondarySystemGroupedBackground))
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                     .onChange(of: note) { _, v in if v.count > 500 { note = String(v.prefix(500)) } }
-                actionButton("Warn", icon: "exclamationmark.triangle.fill", color: .orange, .warn)
-                if r.reported.isAdmin != true {
+                if r.reported.isDeleted {
+                    Text("This account was deleted. You can dismiss the report\(r.reported.canBan == true ? " or ban the email address so it can't be used to register again." : ".")")
+                        .font(.system(size: 12)).foregroundColor(.secondary)
+                    if r.reported.canBan == true {
+                        actionButton("Ban email address", icon: "nosign", color: .red, .ban)
+                    }
+                } else {
+                    actionButton("Warn", icon: "exclamationmark.triangle.fill", color: .orange, .warn)
+                }
+                if r.reported.isAdmin != true && !r.reported.isDeleted {
                     actionButton("Suspend 7 days", icon: "pause.circle.fill", color: .orange, .suspend7)
                     actionButton("Suspend 30 days", icon: "pause.circle.fill", color: .red, .suspend30)
                     actionButton("Ban permanently", icon: "nosign", color: .red, .ban)
@@ -289,7 +317,18 @@ struct AdminReportDetailView: View {
             card { Text("Closed: \(label)").font(.system(size: 14, weight: .semibold)) }
         }
 
-        if r.reported.restriction.isRestricted {
+        if r.reported.isEmailBanned {
+            Button { showUnbanConfirm = true } label: {
+                Text("Unban email").font(.system(size: 15, weight: .semibold))
+                    .frame(maxWidth: .infinity).padding(.vertical, 12)
+                    .foregroundColor(SS.primary)
+                    .background(SS.primary.opacity(0.1))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+            .disabled(isWorking)
+        }
+
+        if r.reported.restriction.isRestricted && !r.reported.isDeleted {
             Button { showLiftConfirm = true } label: {
                 Text("Lift restriction").font(.system(size: 15, weight: .semibold))
                     .frame(maxWidth: .infinity).padding(.vertical, 12)
@@ -357,6 +396,21 @@ struct AdminReportDetailView: View {
             try await APIClient.shared.applyAdminAction(reportId: reportId, action: action, note: note)
             onChanged()
             dismiss()
+        } catch {
+            actionError = error.localizedDescription
+        }
+        isWorking = false
+    }
+
+    @MainActor
+    private func unbanEmail() async {
+        guard let id = detail?.report.reported.id else { return }
+        isWorking = true
+        actionError = nil
+        do {
+            try await APIClient.shared.unbanDeletedAccount(id: id)
+            onChanged()
+            await load()
         } catch {
             actionError = error.localizedDescription
         }

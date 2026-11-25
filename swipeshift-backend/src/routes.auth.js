@@ -7,7 +7,8 @@ const { completeLogin, respondIfRestricted } = require("./sessions");
 const { normalizeEmail, decideAppleLogin, decideGoogleLogin, needsTakeoverCleanup } = require("./utils/socialLogin");
 const { sanitizeTakenOverAccount } = require("./accountTakeover");
 const { canonicalEmail } = require("./utils/emailCanonical");
-const { isBannedEmailAlias } = require("./emailBan");
+const { isBannedEmailAlias, hashCanonicalEmail, hashAppleSub } = require("./emailBan");
+const m = require("./utils/moderation");
 const { emailChangedNotice } = require("./utils/emailChangeNotice");
 const { prisma } = require("./prisma.js");
 const crypto = require("crypto");
@@ -619,7 +620,7 @@ router.post("/apple", async (req, res) => {
       }
 
       // Alias eines gebannten Nutzers → wie "E-Mail existiert schon" ablehnen (kein Hinweis auf den Bann)
-      if (await isBannedEmailAlias(decision.email)) {
+      if (await isBannedEmailAlias(decision.email, { appleSub })) {
         return { reject: { status: 409, body: { error: "An account with this email already exists. Please sign in with your original method.", code: "EMAIL_IN_USE" } } };
       }
 
@@ -846,7 +847,37 @@ router.patch("/me/email", requireAuth, async (req, res) => {
 router.delete("/me", requireAuth, async (req, res) => {
   const userId = req.auth.sub;
   try {
-    await prisma.user.delete({ where: { id: userId } });
+    await prisma.$transaction(async (tx) => {
+      // Zeilensperre zuerst: serialisiert mit einem parallelen Admin-Ban (applyReportAction sperrt dieselbe Zeile),
+      // sodass der Tombstone nie einen zwischenzeitlich gesetzten Bann/Report verpasst.
+      await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${userId} FOR UPDATE`;
+      const user = await tx.user.findUnique({
+        where: { id: userId },
+        select: { id: true, email: true, role: true, firstName: true, lastName: true, bannedAt: true, suspendedUntil: true, suspensionReason: true, appleSub: true, emailVerifiedAt: true },
+      });
+      if (user) {
+        // Tombstone nur bei relevanten Meldungen (offen oder mit Massnahme; abgewiesene allein nicht), Moderation
+        // (ausser dismiss) oder Sperre — Missbrauchsschutz + Datensparsamkeit, siehe DeletedAccount im Schema
+        const [reportCount, actionCount] = await Promise.all([
+          tx.userReport.count({ where: { reportedUserId: userId, OR: [{ status: "open" }, { resolution: "action_taken" }] } }),
+          tx.moderationAction.count({ where: { targetUserId: userId, action: { not: "dismiss" } } }),
+        ]);
+        const hash = hashCanonicalEmail(user.email);
+        const suspendedUntil = m.tombstoneSuspendedUntil(user);
+        if (hash && m.shouldCreateTombstone({ reportCount, actionCount, bannedAt: user.bannedAt, suspendedUntil })) {
+          await tx.deletedAccount.create({
+            data: {
+              id: user.id, emailCanonicalHash: hash, hashVersion: 1, appleSubHash: hashAppleSub(user.appleSub),
+              emailVerified: !!user.emailVerifiedAt,
+              role: user.role ? String(user.role) : null,
+              displayName: m.tombstoneDisplayName(user.firstName, user.lastName),
+              bannedAt: user.bannedAt ?? null, suspendedUntil,
+            },
+          });
+        }
+      }
+      await tx.user.delete({ where: { id: userId } });
+    });
     return res.json({ ok: true });
   } catch (err) {
     console.error("DELETE /auth/me error:", err);

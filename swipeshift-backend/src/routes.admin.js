@@ -2,6 +2,7 @@
 //   GET  /admin/reports?status=open|closed   Liste (open: ein Eintrag pro gemeldetem User, closed: flach)
 //   GET  /admin/reports/:id                  Detail inkl. Melder-Notizen, Chat-Verlauf (letzte 100), Historie
 //   POST /admin/reports/:id/actions          { action: warn|suspend|ban|dismiss, durationDays?, note? }
+//   POST /admin/deleted-accounts/:id/unban   E-Mail eines geloeschten, gebannten Kontos entbannen
 //   POST /admin/users/:id/lift               Sperre/Bann aufheben
 //   GET  /admin/reliability                  Auffaellige Worker (>= 2 No-Shows / >= 3 kurzfristige Stornos in 90 Tagen) + offene Anwesenheits-Einsprueche
 //   POST /admin/attendance/:applyId/resolve  { uphold: true } | { attendance: attended|late|no_show }
@@ -14,7 +15,7 @@ const { requireAuth } = require("./auth");
 const { requireAdmin } = require("./middlewares/requireAdmin");
 const { describeBlockedUser } = require("./utils/blockedUsers");
 const m = require("./utils/moderation");
-const { applyReportAction, liftRestriction } = require("./moderation");
+const { applyReportAction, applyDeletedReportAction, unbanDeletedAccount, liftRestriction } = require("./moderation");
 const rel = require("./utils/reliability");
 const events = require("./notifyEvents");
 
@@ -51,7 +52,18 @@ async function loadBriefs(ids) {
   return new Map(users.map((u) => [u.id, u]));
 }
 
-function brief(u, id) {
+// Tombstones geloeschter Konten (id → { displayName, role, deletedAt, bannedAt })
+async function loadTombstones(ids) {
+  const unique = [...new Set(ids.filter(Boolean))];
+  const rows = unique.length ? await prisma.deletedAccount.findMany({ where: { id: { in: unique } } }) : [];
+  return new Map(rows.map((t) => [t.id, t]));
+}
+
+function brief(u, id, tombs) {
+  if (!u && tombs?.has(id)) {
+    const t = tombs.get(id);
+    return { id, name: "Deleted account", role: t.role, photoUrl: null, deleted: true, deletedAt: t.deletedAt };
+  }
   if (!u) return { id, name: "Deleted user", role: null, photoUrl: null };
   const d = describeBlockedUser(u, u.employer, u.worker);
   return { id: u.id, name: d.name, role: d.role, photoUrl: d.photoUrl };
@@ -62,12 +74,23 @@ function restrictionOf(u) {
   return { state: s.state, until: s.until ? s.until.toISOString() : null, pendingReview: s.pendingReview };
 }
 
-function reportCard(r, briefs, openCount, openReporterCount) {
+// Gemeldeter: geloeschtes Konto → "Deleted account", deleted:true, canBan nur mit Tombstone (Ban braucht die E-Mail-Spur).
+// displayName ("Anna M.") nur fuer Admins. Altfaelle ohne Tombstone: nur dismiss.
+function reportedBrief(u, id, tombs) {
+  if (u) return brief(u, id, tombs);
+  const t = tombs?.get(id);
+  return {
+    id, name: "Deleted account", role: t?.role ?? null, photoUrl: null,
+    deleted: true, deletedAt: t?.deletedAt ?? null, deletedName: t?.displayName ?? null, canBan: !!t, banned: !!t?.bannedAt, emailVerified: t ? t.emailVerified : null,
+  };
+}
+
+function reportCard(r, briefs, openCount, openReporterCount, tombs) {
   return {
     id: r.id, status: r.status, reason: r.reason, details: r.details, createdAt: r.createdAt,
     resolvedAt: r.resolvedAt, resolution: r.resolution, conversationId: r.conversationId,
-    reporter: brief(briefs.get(r.reporterId), r.reporterId),
-    reported: { ...brief(briefs.get(r.reportedUserId), r.reportedUserId), isAdmin: !!briefs.get(r.reportedUserId)?.isAdmin, restriction: restrictionOf(briefs.get(r.reportedUserId)) },
+    reporter: brief(briefs.get(r.reporterId), r.reporterId, tombs),
+    reported: { ...reportedBrief(briefs.get(r.reportedUserId), r.reportedUserId, tombs), isAdmin: !!briefs.get(r.reportedUserId)?.isAdmin, restriction: restrictionOf(briefs.get(r.reportedUserId)) },
     openReportCount: openCount, openReporterCount,
   };
 }
@@ -101,11 +124,12 @@ router.get("/reports", handle("GET /admin/reports", async (req, res) => {
     const seen = new Set();
     list = rows.filter((r) => (seen.has(r.reportedUserId) ? false : (seen.add(r.reportedUserId), true)));
   }
-  const briefs = await loadBriefs(list.flatMap((r) => [r.reporterId, r.reportedUserId]));
+  const ids = list.flatMap((r) => [r.reporterId, r.reportedUserId]);
+  const [briefs, tombs] = await Promise.all([loadBriefs(ids), loadTombstones(ids)]);
   return res.json({
     reports: list.slice(0, 100).map((r) => {
       const c = counts.get(r.reportedUserId);
-      return reportCard(r, briefs, c?.total ?? 0, c?.reporters.size ?? 0);
+      return reportCard(r, briefs, c?.total ?? 0, c?.reporters.size ?? 0, tombs);
     }),
   });
 }));
@@ -135,25 +159,26 @@ router.get("/reports/:id", handle("GET /admin/reports/:id", async (req, res) => 
     messages = rows.reverse();
   }
 
-  const briefs = await loadBriefs([
+  const briefIds = [
     report.reportedUserId, ...notes.map((r) => r.reporterId), ...history.map((h) => h.adminId),
     convo?.workerId, convo?.employerId,
-  ]);
-  const card = reportCard(report, briefs, openReports.length, new Set(openReports.map((r) => r.reporterId)).size);
+  ];
+  const [briefs, tombs] = await Promise.all([loadBriefs(briefIds), loadTombstones(briefIds)]);
+  const card = reportCard(report, briefs, openReports.length, new Set(openReports.map((r) => r.reporterId)).size, tombs);
 
   return res.json({
     report: card,
-    reports: notes.map((r) => ({ id: r.id, reason: r.reason, details: r.details, createdAt: r.createdAt, reporter: brief(briefs.get(r.reporterId), r.reporterId) })),
+    reports: notes.map((r) => ({ id: r.id, reason: r.reason, details: r.details, createdAt: r.createdAt, reporter: brief(briefs.get(r.reporterId), r.reporterId, tombs) })),
     conversation: convo
       ? {
           id: convo.id, jobTitle: convo.job?.title ?? null,
-          participants: [convo.workerId, convo.employerId].filter(Boolean).map((id) => brief(briefs.get(id), id)),
+          participants: [convo.workerId, convo.employerId].filter(Boolean).map((id) => brief(briefs.get(id), id, tombs)),
           messages: messages.map((x) => ({ id: x.id, senderId: x.senderId, text: x.text, isSystem: x.isSystem, createdAt: x.createdAt })),
         }
       : null,
     history: history.map((h) => ({
       id: h.id, action: h.action, durationDays: h.durationDays, note: h.note, createdAt: h.createdAt,
-      admin: h.adminId ? brief(briefs.get(h.adminId), h.adminId) : null, // null = System
+      admin: h.adminId ? brief(briefs.get(h.adminId), h.adminId, tombs) : null, // null = System
     })),
   });
 }));
@@ -171,12 +196,29 @@ router.post("/reports/:id/actions", handle("POST /admin/reports/:id/actions", as
     where: { id: report.reportedUserId },
     select: { id: true, email: true, isAdmin: true, bannedAt: true, suspendedUntil: true, suspensionReason: true },
   });
+  if (!target) {
+    // Gemeldetes Konto wurde geloescht: nur dismiss/ban (ban nur mit Tombstone)
+    const del = await applyDeletedReportAction({ report, adminId: req.auth.sub, value: check.value });
+    if (!del.ok) return res.status(del.status).json({ error: del.error, code: del.code });
+    return res.json({ ok: true, closedReports: del.closedCount });
+  }
   const can = m.canModerate(req.auth.sub, target);
   if (!can.ok) return res.status(can.status).json({ error: can.error });
 
-  const result = await applyReportAction({ report, target, adminId: req.auth.sub, value: check.value });
+  let result = await applyReportAction({ report, target, adminId: req.auth.sub, value: check.value });
+  if (!result.ok && result.gone) {
+    // Konto wurde zwischen Lesen und Aktion geloescht → einmal auf den Deleted-Pfad umschwenken
+    result = await applyDeletedReportAction({ report, adminId: req.auth.sub, value: check.value });
+  }
   if (!result.ok) return res.status(result.status).json({ error: result.error, code: result.code });
   return res.json({ ok: true, closedReports: result.closedCount });
+}));
+
+// E-Mail eines geloeschten, gebannten Kontos entbannen (Konto selbst bleibt geloescht)
+router.post("/deleted-accounts/:id/unban", handle("POST /admin/deleted-accounts/:id/unban", async (req, res) => {
+  const result = await unbanDeletedAccount({ id: String(req.params.id), adminId: req.auth.sub });
+  if (!result.ok) return res.status(result.status).json({ error: result.error, code: result.code });
+  return res.json({ ok: true });
 }));
 
 router.post("/users/:id/lift", handle("POST /admin/users/:id/lift", async (req, res) => {

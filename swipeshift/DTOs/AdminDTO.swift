@@ -40,6 +40,15 @@ struct AdminReportedUser: Decodable, Equatable {
     let photoUrl: String?
     let restriction: AdminRestriction
     let isAdmin: Bool?         // Admin-Konten koennen nicht gesperrt/gebannt werden (Backend: ADMIN_TARGET)
+    // Geloeschtes Konto (Report bleibt bestehen): nur Dismiss und – mit Tombstone (canBan) – Ban moeglich
+    let deleted: Bool?
+    let deletedAt: Date?
+    let deletedName: String?   // z.B. "Anna M." (nur Admin-Anzeige)
+    let canBan: Bool?
+    let banned: Bool?          // E-Mail des geloeschten Kontos ist gebannt (Unban moeglich)
+    let emailVerified: Bool?   // nur bei geloeschten Konten mit Tombstone
+    var isDeleted: Bool { deleted == true }
+    var isEmailBanned: Bool { deleted == true && banned == true }
     var initial: String { name.first.map { String($0).uppercased() } ?? "?" }
     var roleLabel: String { role == "employer" ? "Employer" : (role == "worker" ? "Worker" : "User") }
 }

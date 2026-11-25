@@ -13,6 +13,7 @@ const { notify } = require("./notify");
 const copy = require("./utils/notificationCopy");
 const events = require("./notifyEvents");
 const { runAutoAttendance } = require("./reliability");
+const { purgeExpiredTombstones } = require("./moderation");
 const { nextBookedStart, bookedEnd } = require("./utils/shiftBooking");
 const { collectPaged } = require("./utils/paged");
 const { attendanceReminderWindow } = require("./utils/reliability");
@@ -187,8 +188,18 @@ async function runAttendanceReminders(now = new Date()) {
   return jobs.length;
 }
 
+// Tombstone-Retention: hoechstens alle 24 h (erster Tick nach dem Start laeuft sofort mit)
+const PURGE_INTERVAL_MS = 24 * 3_600_000;
+let lastPurgeAt = 0;
+async function runTombstonePurge(now = new Date()) {
+  if (now.getTime() - lastPurgeAt < PURGE_INTERVAL_MS) return 0;
+  const n = await purgeExpiredTombstones(now);
+  lastPurgeAt = now.getTime(); // nur nach Erfolg → bei Fehler naechster Tick erneut
+  return n;
+}
+
 async function runAll(now = new Date()) {
-  for (const [name, fn] of [["shift reminders", runShiftReminders], ["unread message emails", runUnreadMessageEmails], ["payment open", runPaymentOpen], ["attendance reminders", runAttendanceReminders], ["auto attendance", runAutoAttendance]]) {
+  for (const [name, fn] of [["tombstone purge", runTombstonePurge], ["shift reminders", runShiftReminders], ["unread message emails", runUnreadMessageEmails], ["payment open", runPaymentOpen], ["attendance reminders", runAttendanceReminders], ["auto attendance", runAutoAttendance]]) {
     try {
       await fn(now);
     } catch (err) {

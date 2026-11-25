@@ -161,7 +161,13 @@ test("Backup-Pepper: eigener Key (nicht an Verschluesselungs-Key gekoppelt), Pfl
   assert.notDeepEqual(totp.getBackupPepper({ NODE_ENV: "test", JWT_SECRET: "a" }), totp.getBackupPepper({ NODE_ENV: "test", JWT_SECRET: "b" }));
   // assertTotpConfig verlangt beide
   assert.throws(() => totp.assertTotpConfig({ NODE_ENV: "production", TOTP_ENCRYPTION_KEY: enc }), /BACKUP_CODE_PEPPER/);
-  assert.doesNotThrow(() => totp.assertTotpConfig(env));
+  assert.throws(() => totp.assertTotpConfig(env), /EMAIL_BAN_PEPPER/); // eigener Pflicht-Pepper
+  const full = { ...env, EMAIL_BAN_PEPPER: "44".repeat(32) };
+  assert.doesNotThrow(() => totp.assertTotpConfig(full));
+  assert.equal(totp.getEmailBanPepperPrev(full), null);
+  assert.deepEqual(totp.getEmailBanPepperPrev({ ...full, EMAIL_BAN_PEPPER_PREV: "55".repeat(32) }), Buffer.from("55".repeat(32), "hex"));
+  assert.throws(() => totp.getEmailBanPepper({ NODE_ENV: "production" }), /EMAIL_BAN_PEPPER/);
+  assert.equal(totp.getEmailBanPepper({ NODE_ENV: "development" }).length, 32);
 });
 
 test("Backup-Codes: Format, Eindeutigkeit, Hash, Normalisierung, Verbrauch", () => {

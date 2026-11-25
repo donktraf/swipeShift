@@ -1412,6 +1412,14 @@ extension APIClient {
         try validate(response: resp, data: data)
     }
 
+    // POST /admin/deleted-accounts/:id/unban (E-Mail eines geloeschten, gebannten Kontos entbannen)
+    func unbanDeletedAccount(id: String) async throws {
+        let encoded = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
+        let req = try makeRequest(path: "/admin/deleted-accounts/\(encoded)/unban", method: "POST")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+    }
+
     // POST /auth/me/pause
     func setAccountPaused(_ paused: Bool) async throws -> Bool {
         var req = try makeRequest(path: "/auth/me/pause", method: "POST")
