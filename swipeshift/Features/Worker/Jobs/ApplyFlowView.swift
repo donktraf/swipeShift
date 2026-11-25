@@ -42,13 +42,62 @@ struct ApplyFlowView: View {
     @State private var step: ApplyStep
     @State private var selectedShiftIds: Set<String> = []
 
-    init(job: Job, onSuccess: (() -> Void)? = nil, onExitToJobList: (() -> Void)? = nil) {
+    /// `initialResult`: Sheet startet direkt im Ergebnis-Zustand (z.B. nach Sofort-Apply-Fehler im Swipe)
+    init(job: Job, initialResult: ApplyResult? = nil, onSuccess: (() -> Void)? = nil, onExitToJobList: (() -> Void)? = nil) {
         self.job = job
         self.onSuccess = onSuccess
         self.onExitToJobList = onExitToJobList
         // Direkt zur Bestätigung wenn 0 oder 1 Schicht
-        let hasMultipleShifts = (job.shifts?.count ?? 0) > 1
-        self._step = State(initialValue: hasMultipleShifts ? .selectShifts : .confirm)
+        if let initialResult {
+            self._step = State(initialValue: .result(initialResult))
+        } else if ApplyFlowView.hasNoBookableShift(job) {
+            self._step = State(initialValue: .result(.shiftUnavailable))
+        } else {
+            self._step = State(initialValue: ApplyFlowView.needsShiftSelection(job) ? .selectShifts : .confirm)
+        }
+    }
+
+    // MARK: - Schicht-Logik (geteilt mit JobSwipeView)
+
+    /// Buchbare Schichten: noch nicht begonnen (Schichten ohne Startzeit gelten als buchbar).
+    /// Ob eine Schicht voll ist, weiss nur das Backend (SHIFT_TAKEN beim Apply).
+    static func bookableShifts(of job: Job, now: Date = Date()) -> [JobShift] {
+        (job.shifts ?? []).filter { ($0.startDate ?? .distantFuture) > now }
+    }
+
+    /// Mehr als eine buchbare Schicht → Schicht-Auswahl noetig, sonst direkt bestaetigen/bewerben.
+    static func needsShiftSelection(_ job: Job, now: Date = Date()) -> Bool {
+        bookableShifts(of: job, now: now).count > 1
+    }
+
+    /// Schichtliste vorhanden, aber keine davon buchbar (alle gestartet) → "Shift Unavailable"
+    static func hasNoBookableShift(_ job: Job, now: Date = Date()) -> Bool {
+        !(job.shifts ?? []).isEmpty && bookableShifts(of: job, now: now).isEmpty
+    }
+
+    /// Sofort-Apply nur bei genau einer buchbaren Schicht oder Job ganz ohne Schichtliste
+    static func canApplyImmediately(_ job: Job, now: Date = Date()) -> Bool {
+        (job.shifts ?? []).isEmpty || singleShiftIds(for: job, now: now) != nil
+    }
+
+    /// Fehler des Apply-Calls → Ergebniszustand
+    static func result(for error: Error) -> ApplyResult {
+        guard let applyError = error as? ApplyError else { return .connectionLost }
+        switch applyError {
+        case .shiftTaken:         return .shiftAlreadyTaken
+        case .jobUnavailable:     return .shiftUnavailable
+        case .schedulingConflict: return .schedulingConflict
+        case .shiftUnavailable:   return .shiftUnavailable
+        case .accountPaused:      return .accountPaused
+        case .blocked:            return .blocked
+        case .tryAgain:           return .connectionLost
+        }
+    }
+
+    /// shiftIds fuer einen Sofort-Apply (genau eine buchbare Schicht); nil bei Jobs ohne Schichtliste.
+    static func singleShiftIds(for job: Job, now: Date = Date()) -> [String]? {
+        let shifts = bookableShifts(of: job, now: now)
+        return shifts.count == 1 ? [shifts[0].id] : nil
     }
 
     var body: some View {
@@ -77,7 +126,7 @@ struct ApplyFlowView: View {
                     selectedShifts: selectedShiftsForConfirmation,
                     onConfirm: { Task { await submitApplication() } },
                     onBack: {
-                        let hasMultipleShifts = (job.shifts?.count ?? 0) > 1
+                        let hasMultipleShifts = ApplyFlowView.needsShiftSelection(job)
                         if hasMultipleShifts {
                             withAnimation(.easeInOut(duration: 0.25)) { step = .selectShifts }
                         } else {
@@ -126,7 +175,7 @@ struct ApplyFlowView: View {
 
     /// Schichten die bestätigt werden: entweder ausgewählte oder die einzige Schicht des Jobs
     private var selectedShiftsForConfirmation: [JobShift] {
-        guard let shifts = job.shifts else { return [] }
+        let shifts = ApplyFlowView.bookableShifts(of: job)
         if selectedShiftIds.isEmpty { return shifts }
         return shifts.filter { selectedShiftIds.contains($0.id) }
     }
@@ -134,7 +183,9 @@ struct ApplyFlowView: View {
     /// Schicht-IDs fuer den Backend-Call: die ausgewaehlten (in Job-Reihenfolge) bzw. alle Schichten bei Single-Shift-Jobs.
     /// nil bei Jobs ohne Schicht-Eintraege → Backend bucht dann "alle".
     private var shiftIdsToBook: [String]? {
-        guard let shifts = job.shifts, !shifts.isEmpty else { return nil }
+        let shifts = ApplyFlowView.bookableShifts(of: job)
+        if (job.shifts ?? []).isEmpty { return nil }   // Altbestand ohne Schichtliste → Backend bucht "alle"
+        if shifts.isEmpty { return [] }                // nie "alle" buchen, wenn nichts buchbar ist
         if selectedShiftIds.isEmpty { return shifts.map(\.id) }
         return shifts.map(\.id).filter { selectedShiftIds.contains($0) }
     }
@@ -147,18 +198,8 @@ struct ApplyFlowView: View {
             try await Task.sleep(nanoseconds: 900_000_000) // 0.9s UX-Feedback
             let autoAccepted = try await jobStore.apply(to: job, shiftIds: shiftIdsToBook)
             withAnimation { step = .result(autoAccepted ? .booked : .submitted) }
-        } catch let applyError as ApplyError {
-            switch applyError {
-            case .shiftTaken:         withAnimation { step = .result(.shiftAlreadyTaken) }
-            case .jobUnavailable:     withAnimation { step = .result(.shiftUnavailable) }
-            case .schedulingConflict: withAnimation { step = .result(.schedulingConflict) }
-            case .shiftUnavailable:   withAnimation { step = .result(.shiftUnavailable) }
-            case .accountPaused:      withAnimation { step = .result(.accountPaused) }
-            case .blocked:            withAnimation { step = .result(.blocked) }
-            case .tryAgain:           withAnimation { step = .result(.connectionLost) }
-            }
         } catch {
-            withAnimation { step = .result(.connectionLost) }
+            withAnimation { step = .result(ApplyFlowView.result(for: error)) }
         }
     }
 }
@@ -170,7 +211,7 @@ private struct ShiftSelectionView: View {
     let onNext: () -> Void
     let onDismiss: () -> Void
 
-    private var shifts: [JobShift] { job.shifts ?? [] }
+    private var shifts: [JobShift] { ApplyFlowView.bookableShifts(of: job) }
     private var canProceed: Bool { !selectedShiftIds.isEmpty }
 
     var body: some View {

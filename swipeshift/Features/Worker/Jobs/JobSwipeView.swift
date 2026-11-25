@@ -14,6 +14,17 @@ struct JobSwipeView: View {
     @State private var showFilterSheet = false
     @State private var filterOptions: JobFilterOptions = JobFilterOptions()
 
+    // Schicht-Auswahl-Sheet bei Mehrschicht-Jobs (Swipe-Rechts / Apply-Button)
+    @State private var applySheetJob: ApplySheetRequest?
+    // Fly-out/Sofort-Apply läuft: weitere Taps und Drags ignorieren
+    @State private var isSwiping = false
+
+    private struct ApplySheetRequest: Identifiable {
+        let job: Job
+        var initialResult: ApplyResult? = nil
+        var id: String { job.id }
+    }
+
     // Haptics: kippt einmalig pro Drag-Geste beim Ueberschreiten des Swipe-Thresholds
     @State private var hasCrossedSwipeThreshold = false
     // Haptics: toggelt bei jedem tatsaechlichen Apply/Skip-Auslösen
@@ -54,6 +65,10 @@ struct JobSwipeView: View {
         .sheet(isPresented: $showFilterSheet) {
             FilterSheet(filterOptions: $filterOptions)
                 .presentationDetents([.medium])
+        }
+        // Erfolg: jobStore.apply entfernt den Job bereits aus swipeJobs; Abbruch/Fehler: Karte bleibt
+        .sheet(item: $applySheetJob) { request in
+            ApplyFlowView(job: request.job, initialResult: request.initialResult)
         }
         .sensoryFeedback(.impact(weight: .light), trigger: hasCrossedSwipeThreshold)
         .sensoryFeedback(.impact(weight: .medium), trigger: swipeHapticTrigger)
@@ -142,13 +157,14 @@ struct JobSwipeView: View {
                     .gesture(
                         DragGesture()
                             .onChanged { value in
+                                guard !isSwiping else { return }
                                 dragOffset = value.translation
                                 let fraction = min(abs(value.translation.width) / 130, 1.0)
                                 if fraction > 0.6 && !hasCrossedSwipeThreshold {
                                     hasCrossedSwipeThreshold = true
                                 }
                             }
-                            .onEnded   { handleDragEnd($0, job: job) }
+                            .onEnded   { if !isSwiping { handleDragEnd($0, job: job) } }
                     )
                     .animation(.interactiveSpring(response: 0.35, dampingFraction: 0.72), value: dragOffset)
                 }
@@ -240,16 +256,38 @@ struct JobSwipeView: View {
     }
 
     private func animateSwipe(direction: CGFloat, job: Job) {
+        guard !isSwiping, applySheetJob == nil else { return }
+
+        // Mehrschicht-Job (oder Schichten ohne eindeutig buchbare Schicht): Karte bleibt, Sheet öffnet
+        if direction > 0 && !ApplyFlowView.canApplyImmediately(job) {
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.75)) {
+                dragOffset = .zero
+            }
+            applySheetJob = ApplySheetRequest(job: job)
+            return
+        }
+
+        isSwiping = true
         swipeHapticTrigger.toggle()
         withAnimation(.easeIn(duration: 0.28)) {
             dragOffset = CGSize(width: direction * 700, height: 0)
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
-            dragOffset = .zero
-            Task {
-                if direction > 0 { try? await jobStore.apply(to: job) }
-                else             { await jobStore.skip(job) }
+        Task {
+            try? await Task.sleep(nanoseconds: 280_000_000)
+            var failure: ApplyResult?
+            if direction > 0 {
+                do { try await jobStore.apply(to: job, shiftIds: ApplyFlowView.singleShiftIds(for: job)) }
+                catch { failure = ApplyFlowView.result(for: error) }
+            } else {
+                await jobStore.skip(job)
             }
+            // Karte erst nach dem Call zurücksetzen (kein Zurückspringen während des Requests)
+            var tx = Transaction(); tx.disablesAnimations = failure == nil
+            withTransaction(tx) { dragOffset = .zero }
+            if let failure {
+                applySheetJob = ApplySheetRequest(job: job, initialResult: failure)
+            }
+            isSwiping = false
         }
     }
 }

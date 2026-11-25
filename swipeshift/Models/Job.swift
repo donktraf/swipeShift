@@ -16,6 +16,7 @@ struct JobShift: Identifiable, Equatable {
     let timeRange: String   // z.B. "18:00–23:00"
     let duration: String    // z.B. "5 Stunden"
     let totalPay: String    // z.B. "$75 total"
+    var startDate: Date? = nil  // Schichtbeginn (nil bei Altdaten ohne startTimeISO)
 }
 
 struct Job: Identifiable, Equatable {

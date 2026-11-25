@@ -14,10 +14,26 @@ struct ShiftDTO: Decodable {
     let timeRange: String
     let duration: String
     let totalPay: String
+    let startTimeISO: String?
 
     /// `fallbackIndex`: Backend-Fallback-ID "s<Position ab 1>" fuer Altdaten ohne id (muss zu utils/shiftBooking.js passen)
     func toDomain(fallbackIndex: Int = 0) -> JobShift {
-        JobShift(id: id ?? "s\(fallbackIndex + 1)", date: date, timeRange: timeRange, duration: duration, totalPay: totalPay)
+        JobShift(id: id ?? "s\(fallbackIndex + 1)", date: date, timeRange: timeRange, duration: duration, totalPay: totalPay,
+                 startDate: startTimeISO.flatMap { ShiftDTO.parseISO($0) })
+    }
+}
+
+extension ShiftDTO {
+    /// ISO-8601 mit und ohne Millisekunden (Backend liefert je nach Quelle beides)
+    private static let isoWithFraction: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    private static let isoPlain = ISO8601DateFormatter()
+
+    static func parseISO(_ iso: String) -> Date? {
+        isoWithFraction.date(from: iso) ?? isoPlain.date(from: iso)
     }
 }
 
