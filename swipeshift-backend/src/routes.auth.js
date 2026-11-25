@@ -20,7 +20,7 @@ const { createRemoteJWKSet, jwtVerify } = require("jose");
 const { requireAuth } = require("./auth");
 const { removeDevicesForSessions } = require("./pushDevices");
 const events = require("./notifyEvents");
-const { cancelOpenJobs } = require("./accountCleanup");
+const { cancelOpenJobs, findUnpaidWorkers, closeJobsForDeletedEmployer } = require("./accountCleanup");
 const { releaseUploads, checkPhotoUrl, INVALID_PHOTO_MESSAGE } = require("./uploadCleanup");
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID; // iOS ClientID
@@ -854,10 +854,15 @@ router.delete("/me", requireAuth, async (req, res) => {
   try {
     let uploadUrls = [];
     let cancelledJobIds = [];
+    let notices = [];
     await prisma.$transaction(async (tx) => {
       // Zeilensperre zuerst: serialisiert mit einem parallelen Admin-Ban (applyReportAction sperrt dieselbe Zeile),
       // sodass der Tombstone nie einen zwischenzeitlich gesetzten Bann/Report verpasst.
       await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${userId} FOR UPDATE`;
+      // Beendete, noch unbezahlte Schichten blockieren die Loeschung (nichts wird geaendert). Regeln: utils/accountCleanup.js
+      const now = new Date(); // gemeinsamer Zeitpunkt fuer Pruefung und Abschluss
+      const unpaid = await findUnpaidWorkers(tx, userId, now);
+      if (unpaid.length) throw Object.assign(new Error("UNPAID_WORKERS"), { unpaid });
       const user = await tx.user.findUnique({
         where: { id: userId },
         select: { id: true, email: true, role: true, firstName: true, lastName: true, bannedAt: true, suspendedUntil: true, suspensionReason: true, appleSub: true, emailVerifiedAt: true },
@@ -891,16 +896,25 @@ router.delete("/me", requireAuth, async (req, res) => {
       uploadUrls = [worker?.profilePhotoUrl, employer?.companyLogoUrl].filter(Boolean);
       // Job.employerId hat keinen FK: offene Jobs (draft/published/inProgress) des Kontos stornieren; abgeschlossene
       // bleiben (Worker-Historie/Bewertungen, Firmenname steht als Text am Job)
-      cancelledJobIds = await cancelOpenJobs(tx, { employerId: userId });
+      const closed = await closeJobsForDeletedEmployer(tx, userId, now);
+      cancelledJobIds = closed.cancelledIds;
+      notices = closed.notices;
       await tx.user.delete({ where: { id: userId } });
       // Nochmal nach dem Delete: Jobs, die zwischen dem ersten Lauf und dem Delete entstanden sind (Race mit POST /jobs)
       cancelledJobIds = [...new Set([...cancelledJobIds, ...(await cancelOpenJobs(tx, { employerId: userId }))])];
     }, { timeout: 30000, maxWait: 10000 });
     // Nach dem Commit, fire-and-forget bzw. fehlertolerant: Worker informieren, Dateien loeschen
     for (const jobId of cancelledJobIds) events.jobCancelled(jobId);
+    if (notices.length) events.accountClosedShifts(notices);
     releaseUploads(uploadUrls).catch(() => {});
     return res.json({ ok: true });
   } catch (err) {
+    if (err?.message === "UNPAID_WORKERS" && err.unpaid) {
+      return res.status(409).json({
+        code: "UNPAID_WORKERS", error: "Please pay your workers before deleting your account.",
+        count: err.unpaid.reduce((s, j) => s + j.unpaidWorkers, 0), jobs: err.unpaid,
+      });
+    }
     console.error("DELETE /auth/me error:", err);
     return res.status(500).json({ error: "Could not delete account" });
   }

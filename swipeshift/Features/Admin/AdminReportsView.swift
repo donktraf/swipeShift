@@ -537,6 +537,9 @@ struct AdminReliabilitySection: View {
             if let note = d.note {
                 Text("\"\(note)\"").font(.system(size: 13))
             }
+            if d.employerDeleted == true {
+                Text("Employer account deleted").font(.system(size: 12, weight: .medium)).foregroundColor(.orange)
+            }
             Text("Disputed \(d.disputedAt.formatted(date: .abbreviated, time: .shortened))")
                 .font(.system(size: 11)).foregroundColor(.secondary)
             Button("Decide") { resolving = d }

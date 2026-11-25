@@ -1426,6 +1426,16 @@ struct PrivacyDataView: View {
                     } catch {
                         // Konto existiert noch → nicht ausloggen, Fehler anzeigen
                         isDeletingAccount = false
+                        if let api = error as? APIError, api.code == "UNPAID_WORKERS" {
+                            // Beendete Schichten sind noch nicht bezahlt: Meldung + betroffene Jobs
+                            // TODO: Direkt-Navigation zur Zahlungsuebersicht (Settings liegt tief im Profil-Stack)
+                            let jobs = api.unpaidJobs ?? []
+                            let more = jobs.count > 5 ? ["and \(jobs.count - 5) more"] : []
+                            let list = (jobs.prefix(5).map { "• \($0.title) (\($0.unpaidWorkers) unpaid)" } + more).joined(separator: "\n")
+                            deleteError = api.message + (list.isEmpty ? "" : "\n\n" + list)
+                                + "\n\nOpen Jobs > Payments to pay them."
+                            return
+                        }
                         deleteError = "Your account could not be deleted. Please try again."
                         return
                     }

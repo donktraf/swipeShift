@@ -1469,6 +1469,7 @@ struct APIError: LocalizedError {
     var missing: [String]? = nil
     var methods: [String]? = nil
     var retryAfterMinutes: Int? = nil
+    var unpaidJobs: [UnpaidJobDTO]? = nil
     var errorDescription: String? { message }
 }
 
@@ -1495,7 +1496,7 @@ func validate(response: URLResponse, data: Data) throws {
         // Lesbare Backend-Meldung ({ error }, optional mit code) durchreichen statt rohem JSON
         if let message = body?.error, !message.isEmpty {
             throw APIError(status: http.statusCode, message: message, code: body?.code, missing: body?.missing,
-                           methods: body?.methods, retryAfterMinutes: body?.retryAfterMinutes)
+                           methods: body?.methods, retryAfterMinutes: body?.retryAfterMinutes, unpaidJobs: body?.jobs)
         }
 
         let raw = String(data: data, encoding: .utf8) ?? "<no body>"

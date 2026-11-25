@@ -60,3 +60,8 @@ test("deriveApplicationStatus: 'completed' erst nach dem Ende der GEBUCHTEN Schi
   assert.equal(deriveApplicationStatus({ status: "accepted", shiftIds: ["b"] }, job, now).displayStatus, "confirmed");
   assert.equal(deriveApplicationStatus({ status: "accepted", shiftIds: [] }, job, now).displayStatus, "confirmed");
 });
+
+test("declined mit cancelReason (Konto des Arbeitgebers geschlossen) → jobCancelled mit Grund", () => {
+  const r = deriveApplicationStatus({ status: "declined", cancelReason: "The employer closed their account." }, { status: "completed" });
+  assert.deepEqual([r.displayStatus, r.cancellationKind, r.cancellationReason], ["cancelled", "jobCancelled", "The employer closed their account."]);
+});

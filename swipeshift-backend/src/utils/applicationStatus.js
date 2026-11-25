@@ -35,6 +35,11 @@ function deriveApplicationStatus(apply, job, now = new Date()) {
     };
   }
   if (apply.status === "declined") {
+    // Vom Konto-Loeschen des Arbeitgebers geschlossen (Grund an der Bewerbung) → eigener Text statt normaler Ablehnung
+    const closed = typeof apply.cancelReason === "string" ? apply.cancelReason.trim() : "";
+    if (closed) {
+      return { displayStatus: "cancelled", cancellationKind: "jobCancelled", cancellationReason: closed, paymentStatus: null };
+    }
     return {
       displayStatus:      "cancelled",
       cancellationKind:   "declined",

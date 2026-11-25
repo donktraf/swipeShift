@@ -70,6 +70,14 @@ const jobCancelled = safe("jobCancelled", async (jobId) => {
   }
 });
 
+// Worker: Konto des Arbeitgebers geschlossen, zukuenftige Schichten entfallen (notices aus closeJobsForDeletedEmployer).
+// Kein Block-Check: der Arbeitgeber existiert nicht mehr.
+const accountClosedShifts = safe("accountClosedShifts", async (notices) => {
+  for (const n of notices ?? []) {
+    try { await notify(n.userId, copy.accountClosedShifts(n)); } catch (err) { console.error("accountClosedShifts notify failed:", err); }
+  }
+});
+
 // Employer: neue Bewerbung bzw. Instant Match gebucht
 const workerApplied = safe("workerApplied", async ({ employerId, workerId, jobId, jobTitle, autoAccepted }) => {
   if (!employerId) return;
@@ -193,7 +201,7 @@ const accountPauseChanged = safe("accountPauseChanged", async (userId, paused) =
 });
 
 module.exports = {
-  applicationDecided, jobCancelled, workerApplied, newChatMessage,
+  applicationDecided, jobCancelled, accountClosedShifts, workerApplied, newChatMessage,
   paymentReceived, paymentOpen, reviewReceived, accountPauseChanged,
   noShowRecorded, attendanceReminder, workerCancelledShift, attendanceDisputeResolved,
 };

@@ -118,6 +118,15 @@ struct APIErrorBody: Decodable {
     let methods: [String]?
     /// Nur bei TOO_MANY_ATTEMPTS (Re-Auth): Wartezeit in Minuten
     let retryAfterMinutes: Int?
+    /// Nur bei UNPAID_WORKERS (DELETE /auth/me): Jobs mit unbezahlten Workern
+    let jobs: [UnpaidJobDTO]?
+}
+
+/// Job mit beendeten, noch unbezahlten Schichten (409 UNPAID_WORKERS beim Konto-Loeschen)
+struct UnpaidJobDTO: Decodable {
+    let id: String
+    let title: String
+    let unpaidWorkers: Int
 }
 
 /// GET /auth/me/reauth/methods

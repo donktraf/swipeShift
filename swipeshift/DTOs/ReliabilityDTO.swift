@@ -102,6 +102,8 @@ struct AdminAttendanceDispute: Identifiable, Decodable, Equatable {
     let attendanceSource: String?
     let note: String?
     let disputedAt: Date
+    /// Employer-Konto existiert nicht mehr (Zahlung evtl. nie moeglich)
+    var employerDeleted: Bool? = nil
     var id: String { applyId }
     var status: AttendanceStatus? { attendance.flatMap(AttendanceStatus.init(rawValue:)) }
 }

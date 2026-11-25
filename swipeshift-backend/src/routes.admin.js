@@ -272,6 +272,9 @@ router.get("/reliability", handle("GET /admin/reliability", async (req, res) => 
   });
 
   const briefs = await loadBriefs([...flagged.slice(0, 50).map((f) => f.userId), ...disputes.map((d) => d.userId)]);
+  // Employer-Konto geloescht (Job.employerId hat keinen FK) → Zahlung ggf. nie mehr moeglich
+  const employerIds = [...new Set(disputes.map((d) => d.job.employerId).filter(Boolean))];
+  const existing = new Set((await prisma.user.findMany({ where: { id: { in: employerIds } }, select: { id: true } })).map((u) => u.id));
   return res.json({
     windowDays: rel.ADMIN_WINDOW_DAYS,
     thresholds: { noShows: rel.ADMIN_NO_SHOW_THRESHOLD, lateCancellations: rel.ADMIN_LATE_CANCEL_THRESHOLD },
@@ -286,6 +289,7 @@ router.get("/reliability", handle("GET /admin/reliability", async (req, res) => 
       jobTitle: d.job.title, company: d.job.company, shiftStart: d.job.startTime, shiftEnd: d.job.endTime,
       attendance: d.attendance, attendanceSource: d.attendanceSource, attendanceSetAt: d.attendanceSetAt,
       note: d.disputeNote, disputedAt: d.disputedAt,
+      employerDeleted: !!d.job.employerId && !existing.has(d.job.employerId),
     })),
   });
 }));

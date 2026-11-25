@@ -173,6 +173,23 @@ function lateCancellationRecorded({ jobTitle, jobId }) {
   });
 }
 
+// Worker: Arbeitgeber hat sein Konto geschlossen; zukuenftige Schichten eines (sonst abgeschlossenen) Jobs entfallen
+// kind "pending": Bewerbung ohne Antwort geschlossen; sonst (shifts) zukuenftige Schichten
+function accountClosedShifts({ jobTitle, company, jobId, kind }) {
+  const t = job(jobTitle);
+  const pending = kind === "pending";
+  const base = pending
+    ? `The employer closed their account, so your application for "${t}" was closed.`
+    : `${who(company, "The employer")} closed their account. Your upcoming shifts for "${t}" were cancelled; shifts that already took place stay as completed.`;
+  return make("jobActivity", {
+    title: pending ? "Application closed" : "Upcoming shifts cancelled",
+    body: base,
+    data: { type: "job", jobId },
+    subject: pending ? `Application closed: ${t}` : `Upcoming shifts cancelled: ${t}`,
+    paragraphs: [base, OPEN_APP],
+  });
+}
+
 // Employer: ein bestaetigter Worker hat die Schicht storniert
 // shiftLabel (optional): Einzel-Absage einer Schicht ("Thu, Nov 19 09:00–13:00"); withdrawn: war die letzte gebuchte Schicht
 function workerCancelledShift({ workerName, jobTitle, jobId, late, shiftLabel, withdrawn }) {
@@ -287,7 +304,7 @@ function accountResumed() {
 }
 
 module.exports = {
-  formatShiftStart, describeShiftStart, applicationAccepted, applicationDeclined, jobCancelled, shiftReminder,
+  formatShiftStart, describeShiftStart, applicationAccepted, applicationDeclined, jobCancelled, accountClosedShifts, shiftReminder,
   noShowRecorded, attendanceReminder, lateCancellationRecorded, workerCancelledShift, attendanceDisputeResolved,
   newApplication, instantMatchBooked, newMessagePush, unreadMessageEmail,
   paymentReceived, paymentOpen, reviewReceived, accountPaused, accountResumed,
