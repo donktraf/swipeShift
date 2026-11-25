@@ -911,3 +911,16 @@ Gefunden beim Profile-Screen-Abgleich: Legal-Schalter (Worker + Arbeitgeber) und
 - E-Mail ändern: alter Absturz behoben, 409 bei vergebener Adresse, Sicherheits-Mail an die alte Adresse
 - Migrationen `20261121000000_shift_booking_email_canonical`, `20261121010000_job_time_span` (lokal angewendet)
 - Offen: Worker kann nur die ganze Buchung absagen; Swipe bucht alle offenen Schichten; Zahlungs-/Anwesenheits-Erinnerung einmal pro Job; App zeigt bei fehlgeschlagener Bestätigungsmail noch kein „Resend“
+
+### Simulator-Testdurchgang + Launch-Etappe (2026-11-25)
+- Plan per Grilling-Session festgelegt (Maßstab: App-Store-/Soft-Launch-Tauglichkeit; Zahlungsanbieter bis zur Firmengründung zurückgestellt)
+- Testdurchgang im Simulator (Notion-Checkliste) bis auf Abschnitt 7 (Zahlung) durchgeführt; Testdaten per `npm run seed:test-shifts` (nur lokal, lehnt Produktion/entfernte DB ab)
+- Glocke: Ungelesen-Zähler (Worker + Arbeitgeber, `User.notificationsSeenAt`), Einträge mit Ereigniszeit (`Apply.acceptedAt`, `Apply.paidAt`); Karte „You're confirmed“ mit „Open chat“ auf dem Worker-Home; Admin-Recht kommt direkt mit der Anmeldung
+- Admin-Interessenkonflikte: Meldungen gegen sich selbst unsichtbar (anderer Admin bearbeitet), eigene Meldungen nicht selbst entscheidbar, kein Suspend/Ban gegen Admins (erst Admin-Recht per CLI entziehen), eigene Zuverlässigkeits-Widersprüche ausgeblendet
+- „Resend“ der Bestätigungsmail mit 60-s-Sperre (bei 429 länger), Hinweis wenn die Mail bei Registrierung oder E-Mail-Wechsel nicht verschickt werden konnte
+- Gelöschte Konten mit Meldungen/Moderation hinterlassen einen minimalen Eintrag (HMAC der E-Mail, Apple-ID-Hash, Rolle, Kurzname); Admin kann „Dismiss“ oder „Ban email address“ (blockiert Neuregistrierung inkl. Aliasse); ohne Ban nach 90 Tagen gelöscht; „Unban email“; neuer Server-Schlüssel `EMAIL_BAN_PEPPER` (+ `_PREV`) Pflicht außerhalb dev/test
+- Einzelne Schicht absagen (`ShiftCancellation`): kurzfristig = < 24 h vor dieser Schicht, zählt pro Schicht einmal (auch bei „alles absagen“); letzte Schicht zieht die Bewerbung zurück
+- Swipe-Rechts öffnet bei mehreren Schichten die Schicht-Auswahl; bei einer Schicht sofort mit dieser Schicht; nie mehr „alle buchen“
+- Schicht-Erinnerungen 24 h und < 2 h vor jeder gebuchten Schicht (`ShiftReminder`), Restzeit im Text, Retry bei Versandfehler
+- Migrationen `20261125132002_notifications_seen_at`, `20261125132546_apply_accepted_paid_at`, `20261125135003_deleted_account_tombstone`, `20261125135445_deleted_account_hardening`, `20261125142132_deleted_account_unbanned_at`, `20261125142637_shift_cancellation`, `20261125160000_shift_reminder` (lokal angewendet)
+- Offen: Abschnitt 7 (Zahlung) im Simulator testen; Konto löschen trotz Sperre (Datenschutz); Datenschutzerklärung (aufbewahrter E-Mail-Hash); `EMAIL_BAN_PEPPER` auf dem Server setzen
