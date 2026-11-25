@@ -3,6 +3,7 @@ const express = require("express");
 const { prisma } = require("./prisma");
 const { requireAuth } = require("./auth");
 const { z } = require("zod");
+const { releaseUploads, checkPhotoUrl, INVALID_PHOTO_MESSAGE } = require("./uploadCleanup");
 const { isAtLeast18, UNDERAGE_MESSAGE } = require("./utils/age");
 const { mergeConsents } = require("./utils/consents");
 
@@ -63,14 +64,17 @@ router.patch("/worker", requireAuth, async (req, res) => {
     }
 
     const data = parsed.data;
+    const photo = checkPhotoUrl(data.profilePhotoUrl, req, (await prisma.worker.findUnique({ where: { userId }, select: { profilePhotoUrl: true } }))?.profilePhotoUrl);
+    if (!photo.ok) return res.status(400).json({ error: INVALID_PHOTO_MESSAGE });
 
-    // Upsert Worker
+    // Upsert Worker (altes Foto merken: wird beim erneuten Onboarding ggf. ersetzt)
+    const oldPhoto = (await prisma.worker.findUnique({ where: { userId }, select: { profilePhotoUrl: true } }))?.profilePhotoUrl;
     await prisma.worker.upsert({
       where: { userId },
       update: {
         dateOfBirth: new Date(data.dateOfBirth),
         bio: data.bio ?? null,
-        profilePhotoUrl: data.profilePhotoUrl ?? null,
+        profilePhotoUrl: photo.value,
         jobInterests: data.jobInterests,
         availability: data.availability,
       },
@@ -78,11 +82,13 @@ router.patch("/worker", requireAuth, async (req, res) => {
         userId,
         dateOfBirth: new Date(data.dateOfBirth),
         bio: data.bio ?? null,
-        profilePhotoUrl: data.profilePhotoUrl ?? null,
+        profilePhotoUrl: photo.value,
         jobInterests: data.jobInterests,
         availability: data.availability,
       },
     });
+
+    if (oldPhoto) releaseUploads([oldPhoto], [photo.value]).catch(() => {});
 
     const updated = await prisma.user.update({
       where: { id: userId },
@@ -157,15 +163,18 @@ router.patch("/employer", requireAuth, async (req, res) => {
     }
 
     const data = parsed.data;
+    const logo = checkPhotoUrl(data.companyLogoUrl, req, (await prisma.employer.findUnique({ where: { userId }, select: { companyLogoUrl: true } }))?.companyLogoUrl);
+    if (!logo.ok) return res.status(400).json({ error: INVALID_PHOTO_MESSAGE });
 
-    // Upsert Employer
+    // Upsert Employer (altes Logo merken: wird beim erneuten Onboarding ggf. ersetzt)
+    const oldLogo = (await prisma.employer.findUnique({ where: { userId }, select: { companyLogoUrl: true } }))?.companyLogoUrl;
     await prisma.employer.upsert({
       where: { userId },
       update: {
         companyName: data.companyName,
         companySize: data.companySize,
         industry: data.industry,
-        companyLogoUrl: data.companyLogoUrl ?? null,
+        companyLogoUrl: logo.value,
         websiteOrInstagram: data.websiteOrInstagram ?? null,
         companyDescription: data.companyDescription ?? null,
       },
@@ -174,11 +183,13 @@ router.patch("/employer", requireAuth, async (req, res) => {
         companyName: data.companyName,
         companySize: data.companySize,
         industry: data.industry,
-        companyLogoUrl: data.companyLogoUrl ?? null,
+        companyLogoUrl: logo.value,
         websiteOrInstagram: data.websiteOrInstagram ?? null,
         companyDescription: data.companyDescription ?? null,
       },
     });
+
+    if (oldLogo) releaseUploads([oldLogo], [logo.value]).catch(() => {});
 
     const updated = await prisma.user.update({
       where: { id: userId },

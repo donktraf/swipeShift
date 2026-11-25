@@ -889,6 +889,22 @@ final class APIClient {
         try validate(response: resp, data: data)
     }
 
+    /// Nur das Profilfoto (Worker) setzen — PATCH /auth/me. Fuer die Registrierung: Upload braucht ein Token.
+    func setWorkerProfilePhotoUrl(_ url: String) async throws {
+        var req = try makeRequest(path: "/auth/me", method: "PATCH")
+        req.httpBody = try JSONEncoder().encode(["profilePhotoUrl": url])
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+    }
+
+    /// Nur das Firmenlogo (Employer) setzen — PATCH /employer/profile (Employer-Datensatz entsteht schon bei /auth/register)
+    func setEmployerLogoUrl(_ url: String) async throws {
+        var req = try makeRequest(path: "/employer/profile", method: "PATCH")
+        req.httpBody = try JSONEncoder().encode(["profilePhotoUrl": url])
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+    }
+
     func updateEmployerProfile(_ request: UpdateEmployerProfileRequest) async throws {
         var req = try makeRequest(path: "/employer/profile", method: "PATCH")
         req.httpBody = try JSONEncoder().encode(request)

@@ -3,6 +3,7 @@ const express = require("express");
 const { prisma } = require("./prisma.js");
 const { requireAuth } = require("./auth");
 const { z } = require("zod");
+const { releaseUploads, checkPhotoUrl, INVALID_PHOTO_MESSAGE } = require("./uploadCleanup");
 const { isAtLeast18, UNDERAGE_MESSAGE } = require("./utils/age");
 const { validateWorkerProfileFields, cleanExperience, cleanWhitelist, cleanSocialLinks, AVAILABLE_TIMES, SHIFT_TYPES } = require("./utils/profileFields");
 const { mergeConsents, consentsToFlags, allowedKeysForRole } = require("./utils/consents");
@@ -142,6 +143,12 @@ router.patch("/me", requireAuth, async (req, res) => {
       return res.status(400).json({ error: UNDERAGE_MESSAGE });
     }
 
+    // Foto nur als eigene Upload-URL (oder leer) speichern
+    const photoCheck = profilePhotoUrl !== undefined
+      ? checkPhotoUrl(profilePhotoUrl, req, (await prisma.worker.findUnique({ where: { userId }, select: { profilePhotoUrl: true } }))?.profilePhotoUrl)
+      : null;
+    if (photoCheck && !photoCheck.ok) return res.status(400).json({ error: INVALID_PHOTO_MESSAGE });
+
     // Neue Worker-Felder (Tageszeiten, Schicht-Typen, Erfahrung) validieren, bevor etwas gespeichert wird
     const extra = validateWorkerProfileFields(req.body);
     if (extra.errors.length > 0) {
@@ -193,10 +200,13 @@ router.patch("/me", requireAuth, async (req, res) => {
       if (payRangeMax         !== undefined) workerUpdate.payRangeMax        = payRangeMax != null ? Number(payRangeMax) : null;
       if (skills              !== undefined) workerUpdate.skills             = skills ?? null;
       if (workAuthorization   !== undefined) workerUpdate.workAuthorization  = !!workAuthorization;
-      if (profilePhotoUrl     !== undefined) workerUpdate.profilePhotoUrl    = profilePhotoUrl ?? null;
+      if (profilePhotoUrl     !== undefined) workerUpdate.profilePhotoUrl    = photoCheck.value;
       Object.assign(workerUpdate, extra.data);
 
       if (Object.keys(workerUpdate).length > 0) {
+        const oldPhoto = "profilePhotoUrl" in workerUpdate
+          ? (await prisma.worker.findUnique({ where: { userId }, select: { profilePhotoUrl: true } }))?.profilePhotoUrl
+          : null;
         await prisma.worker.upsert({
           where:  { userId },
           update: workerUpdate,
@@ -208,6 +218,8 @@ router.patch("/me", requireAuth, async (req, res) => {
             ...workerUpdate,
           },
         });
+        // Altes Foto entfernen, wenn es ersetzt/geloescht wurde (fehlertolerant)
+        if (oldPhoto) releaseUploads([oldPhoto], [workerUpdate.profilePhotoUrl]).catch(() => {});
       }
     }
 

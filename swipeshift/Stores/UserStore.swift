@@ -190,82 +190,62 @@ final class UserStore: ObservableObject {
 
     /// Registriert einen neuen User (Worker oder Employer) über das Backend.
     ///
-    /// Besonderheit:
-    /// - Falls ein Profilbild vorhanden ist, wird es **zuerst hochgeladen**
-    /// - Das Backend bekommt **nur die Bild-URL**, niemals das Bild selbst
-    ///
-    /// Ablauf:
-    /// 1) optionaler Upload → URL
-    /// 2) Register-Request mit vollständigem Body
-    /// 3) currentUser setzen
+    /// Ablauf (Upload-Endpunkte brauchen ein Token, das es erst nach dem Register gibt):
+    /// 1) Register-Request ohne Bild-URL → Token wird im APIClient gesetzt
+    /// 2) currentUser setzen (Registrierung gilt)
+    /// 3) optional: Bild mit Token hochladen und URL ueber den Profil-Endpunkt speichern.
+    ///    Schlaegt das fehl, bleibt die Registrierung gueltig; das Foto kann spaeter im Profil gesetzt werden.
     @MainActor
     func registerRemote(request: RegisterRequestDTO, pickedImage: UIImage?) async {
         errorMessage = nil
         print("Vor aufruf Backend. Daten aus Front: ", request);
         do {
-            var finalRequest = request
+            // Bild-URLs nie mitschicken (Backend akzeptiert nur eigene Upload-URLs)
+            let finalRequest = RegisterRequestDTO(
+                firstName: request.firstName,
+                lastName: request.lastName,
+                email: request.email,
+                password: request.password,
+                role: request.role,
+                location: request.location,
+                lat: request.lat,
+                lng: request.lng,
 
-            // optional Upload je nach Rolle
-            if let image = pickedImage {
-                if request.role == "worker" {
-                    let url = try await APIClient.shared.uploadProfilePhoto(image)
+                dateOfBirth: request.dateOfBirth,
+                jobInterests: request.jobInterests,
+                availability: request.availability,
+                bio: request.bio,
+                profilePhotoUrl: nil,
 
-                    finalRequest = RegisterRequestDTO(
-                        firstName: request.firstName,
-                        lastName: request.lastName,
-                        email: request.email,
-                        password: request.password,
-                        role: request.role,
-                        location: request.location,
-                        lat: request.lat,
-                        lng: request.lng,
+                companyName: request.companyName,
+                companySize: request.companySize,
+                industry: request.industry,
 
-                        dateOfBirth: request.dateOfBirth,
-                        jobInterests: request.jobInterests,
-                        availability: request.availability,
-                        bio: request.bio,
-                        profilePhotoUrl: url,
+                companyLogoUrl: nil,
+                websiteOrInstagram: request.websiteOrInstagram,
+                companyDescription: request.companyDescription,
+                acceptedTerms: request.acceptedTerms
+            )
 
-                        companyName: request.companyName,
-                        companySize: request.companySize,
-                        industry: request.industry,
-
-                        companyLogoUrl: request.companyLogoUrl,
-                        websiteOrInstagram: request.websiteOrInstagram,
-                        companyDescription: request.companyDescription
-                    )
-                } else {
-                    let url = try await APIClient.shared.uploadCompanyLogo(image)
-
-                    finalRequest = RegisterRequestDTO(
-                        firstName: request.firstName,
-                        lastName: request.lastName,
-                        email: request.email,
-                        password: request.password,
-                        role: request.role,
-                        location: request.location,
-                        lat: request.lat,
-                        lng: request.lng,
-
-                        dateOfBirth: request.dateOfBirth,
-                        jobInterests: request.jobInterests,
-                        availability: request.availability,
-                        bio: request.bio,
-                        profilePhotoUrl: request.profilePhotoUrl,
-
-                        companyName: request.companyName,
-                        companySize: request.companySize,
-                        industry: request.industry,
-                        companyLogoUrl: url,
-                        websiteOrInstagram: request.websiteOrInstagram,
-                        companyDescription: request.companyDescription
-                    )
-                }
-            }
-            // Registrierung durchführen
+            // Registrierung durchführen (setzt das Token)
             let (user, mailSent) = try await APIClient.shared.register(requestBody: finalRequest)
             self.verificationMailFailed = !mailSent
-            
+
+            // Bild nach dem Register hochladen (Token vorhanden); Fehler blockieren die Registrierung nicht
+            if let image = pickedImage {
+                do {
+                    if request.role == "worker" {
+                        let url = try await APIClient.shared.uploadProfilePhoto(image)
+                        try await APIClient.shared.setWorkerProfilePhotoUrl(url)
+                    } else {
+                        let url = try await APIClient.shared.uploadCompanyLogo(image)
+                        try await APIClient.shared.setEmployerLogoUrl(url)
+                    }
+                } catch {
+                    print("Register: image upload failed (registration kept):", error.localizedDescription)
+                }
+            }
+
             // App-State aktualisieren
             self.currentUser = user
             print("Register success:", user.firstName)
@@ -275,7 +255,7 @@ final class UserStore: ObservableObject {
             print("Register error:", error.localizedDescription)
         }
     }
-    
+
     @MainActor
     func forgotPasswordRemote(email: String) async {
         errorMessage = nil

@@ -19,6 +19,9 @@ const { OAuth2Client } = require("google-auth-library");
 const { createRemoteJWKSet, jwtVerify } = require("jose");
 const { requireAuth } = require("./auth");
 const { removeDevicesForSessions } = require("./pushDevices");
+const events = require("./notifyEvents");
+const { cancelOpenJobs } = require("./accountCleanup");
+const { releaseUploads, checkPhotoUrl, INVALID_PHOTO_MESSAGE } = require("./uploadCleanup");
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID; // iOS ClientID
 const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID);
@@ -171,6 +174,8 @@ router.post("/register", registerLimiter, async (req, res) => {
   }
 
   const data = parsed.data;
+  const photo = checkPhotoUrl(data.role === "worker" ? data.profilePhotoUrl : data.companyLogoUrl, req);
+  if (!photo.ok) return res.status(400).json({ error: INVALID_PHOTO_MESSAGE, fieldErrors: { photo: [INVALID_PHOTO_MESSAGE] } });
 
   // Email uniqueness
   const exists = await prisma.user.findUnique({
@@ -211,7 +216,7 @@ router.post("/register", registerLimiter, async (req, res) => {
           create: {
             dateOfBirth: new Date(data.dateOfBirth),
             bio: data.bio ?? null,
-            profilePhotoUrl: data.profilePhotoUrl ?? null,
+            profilePhotoUrl: photo.value,
             jobInterests: data.jobInterests,
             availability: data.availability,
           }
@@ -224,7 +229,7 @@ router.post("/register", registerLimiter, async (req, res) => {
             companyName: data.companyName,
             companySize: data.companySize,
             industry: data.industry,
-            companyLogoUrl: data.companyLogoUrl ?? null,
+            companyLogoUrl: photo.value,
             websiteOrInstagram: data.websiteOrInstagram ?? null,
             companyDescription: data.companyDescription ?? null,
           }
@@ -847,6 +852,8 @@ router.patch("/me/email", requireAuth, async (req, res) => {
 router.delete("/me", requireAuth, async (req, res) => {
   const userId = req.auth.sub;
   try {
+    let uploadUrls = [];
+    let cancelledJobIds = [];
     await prisma.$transaction(async (tx) => {
       // Zeilensperre zuerst: serialisiert mit einem parallelen Admin-Ban (applyReportAction sperrt dieselbe Zeile),
       // sodass der Tombstone nie einen zwischenzeitlich gesetzten Bann/Report verpasst.
@@ -876,8 +883,22 @@ router.delete("/me", requireAuth, async (req, res) => {
           });
         }
       }
+      // Hochgeladene Dateien (Profilfoto/Firmenlogo) merken; geloescht wird erst nach dem Commit
+      const [worker, employer] = await Promise.all([
+        tx.worker.findUnique({ where: { userId }, select: { profilePhotoUrl: true } }),
+        tx.employer.findUnique({ where: { userId }, select: { companyLogoUrl: true } }),
+      ]);
+      uploadUrls = [worker?.profilePhotoUrl, employer?.companyLogoUrl].filter(Boolean);
+      // Job.employerId hat keinen FK: offene Jobs (draft/published/inProgress) des Kontos stornieren; abgeschlossene
+      // bleiben (Worker-Historie/Bewertungen, Firmenname steht als Text am Job)
+      cancelledJobIds = await cancelOpenJobs(tx, { employerId: userId });
       await tx.user.delete({ where: { id: userId } });
-    });
+      // Nochmal nach dem Delete: Jobs, die zwischen dem ersten Lauf und dem Delete entstanden sind (Race mit POST /jobs)
+      cancelledJobIds = [...new Set([...cancelledJobIds, ...(await cancelOpenJobs(tx, { employerId: userId }))])];
+    }, { timeout: 30000, maxWait: 10000 });
+    // Nach dem Commit, fire-and-forget bzw. fehlertolerant: Worker informieren, Dateien loeschen
+    for (const jobId of cancelledJobIds) events.jobCancelled(jobId);
+    releaseUploads(uploadUrls).catch(() => {});
     return res.json({ ok: true });
   } catch (err) {
     console.error("DELETE /auth/me error:", err);

@@ -14,6 +14,8 @@ const copy = require("./utils/notificationCopy");
 const events = require("./notifyEvents");
 const { runAutoAttendance } = require("./reliability");
 const { purgeExpiredTombstones } = require("./moderation");
+const { sweepOrphanUploads } = require("./uploadCleanup");
+const { purgeOldSessions, purgeExpiredTokens, purgeOldReports } = require("./retention");
 const { bookedEnd } = require("./utils/shiftBooking");
 const { collectPaged } = require("./utils/paged");
 const { attendanceReminderWindow } = require("./utils/reliability");
@@ -224,8 +226,20 @@ async function runTombstonePurge(now = new Date()) {
   return n;
 }
 
+// Weitere Retention-Laeufe (Sessions/Tokens, Meldungen/Moderation): je hoechstens alle 24 h, Fehler → Retry im naechsten Tick
+const lastRetentionAt = new Map();
+async function runDailyPurge(key, fn, now = new Date()) {
+  if (now.getTime() - (lastRetentionAt.get(key) ?? 0) < PURGE_INTERVAL_MS) return 0;
+  const n = await fn(now);
+  lastRetentionAt.set(key, now.getTime());
+  return n;
+}
+const runSessionTokenPurge = (now = new Date()) => runDailyPurge("sessions-tokens", async (t) => [await purgeOldSessions(t), await purgeExpiredTokens(t)], now);
+const runUploadSweep = (now = new Date()) => runDailyPurge("upload-sweep", sweepOrphanUploads, now);
+const runReportPurge = (now = new Date()) => runDailyPurge("reports", purgeOldReports, now);
+
 async function runAll(now = new Date()) {
-  for (const [name, fn] of [["tombstone purge", runTombstonePurge], ["shift reminders", runShiftReminders], ["unread message emails", runUnreadMessageEmails], ["payment open", runPaymentOpen], ["attendance reminders", runAttendanceReminders], ["auto attendance", runAutoAttendance]]) {
+  for (const [name, fn] of [["tombstone purge", runTombstonePurge], ["session/token purge", runSessionTokenPurge], ["report purge", runReportPurge], ["upload sweep", runUploadSweep], ["shift reminders", runShiftReminders], ["unread message emails", runUnreadMessageEmails], ["payment open", runPaymentOpen], ["attendance reminders", runAttendanceReminders], ["auto attendance", runAutoAttendance]]) {
     try {
       await fn(now);
     } catch (err) {
@@ -250,4 +264,4 @@ function startScheduler() {
   return timer;
 }
 
-module.exports = { startScheduler, runAll, runAutoAttendance, runAttendanceReminders, runShiftReminders, runUnreadMessageEmails, runPaymentOpen, claimConversationEmail };
+module.exports = { runUploadSweep, runSessionTokenPurge, runReportPurge, startScheduler, runAll, runAutoAttendance, runAttendanceReminders, runShiftReminders, runUnreadMessageEmails, runPaymentOpen, claimConversationEmail };

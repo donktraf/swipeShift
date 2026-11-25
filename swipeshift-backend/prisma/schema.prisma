@@ -114,6 +114,8 @@ model UserSession {
   reauthAt     DateTime? // letzter Step-up (Re-Auth) dieser Sitzung, gueltig 10 min (utils/reauth.js)
 
   @@index([userId])
+  @@index([expiresAt])
+  @@index([revokedAt])
 }
 
 // APNs-Geraetetoken pro Login-Sitzung (Push-Benachrichtigungen). Wird mit der Session geloescht.
@@ -155,6 +157,7 @@ model TwoFactorCode {
   createdAt  DateTime  @default(now())
 
   @@index([userId, purpose])
+  @@index([expiresAt])
 }
 
 // Sperre gegen Code-Raten pro User+IP (Entscheidungslogik: nextLockState in utils/twoFactor.js)
@@ -613,6 +616,7 @@ model UserReport {
   @@index([reporterId, reportedUserId, conversationId])
   @@index([status])
   @@index([reportedUserId, status])
+  @@index([status, resolvedAt])
 }
 
 // Tombstone eines geloeschten Kontos, NUR wenn Meldungen/Moderation vorlagen (Datensparsamkeit, Missbrauchsschutz:
@@ -649,6 +653,7 @@ model ModerationAction {
   createdAt    DateTime @default(now())
 
   @@index([targetUserId, createdAt])
+  @@index([createdAt])
   @@index([reportId])
 }
 

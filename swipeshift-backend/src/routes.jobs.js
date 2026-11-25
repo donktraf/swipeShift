@@ -23,6 +23,8 @@ const { restrictedEmployerIds } = require("./restrictedUsers");
 const { restrictedWhere, isRestricted, visibleApplyFilter } = require("./utils/moderation");
 const { platformFeePercent } = require("./utils/fees");
 
+const { withEmployerShareLock } = require("./accountCleanup");
+
 const router = express.Router();
 
 // Pausierte Arbeitgeber: ihre Jobs sind fuer Worker unsichtbar und nicht bewerbbar
@@ -338,9 +340,10 @@ router.post("/", requireAuth, requireVerifiedEmail, async (req, res) => {
       console.log(`geocode: lat/lng vom Client übernommen (${data.lat}, ${data.lng})`);
     }
 
-    const newJob = await prisma.job.create({
-      data: { ...data, status, employerId: req.auth.sub },
-    });
+    const created = await withEmployerShareLock(prisma, req.auth.sub, (tx) =>
+      tx.job.create({ data: { ...data, status, employerId: req.auth.sub } }));
+    if (created.gone) return res.status(401).json({ error: "User not found" });
+    const newJob = created.value;
 
     console.log(`POST /jobs — neuer Job: "${title}" (${status}), ID: ${newJob.id}`);
     return res.status(201).json({ job: newJob });
@@ -719,7 +722,7 @@ router.patch("/:id/status", requireAuth, requireVerifiedEmail, async (req, res) 
     // Bedingtes Update gegen Races: Status und updatedAt wie gelesen (ein paralleles PUT/Status-Update
     // macht den Vollstaendigkeits-Check hinfaellig); zurueck zu draft zusaetzlich nur ohne Bewerbungen.
     const toDraft = status === "draft";
-    const result = await prisma.job.updateMany({
+    const locked = await withEmployerShareLock(prisma, employerId, (tx) => tx.job.updateMany({
       where: { id: jobId, status: job.status, // Postgres speichert evtl. Mikrosekunden (Altzeilen), JS nur Millisekunden → 1-ms-Fenster
         updatedAt: { gte: job.updatedAt, lt: new Date(job.updatedAt.getTime() + 1) }, ...(toDraft ? { applies: { none: {} } } : {}) },
       // Grund nur beim Stornieren speichern; bei jedem anderen Status zuruecksetzen
@@ -728,7 +731,9 @@ router.patch("/:id/status", requireAuth, requireVerifiedEmail, async (req, res) 
         cancellationReason: status === "cancelled" ? normalizeCancellationReason(reason) : null,
         ...(decision.publishing ? { termsAcceptedAt: new Date(), platformFeePercent: platformFeePercent() } : {}),
       },
-    });
+    }));
+    if (locked.gone) return res.status(401).json({ error: "User not found" });
+    const result = locked.value;
     if (result.count === 0) {
       // Neu lesen und den Grund anhand des aktuellen Zustands melden
       const current = await prisma.job.findUnique({ where: { id: jobId }, select: { status: true } });
@@ -811,10 +816,12 @@ router.put("/:id", requireAuth, requireVerifiedEmail, async (req, res) => {
       }
     }
 
-    const result = await prisma.job.updateMany({
+    const locked = await withEmployerShareLock(prisma, req.auth.sub, (tx) => tx.job.updateMany({
       where: { id: existing.id, employerId: req.auth.sub, status: "draft" },
       data: { ...data, status: status ?? "draft", updatedAt: new Date() },
-    });
+    }));
+    if (locked.gone) return res.status(401).json({ error: "User not found" });
+    const result = locked.value;
     if (result.count === 0) return respondDraftError(req, res);
 
     const updated = await prisma.job.findUnique({ where: { id: existing.id } });

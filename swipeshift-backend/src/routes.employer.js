@@ -2,6 +2,7 @@
 
 const express = require("express");
 const events = require("./notifyEvents");
+const { releaseUploads, checkPhotoUrl, INVALID_PHOTO_MESSAGE } = require("./uploadCleanup");
 const { prisma } = require("./prisma");
 const { requireAuth } = require("./auth");
 const { requireVerifiedEmail } = require("./middlewares/requireVerifiedEmail");
@@ -1281,6 +1282,11 @@ router.patch("/profile", requireAuth, async (req, res) => {
       legalConsents,
     } = req.body;
 
+    const photoCheck = profilePhotoUrl !== undefined
+      ? checkPhotoUrl(profilePhotoUrl, req, (await prisma.employer.findUnique({ where: { userId }, select: { companyLogoUrl: true } }))?.companyLogoUrl)
+      : null;
+    if (photoCheck && !photoCheck.ok) return res.status(400).json({ error: INVALID_PHOTO_MESSAGE });
+
     // Oeffentliche Profil-Zusatzfelder validieren, bevor irgendetwas gespeichert wird
     const extra = validateEmployerProfileFields(req.body);
     if (extra.errors.length > 0) {
@@ -1318,12 +1324,15 @@ router.patch("/profile", requireAuth, async (req, res) => {
     if (teamMembers           !== undefined) employerUpdate.teamMembers           = teamMembers ?? null;
     if (jobTitle              !== undefined) employerUpdate.jobTitle              = jobTitle ?? null;
     if (managerRole           !== undefined) employerUpdate.managerRole           = managerRole ?? null;
-    if (profilePhotoUrl       !== undefined) employerUpdate.companyLogoUrl        = profilePhotoUrl ?? null;
+    if (profilePhotoUrl       !== undefined) employerUpdate.companyLogoUrl        = photoCheck.value;
     Object.assign(employerUpdate, extra.data);
     // Json-Spalte: "kein Wert" muss als DbNull geschrieben werden
     if ("socialLinks" in employerUpdate && employerUpdate.socialLinks === null) employerUpdate.socialLinks = Prisma.DbNull;
 
     if (Object.keys(employerUpdate).length > 0) {
+      const oldLogo = "companyLogoUrl" in employerUpdate
+        ? (await prisma.employer.findUnique({ where: { userId }, select: { companyLogoUrl: true } }))?.companyLogoUrl
+        : null;
       await prisma.employer.upsert({
         where:  { userId },
         update: employerUpdate,
@@ -1335,6 +1344,8 @@ router.patch("/profile", requireAuth, async (req, res) => {
           ...employerUpdate,
         },
       });
+      // Altes Logo entfernen, wenn es ersetzt/geloescht wurde (fehlertolerant)
+      if (oldLogo) releaseUploads([oldLogo], [employerUpdate.companyLogoUrl]).catch(() => {});
     }
 
     return res.json({ ok: true });

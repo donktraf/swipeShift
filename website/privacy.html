@@ -96,13 +96,14 @@
 </ul>
 
 <h2 id="retention">5. Retention and deletion</h2>
-<p>We keep account data while your account exists. Sessions expire after 7 days of sign-in validity.</p>
+<p>We keep account data while your account exists. Sessions expire after 7 days of sign-in validity. Expired or signed-out sessions, including the IP address stored with them, are deleted 30 days after they expired or were ended. Expired verification links, password-reset links, and one-time sign-in codes are deleted about 7 days after they expire.</p>
 <h3>Deleting your account</h3>
-<p>You can delete your account in the App under <strong>Settings &rarr; Privacy &amp; Data</strong>, or by emailing <a href="mailto:support@swipeshift.app">support@swipeshift.app</a> from the email address of the account. You can email us even if your account is suspended or banned. Deletion removes your profile, applications, saved items, sessions, push tokens, and the chats and reviews connected to your applications.</p>
-<div class="review-note">Requires legal/engineering confirmation: whether uploaded profile photos and company logos on our storage, job postings of deleted employers, backups, and logs are also removed, and how quickly.</div>
+<p>You can delete your account in the App under <strong>Settings &rarr; Privacy &amp; Data</strong>, or by emailing <a href="mailto:support@swipeshift.app">support@swipeshift.app</a> from the email address of the account. You can email us even if your account is suspended or banned. Deletion removes your profile, applications, saved items, sessions, push tokens, and the chats and reviews connected to your applications. Your profile photo or company logo is deleted from our storage promptly after account deletion, and a photo you replace is deleted when the new one is saved.</p>
+<p>If you are an employer, your jobs that are still open (drafts, published, or in progress) are cancelled when your account is deleted, and workers with a pending or accepted application are notified (we notify them, subject to their notification settings). They disappear from all job lists. Completed jobs stay in the history of the workers who did them, with the company name shown as plain text, so that workers keep their job history and ratings.</p>
+<p>Backups and server logs: <span class="placeholder">[CONFIRM BACKUP AND LOG RETENTION]</span></p>
 <h3>What we keep after deletion</h3>
 <ul>
-<li><strong>Safety reports and moderation records</strong> about or by you are kept so we can protect other users, even after deletion. <span class="placeholder">[CONFIRM RETENTION PERIOD]</span></li>
+<li><strong>Safety reports and moderation records</strong> about or by you are kept so we can protect other users, even after deletion. Closed reports and moderation decisions are deleted 2 years after the report was closed or the decision was made. Open reports are never deleted automatically. While a ban against a person is active, we keep the reports and moderation records about the banned person for longer.</li>
 <li><strong>Abuse-prevention record:</strong> if your account had reports or moderation actions, or was suspended or banned, we keep a minimal record when you delete it: a keyed hash (HMAC) of your email address, a hash of your Apple account identifier if you used Apple sign-in, your role, a short display name, and the dates of deletion, suspension, or ban. This lets us stop a banned person from registering again. Without a ban, this record is deleted 90 days after deletion. With a ban, it is kept until the ban is lifted (and then for 90 days).</li>
 <li>Information we must keep to meet legal obligations.</li>
 </ul>

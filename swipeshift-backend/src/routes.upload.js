@@ -2,6 +2,8 @@ const express = require("express");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
+const rateLimit = require("express-rate-limit");
+const { requireAuth } = require("./auth");
 
 const router = express.Router();
 
@@ -17,12 +19,22 @@ const storage = multer.diskStorage({
   },
 });
 
+// Alle Upload-Flows (Onboarding, Profil bearbeiten) laufen nach dem Login → Auth Pflicht; zusaetzlich Limit pro IP
+// (UPLOAD_RATE_LIMIT pro Stunde, Standard 20). Verwaiste Dateien raeumt der Scheduler taeglich auf.
+const uploadLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: Number(process.env.UPLOAD_RATE_LIMIT) || 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many uploads. Please try again later." },
+});
+
 const upload = multer({
   storage,
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
 });
 
-router.post("/profile-photo", upload.single("file"), (req, res) => {
+router.post("/profile-photo", requireAuth, uploadLimiter, upload.single("file"), (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: "No file uploaded" });
   }
@@ -33,7 +45,7 @@ router.post("/profile-photo", upload.single("file"), (req, res) => {
 });
 
 // Employer company logo
-router.post("/company-logo", upload.single("file"), (req, res) => {
+router.post("/company-logo", requireAuth, uploadLimiter, upload.single("file"), (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
 
   const url = `${req.protocol}://${req.get("host")}/uploads/${req.file.filename}`;
