@@ -318,7 +318,7 @@ struct HelpSupportPlaceholderView: View {
         SubScreenShell(title: "Help & Support") {
             VStack(spacing: 0) {
                 SettingsRow(icon: "book.fill",        label: "Guide") {
-                    openURL(URL(string: "https://swipeshift.app/guide")!)
+                    openURL(AppConfig.websiteURL.appendingPathComponent("guide"))
                 }
                 Divider().padding(.leading, 52)
                 SettingsRow(icon: "bubble.left.fill", label: "Live Chat") {
@@ -326,11 +326,11 @@ struct HelpSupportPlaceholderView: View {
                 }
                 Divider().padding(.leading, 52)
                 SettingsRow(icon: "doc.text.fill",    label: "Terms & Conditions") {
-                    openURL(URL(string: "https://swipeshift.app/terms")!)
+                    openURL(AppConfig.websiteURL.appendingPathComponent("terms"))
                 }
                 Divider().padding(.leading, 52)
                 SettingsRow(icon: "hand.raised.fill", label: "Privacy Policy") {
-                    openURL(URL(string: "https://swipeshift.app/privacy")!)
+                    openURL(AppConfig.websiteURL.appendingPathComponent("privacy"))
                 }
             }
             .background(Color(uiColor: .systemBackground))

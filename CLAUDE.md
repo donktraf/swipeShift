@@ -478,6 +478,12 @@ Backend (swipeshift-backend/):
   zusaetzliche Dependency noetig
 • Tests liegen unter src/**/*.test.js (aktuell: utils/haversine.test.js) — bewusst auf reine,
   DB-freie Utility-Funktionen beschraenkt, keine vollstaendige Route-/Integrationstest-Suite
+Website (website/, lokal statt Cloudflare):
+• `node scripts/serve-website.js` → http://localhost:8788 (ENV PORT, WEBSITE_DIR; emuliert _redirects,
+  _headers, saubere URLs, 404.html). Tests: `node --test scripts/serve-website.test.js`
+• Debug-Build der App oeffnet Website-Links (Privacy/Terms/Guide, Job-Share) ueber `AppConfig.websiteURL`
+  dort, Release nutzt https://swipeshift.app
+
 iOS (swipeShift.xcodeproj):
 • Es existiert noch KEIN XCTest-Target im Xcode-Projekt. Das Anlegen eines Test-Targets per
   Texteditor im project.pbxproj ist fehleranfaellig und kann die Projektdatei korrumpieren — dies

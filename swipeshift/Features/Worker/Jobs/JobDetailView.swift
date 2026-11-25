@@ -714,7 +714,7 @@ enum JobShareContent {
     /// TODO: Universal Links aktivieren: Associated Domains `applinks:swipeshift.app` in Xcode
     /// (benoetigt bezahlten Apple-Developer-Account) + apple-app-site-association auf der Domain.
     static func url(for job: Job) -> URL {
-        URL(string: "https://swipeshift.app/jobs/\(job.id)") ?? URL(string: "https://swipeshift.app")!
+        AppConfig.websiteURL.appendingPathComponent("jobs").appendingPathComponent(job.id)
     }
 
     static func message(for job: Job) -> String {

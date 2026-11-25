@@ -52,6 +52,13 @@ struct swipeShiftApp: App {
                   host == "swipeshift.app" || host == "www.swipeshift.app",
                   parts.count == 2, parts[0] == "jobs" else { return nil }
             candidate = parts[1]
+        #if DEBUG
+        case "http":
+            // Nur DEBUG: lokaler Website-Server (AppConfig.websiteURL)
+            guard url.host?.lowercased() == "localhost", url.port == 8788,
+                  parts.count == 2, parts[0] == "jobs" else { return nil }
+            candidate = parts[1]
+        #endif
         default:
             return nil
         }

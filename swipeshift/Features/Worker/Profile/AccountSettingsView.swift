@@ -1334,11 +1334,11 @@ struct PrivacyDataView: View {
                 // Dokumente
                 sectionCard("Legal") {
                     SettingsActionRow(icon: "doc.text.fill",    label: "Privacy Policy") {
-                        openURL(URL(string: "https://swipeshift.app/privacy")!)
+                        openURL(AppConfig.websiteURL.appendingPathComponent("privacy"))
                     }
                     Divider().padding(.leading, 52)
                     SettingsActionRow(icon: "doc.badge.gearshape.fill", label: "Terms of Service") {
-                        openURL(URL(string: "https://swipeshift.app/terms")!)
+                        openURL(AppConfig.websiteURL.appendingPathComponent("terms"))
                     }
                 }
 
