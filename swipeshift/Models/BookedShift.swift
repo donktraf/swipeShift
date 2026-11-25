@@ -13,8 +13,11 @@ struct BookedShift: Identifiable, Decodable, Hashable {
     var timeRange: String? = nil   // z.B. "18:00–23:00"
     var startTime: Date? = nil
     var endTime: Date? = nil
+    /// Nur in GET /worker/applications: darf der Worker genau diese Schicht absagen? (< 24 h davor = kurzfristig)
+    var canCancel: Bool? = nil
+    var lateIfCancelledNow: Bool? = nil
 
-    private enum CodingKeys: String, CodingKey { case id, date, timeRange, startTime, endTime }
+    private enum CodingKeys: String, CodingKey { case id, date, timeRange, startTime, endTime, canCancel, lateIfCancelledNow }
 
     /// Tolerant: ein Decoder ohne ISO-8601-Datumsstrategie darf nicht die ganze Liste scheitern lassen
     init(from decoder: Decoder) throws {
@@ -24,6 +27,8 @@ struct BookedShift: Identifiable, Decodable, Hashable {
         timeRange = try? c.decodeIfPresent(String.self, forKey: .timeRange)
         startTime = try? c.decodeIfPresent(Date.self, forKey: .startTime)
         endTime   = try? c.decodeIfPresent(Date.self, forKey: .endTime)
+        canCancel = try? c.decodeIfPresent(Bool.self, forKey: .canCancel)
+        lateIfCancelledNow = try? c.decodeIfPresent(Bool.self, forKey: .lateIfCancelledNow)
     }
 
     /// Kurzform fuer Listen: "Mon 12" (aus startTime, sonst der Datumstext des Employers)

@@ -37,7 +37,7 @@ async function buildNotifications(userId, userRole) {
         userId,
         OR: [
           { status: "accepted", attendance: "no_show", attendanceSetAt: { gte: sinceReliability } },
-          { status: "cancelled_by_worker", lateCancellation: true, cancelledAt: { gte: sinceReliability } },
+          { status: "cancelled_by_worker", lateCancellation: true, cancelledAt: { gte: sinceReliability }, shiftCancellations: { none: {} } },
         ],
       },
       include: { job: { select: { title: true, company: true } } },
@@ -53,6 +53,25 @@ async function buildNotifications(userId, userRole) {
           ? `${a.job.company} marked you as not showing up for ${a.job.title}. You can dispute this once under Job Applications.`
           : `You cancelled ${a.job.title} less than 24 hours before it started.`,
         timestamp: (noShow ? a.attendanceSetAt : a.cancelledAt) ?? a.createdAt,
+        actionLabel: null,
+        actionPayload: null,
+      });
+    }
+
+    // 1c. Kurzfristige Absage einzelner Schichten (Teil-Absage oder letzte Schicht)
+    const lateShiftCancels = await prisma.shiftCancellation.findMany({
+      where: { late: true, cancelledAt: { gte: sinceReliability }, apply: { userId } },
+      include: { apply: { include: { job: { select: { title: true } } } } },
+      orderBy: { cancelledAt: "desc" },
+      take: 10,
+    });
+    for (const c of lateShiftCancels) {
+      notifications.push({
+        id: `late-cancel-shift-${c.id}`,
+        category: "jobActivity",
+        title: "Late cancellation noted",
+        body: `You cancelled a shift of ${c.apply.job.title} less than 24 hours before it started.`,
+        timestamp: c.cancelledAt,
         actionLabel: null,
         actionPayload: null,
       });
@@ -142,6 +161,28 @@ async function buildNotifications(userId, userRole) {
         title: "Worker cancelled a shift",
         body: `${name} cancelled their shift for ${a.job.title}. The spot is open again.`,
         timestamp: a.cancelledAt,
+        actionLabel: null,
+        actionPayload: null,
+      });
+    }
+
+    // 1c. Einzelne Schichten abgesagt (letzte 14 Tage, auch nach spaeterer Ruecknahme der Bewerbung)
+    const partialCancels = await prisma.shiftCancellation.findMany({
+      where: { cancelledAt: { gte: new Date(Date.now() - 14 * 24 * 3_600_000) }, apply: { job: { employerId: userId } } },
+      include: { apply: { include: { user: { select: { firstName: true, lastName: true } }, job: { select: { title: true } } } } },
+      orderBy: { cancelledAt: "desc" },
+      take: 10,
+    });
+    for (const c of partialCancels) {
+      // Zurueckgezogene Bewerbung: der Eintrag oben deckt die Absage der letzten Schicht (gleicher Zeitpunkt) schon ab
+      if (c.apply.status === "cancelled_by_worker" && c.apply.cancelledAt && c.cancelledAt.getTime() === c.apply.cancelledAt.getTime()) continue;
+      const name = [c.apply.user.firstName, c.apply.user.lastName].filter(Boolean).join(" ") || "A worker";
+      notifications.push({
+        id: `worker-cancelled-shift-${c.id}`,
+        category: "jobActivity",
+        title: "Worker cancelled a shift",
+        body: `${name} cancelled one shift for ${c.apply.job.title}${c.late ? " less than 24 hours before the start" : ""}. The spot is open again.`,
+        timestamp: c.cancelledAt,
         actionLabel: null,
         actionPayload: null,
       });

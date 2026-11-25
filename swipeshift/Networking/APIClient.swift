@@ -1327,6 +1327,20 @@ extension APIClient {
         return (try? JSONDecoder().decode(R.self, from: data).lateCancellation) ?? false
     }
 
+    /// POST /worker/applications/:id/shifts/:shiftId/cancel — eine einzelne gebuchte Schicht absagen.
+    /// War es die letzte gebuchte Schicht, ist die ganze Bewerbung zurueckgezogen (applicationWithdrawn).
+    @discardableResult
+    func cancelSingleShift(applyId: String, shiftId: String, reason: String? = nil) async throws -> Bool {
+        var req = try makeRequest(path: "/worker/applications/\(applyId)/shifts/\(shiftId)/cancel", method: "POST")
+        var body: [String: String] = [:]
+        if let reason, !reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { body["reason"] = reason }
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try validate(response: resp, data: data)
+        struct R: Decodable { let lateCancellation: Bool }
+        return (try? JSONDecoder().decode(R.self, from: data).lateCancellation) ?? false
+    }
+
     /// POST /worker/applications/:id/dispute — einmaliger Einspruch gegen "late"/"no-show" (Notiz max. 300 Zeichen)
     func disputeAttendance(applyId: String, note: String) async throws {
         var req = try makeRequest(path: "/worker/applications/\(applyId)/dispute", method: "POST")

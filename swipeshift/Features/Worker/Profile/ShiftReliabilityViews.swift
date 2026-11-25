@@ -27,6 +27,12 @@ struct CancelShiftButton: View {
     let applyId: String
     let jobTitle: String
     let lateIfCancelledNow: Bool
+    /// Gesetzt = nur diese eine Schicht absagen (bei mehreren gebuchten Schichten); nil = ganze Buchung
+    var shiftId: String? = nil
+    /// Beschriftung der Schicht im Dialog ("Mon, Apr 28, 18:00–23:00")
+    var shiftLabel: String? = nil
+    /// Einzelne Schicht ist die letzte gebuchte → Bewerbung wird zurueckgezogen
+    var isLastShift: Bool = false
     /// Wird nach erfolgreicher Stornierung aufgerufen (Parameter: war kurzfristig)
     let onCancelled: (Bool) -> Void
 
@@ -36,7 +42,7 @@ struct CancelShiftButton: View {
 
     var body: some View {
         Button { showConfirm = true } label: {
-            Text(isCancelling ? "Cancelling…" : "Cancel shift")
+            Text(isCancelling ? "Cancelling…" : (shiftLabel.map { "Cancel shift · \($0)" } ?? "Cancel shift"))
                 .font(.system(size: 13, weight: .semibold)).foregroundColor(.red)
                 .frame(maxWidth: .infinity).padding(.vertical, 10)
         }
@@ -46,9 +52,7 @@ struct CancelShiftButton: View {
             Button("Cancel shift", role: .destructive) { Task { await cancel() } }
             Button("Keep shift", role: .cancel) {}
         } message: {
-            Text(lateIfCancelledNow
-                 ? "\"\(jobTitle)\" starts in less than 24 hours. This counts as a late cancellation and employers can see it on your profile."
-                 : "\"\(jobTitle)\" will be removed from your calendar and the employer will be notified.")
+            Text(confirmMessage)
         }
         .alert("Could not cancel", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
             Button("OK", role: .cancel) { errorMessage = nil }
@@ -57,11 +61,25 @@ struct CancelShiftButton: View {
         }
     }
 
+    private var confirmMessage: String {
+        let what = shiftLabel.map { "The shift \($0) of \"\(jobTitle)\"" } ?? "\"\(jobTitle)\""
+        var text = lateIfCancelledNow
+            ? "\(what) starts in less than 24 hours. This counts as a late cancellation and employers can see it on your profile."
+            : "\(what) will be removed from your calendar and the employer will be notified."
+        if shiftId != nil && isLastShift { text += "\n\nThis is your last shift — your application will be withdrawn." }
+        return text
+    }
+
     @MainActor
     private func cancel() async {
         isCancelling = true
         do {
-            let late = try await APIClient.shared.cancelShift(applyId: applyId)
+            let late: Bool
+            if let shiftId {
+                late = try await APIClient.shared.cancelSingleShift(applyId: applyId, shiftId: shiftId)
+            } else {
+                late = try await APIClient.shared.cancelShift(applyId: applyId)
+            }
             isCancelling = false
             onCancelled(late)
         } catch {

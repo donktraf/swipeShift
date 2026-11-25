@@ -7,7 +7,7 @@ const { requireAuth } = require("./auth");
 const { requireVerifiedEmail } = require("./middlewares/requireVerifiedEmail");
 const { resolvePeriod, isInPeriod, bookingPeriodPrefilter, currentWeekRange } = require("./utils/period");
 const { payPerWorker, shiftHours } = require("./utils/jobCost");
-const { bookedSpan, withBookedTimes, describeBooked } = require("./utils/shiftBooking");
+const { bookedSpan, bookedShifts, withBookedTimes, describeBooked } = require("./utils/shiftBooking");
 const { distanceMilesBetween } = require("./utils/haversine");
 const { companyJobsWhere, truncateText } = require("./utils/companyStats");
 const { jobNotesForApply } = require("./utils/jobNotes");
@@ -15,6 +15,7 @@ const { restrictedEmployerIds } = require("./restrictedUsers");
 const { lastCompanyActivity } = require("./utils/savedCompanyDates");
 const { deriveApplicationStatus, normalizeCancellationReason } = require("./utils/applicationStatus");
 const rel = require("./utils/reliability");
+const { evaluateShiftCancel, describeBookedForCancel, shiftLabel } = require("./utils/shiftCancel");
 const { loadReliability } = require("./reliability");
 const { reviewOverall, summarizeEmployerReviews, computeWouldWorkAgain, validateWorkerReviewBody } = require("./utils/reviewLogic");
 
@@ -80,7 +81,7 @@ router.get("/applications", requireAuth, requireVerifiedEmail, async (req, res) 
         // Verdienst fuer diese Schicht (gleiche Formel wie Finanz-Uebersicht)
         earnings:       job && rel.isPayable(a) ? payPerWorker(job, a.shiftIds) : 0, // No-Show (auch unter Einspruch) noch nicht bezahlt; nur gebuchte Schichten
         // Gebuchte Schichten (Kalender/Job Applications zeigen nur diese)
-        bookedShifts:   fullJob ? describeBooked(fullJob, a.shiftIds) : [],
+        bookedShifts:   fullJob ? describeBookedForCancel(a, fullJob, now) : [], // je Schicht canCancel + lateIfCancelledNow
         // Entfernung Worker → Job in Meilen (null ohne Koordinaten)
         distanceMiles:  distanceMilesBetween(me?.lat, me?.lng, job?.lat, job?.lng),
         // Chat erst nach Annahme sinnvoll — die Conversation existiert aber ab Bewerbung
@@ -129,56 +130,134 @@ router.delete("/applications/:applyId", requireAuth, requireVerifiedEmail, async
   }
 });
 
+const CANCEL_APPLY_INCLUDE = {
+  job: { select: { title: true, status: true, startTime: true, endTime: true, shifts: true, employerId: true } },
+  conversation: { select: { id: true } },
+  shiftCancellations: { select: { late: true } },
+};
+
 // ─────────────────────────────────────────────
 // POST /worker/applications/:applyId/cancel  { reason? }
-// Angenommene, noch nicht begonnene Schicht stornieren. < 24 h vor Start = kurzfristige Stornierung
-// (zaehlt in der Zuverlaessigkeit). Der Platz wird frei (Status cancelled_by_worker ist nicht "accepted").
+// Ganze Buchung stornieren (Altbestand / "alle absagen"). Fuer JEDE noch gebuchte Schicht entsteht eine
+// ShiftCancellation (late je Schicht, < 24 h vor DIESER Schicht) → die Zuverlaessigkeit zaehlt pro Schicht.
+// Der Platz wird frei (Status cancelled_by_worker ist nicht "accepted").
 // ─────────────────────────────────────────────
 router.post("/applications/:applyId/cancel", requireAuth, requireVerifiedEmail, async (req, res) => {
   try {
     const workerId = req.auth.sub;
     const { applyId } = req.params;
     const now = new Date();
-
-    const apply = await prisma.apply.findUnique({
-      where:   { id: applyId },
-      include: { job: { select: { title: true, status: true, startTime: true, endTime: true, shifts: true, employerId: true } }, conversation: { select: { id: true } } },
-    });
-    if (!apply)                    return res.status(404).json({ error: "Application not found" });
-    if (apply.userId !== workerId) return res.status(403).json({ error: "Forbidden" });
-
-    // Start = erste GEBUCHTE Schicht (storniert wird die ganze Buchung)
-    const decision = rel.evaluateWorkerCancel(apply, withBookedTimes(apply.job, apply.shiftIds), now);
-    if (!decision.ok) return res.status(decision.status).json({ error: decision.error, code: decision.code });
-
     const reason = normalizeCancellationReason(req.body?.reason);
-    const claimed = await prisma.$transaction(async (tx) => {
-      // Bedingtes Update: nur der erste Request gewinnt (kein doppelter Storno / keine doppelten Nachrichten)
+
+    // Lesen, pruefen und schreiben in EINER Transaktion; das bedingte Update (Status + unveraenderte shiftIds)
+    // sorgt dafuer, dass ein paralleler Teil-Storno / Doppelklick hoechstens einen Request gewinnen laesst.
+    const result = await prisma.$transaction(async (tx) => {
+      const apply = await tx.apply.findUnique({ where: { id: applyId }, include: CANCEL_APPLY_INCLUDE });
+      if (!apply)                    return { status: 404, body: { error: "Application not found" } };
+      if (apply.userId !== workerId) return { status: 403, body: { error: "Forbidden" } };
+
+      // Start = erste GEBUCHTE Schicht
+      const decision = rel.evaluateWorkerCancel(apply, withBookedTimes(apply.job, apply.shiftIds), now);
+      if (!decision.ok) return { status: decision.status, body: { error: decision.error, code: decision.code } };
+
+      const booked = bookedShifts(apply.job, apply.shiftIds);
+      const perShift = booked.map((sh) => ({ id: sh.id, late: sh.startMs !== null && rel.isLateCancellation(new Date(sh.startMs), now) }));
+      const anyLate = perShift.some((x) => x.late) || decision.lateCancellation;
+      const priorLate = apply.shiftCancellations.some((c) => c.late);
+
       const { count } = await tx.apply.updateMany({
-        where: { id: applyId, userId: workerId, status: "accepted" },
-        data:  { status: rel.CANCELLED_BY_WORKER, cancelledAt: now, lateCancellation: decision.lateCancellation, cancelReason: reason },
+        where: { id: applyId, userId: workerId, status: "accepted", shiftIds: { equals: apply.shiftIds } },
+        data:  { status: rel.CANCELLED_BY_WORKER, cancelledAt: now, lateCancellation: anyLate || priorLate, cancelReason: reason },
       });
-      if (count !== 1) return false;
+      if (count !== 1) return { status: 409, body: { error: "This shift was already changed.", code: "CHANGED" } };
+      await tx.shiftCancellation.createMany({
+        data: perShift.map((x) => ({ applyId, shiftId: x.id, cancelledAt: now, late: x.late, reason })),
+        skipDuplicates: true,
+      });
       if (apply.conversation) {
         await tx.conversation.update({ where: { id: apply.conversation.id }, data: { status: "cancelled" } });
         await tx.message.create({
           data: {
             conversationId: apply.conversation.id,
             senderId:       workerId,
-            text:           `The worker cancelled this shift${decision.lateCancellation ? " less than 24 hours before the start" : ""}.${reason ? ` Reason: ${reason}` : ""}`,
+            text:           `The worker cancelled this shift${anyLate ? " less than 24 hours before the start" : ""}.${reason ? ` Reason: ${reason}` : ""}`,
             isSystem:       true,
             isRead:         false, // der Employer sieht den Hinweis als ungelesen
           },
         });
       }
-      return true;
+      return { status: 200, anyLate };
     });
-    if (!claimed) return res.status(409).json({ error: "This shift was already changed.", code: "CHANGED" });
+    if (result.status !== 200) return res.status(result.status).json(result.body);
 
-    events.workerCancelledShift(applyId); // fire-and-forget: Employer informieren, bei < 24 h den Worker erinnern
-    return res.json({ ok: true, lateCancellation: decision.lateCancellation });
+    events.workerCancelledShift(applyId, { late: result.anyLate }); // fire-and-forget: Employer informieren, bei < 24 h den Worker erinnern
+    return res.json({ ok: true, lateCancellation: result.anyLate });
   } catch (err) {
+    if (err?.code === "P2002" || err?.code === "P2034") return res.status(409).json({ error: "This shift was already changed.", code: "CHANGED" });
     console.error("POST /worker/applications/:id/cancel error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─────────────────────────────────────────────
+// POST /worker/applications/:applyId/shifts/:shiftId/cancel  { reason? }
+// Eine einzelne gebuchte Schicht absagen. < 24 h vor DIESER Schicht = kurzfristig (ShiftCancellation, zaehlt in der
+// Zuverlaessigkeit). Der Platz wird frei (shiftIds). War es die letzte gebuchte Schicht, ist die Bewerbung zurueckgezogen
+// (wie beim Komplett-Storno). Regeln: utils/shiftCancel.js
+// ─────────────────────────────────────────────
+router.post("/applications/:applyId/shifts/:shiftId/cancel", requireAuth, requireVerifiedEmail, async (req, res) => {
+  try {
+    const workerId = req.auth.sub;
+    const { applyId, shiftId } = req.params;
+    const now = new Date();
+    const reason = normalizeCancellationReason(req.body?.reason);
+
+    const result = await prisma.$transaction(async (tx) => {
+      const apply = await tx.apply.findUnique({ where: { id: applyId }, include: CANCEL_APPLY_INCLUDE });
+      if (!apply)                    return { status: 404, body: { error: "Application not found" } };
+      if (apply.userId !== workerId) return { status: 403, body: { error: "Forbidden" } };
+
+      const priorLate = apply.shiftCancellations.some((c) => c.late);
+      const decision = evaluateShiftCancel(apply, apply.job, shiftId, { priorLate, now });
+      if (!decision.ok) return { status: decision.status, body: { error: decision.error, code: decision.code } };
+
+      const label = shiftLabel(decision.shift);
+      const lateText = decision.late ? " less than 24 hours before the start" : "";
+      const reasonText = reason ? ` Reason: ${reason}` : "";
+
+      // Bedingtes Update gegen Race/Doppelklick: nur wenn sich die gebuchten Schichten seit dem Lesen nicht geaendert haben
+      const { count } = await tx.apply.updateMany({
+        where: { id: applyId, userId: workerId, status: "accepted", shiftIds: { equals: apply.shiftIds } },
+        data: decision.isLast
+          ? { status: rel.CANCELLED_BY_WORKER, cancelledAt: now, lateCancellation: decision.applyLate, cancelReason: reason, shiftIds: decision.bookedIds }
+          : { shiftIds: decision.remainingIds },
+      });
+      if (count !== 1) return { status: 409, body: { error: "This shift was already changed.", code: "CHANGED" } };
+      await tx.shiftCancellation.createMany({ data: [{ applyId, shiftId, cancelledAt: now, late: decision.late, reason }], skipDuplicates: true });
+      if (apply.conversation) {
+        if (decision.isLast) await tx.conversation.update({ where: { id: apply.conversation.id }, data: { status: "cancelled" } });
+        await tx.message.create({
+          data: {
+            conversationId: apply.conversation.id,
+            senderId:       workerId,
+            text:           decision.isLast
+              ? `The worker cancelled the shift ${label}${lateText}. This was their last shift, so the application is withdrawn.${reasonText}`
+              : `The worker cancelled the shift ${label}${lateText}. Their other booked shifts still stand.${reasonText}`,
+            isSystem:       true,
+            isRead:         false,
+          },
+        });
+      }
+      return { status: 200, decision, label };
+    });
+    if (result.status !== 200) return res.status(result.status).json(result.body);
+
+    const { decision, label } = result;
+    events.workerCancelledShift(applyId, { late: decision.late, shiftLabel: label, partial: !decision.isLast });
+    return res.json({ ok: true, lateCancellation: decision.late, applicationWithdrawn: decision.isLast, remainingShiftIds: decision.isLast ? [] : decision.remainingIds });
+  } catch (err) {
+    if (err?.code === "P2002" || err?.code === "P2034") return res.status(409).json({ error: "This shift was already changed.", code: "CHANGED" });
+    console.error("POST /worker/applications/:id/shifts/:shiftId/cancel error:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
 });

@@ -92,10 +92,26 @@ struct ApplicationCard: View {
             quickActions
 
             // Bestaetigte, noch nicht begonnene Schicht stornieren (< 24 h = kurzfristig, Warnung im Dialog)
-            if status == .confirmed, item.canCancel == true {
-                Divider().padding(.horizontal, 14)
-                CancelShiftButton(applyId: item.id, jobTitle: item.jobTitle,
-                                  lateIfCancelledNow: item.lateIfCancelledNow == true) { _ in onChanged() }
+            // Bestaetigte, noch nicht begonnene Schicht(en) absagen (< 24 h = kurzfristig, Warnung im Dialog).
+            // Mit gebuchten Schichten immer pro Schicht; ohne Schichtliste (Altbestand) die ganze Buchung.
+            let booked = item.bookedShifts ?? []
+            if status == .confirmed {
+                if booked.isEmpty {
+                    if item.canCancel == true {
+                        Divider().padding(.horizontal, 14)
+                        CancelShiftButton(applyId: item.id, jobTitle: item.jobTitle,
+                                          lateIfCancelledNow: item.lateIfCancelledNow == true) { _ in onChanged() }
+                    }
+                } else {
+                    ForEach(booked.filter { $0.canCancel == true }) { shift in
+                        Divider().padding(.horizontal, 14)
+                        CancelShiftButton(applyId: item.id, jobTitle: item.jobTitle,
+                                          lateIfCancelledNow: shift.lateIfCancelledNow == true,
+                                          shiftId: shift.id,
+                                          shiftLabel: booked.count > 1 ? (shift.fullLabel.isEmpty ? shift.shortLabel : shift.fullLabel) : nil,
+                                          isLastShift: booked.count == 1) { _ in onChanged() }
+                    }
+                }
             }
 
             if status == .applied {

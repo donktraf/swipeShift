@@ -242,7 +242,7 @@ router.get("/reliability", handle("GET /admin/reliability", async (req, res) => 
     where: rel.reliabilityRowsWhere(now, rel.ADMIN_WINDOW_DAYS),
     select: {
       userId: true, status: true, attendance: true, disputedAt: true, disputeResolvedAt: true,
-      lateCancellation: true, cancelledAt: true, shiftIds: true, job: { select: { endTime: true, startTime: true, shifts: true } },
+      lateCancellation: true, cancelledAt: true, shiftIds: true, shiftCancellations: { select: { late: true, cancelledAt: true } }, job: { select: { endTime: true, startTime: true, shifts: true } },
     },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }], // deterministisch, falls das Limit greift
     take: 5000,

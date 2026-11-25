@@ -35,6 +35,10 @@ struct CalendarEntry: Identifiable, Equatable {
     /// Bestaetigte, noch nicht begonnene Schicht → "Cancel shift"; < 24 h = kurzfristige Stornierung
     let canCancel: Bool
     let lateIfCancelledNow: Bool
+    /// Gesetzt bei Eintraegen einer von mehreren gebuchten Schichten → nur diese Schicht absagen
+    var shiftId: String? = nil
+    /// Die einzige gebuchte Schicht → Dialog weist darauf hin, dass die Bewerbung zurueckgezogen wird
+    var isLastShift = false
     /// Vom Employer erfasste Anwesenheit (vergangene Schichten) + Stand eines Einspruchs
     let attendance: String?
     let disputeStatus: String?
@@ -76,8 +80,17 @@ struct CalendarEntry: Identifiable, Equatable {
         category = item.category == "—" ? nil : item.category
         distanceMiles = item.distanceMiles
         jobNotes = item.jobNotes
-        canCancel = item.canCancel == true
-        lateIfCancelledNow = item.lateIfCancelledNow == true
+        let bookedCount = item.bookedShifts?.count ?? 0
+        if let cancelShift = shift ?? (bookedCount == 1 ? item.bookedShifts?.first : nil) {
+            // Mit Schichtliste immer die Einzel-Absage; Altbestand ohne Liste → ganze Buchung (shiftId nil)
+            shiftId = cancelShift.id
+            isLastShift = bookedCount == 1
+            canCancel = cancelShift.canCancel == true
+            lateIfCancelledNow = cancelShift.lateIfCancelledNow == true
+        } else {
+            canCancel = item.canCancel == true
+            lateIfCancelledNow = item.lateIfCancelledNow == true
+        }
         attendance = item.attendance
         disputeStatus = item.disputeStatus
     }

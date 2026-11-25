@@ -409,6 +409,7 @@ model Apply {
   savedApplicant SavedApplicant?
   workerReview   WorkerReview?
   reviewDraft    ReviewDraft?
+  shiftCancellations ShiftCancellation[]
 
   @@unique([userId, jobId])
   @@index([userId])
@@ -647,4 +648,20 @@ model ModerationAction {
 
   @@index([targetUserId, createdAt])
   @@index([reportId])
+}
+
+// Einzelne gebuchte Schicht, die der Worker abgesagt hat (Teil-Absage oder letzte Schicht). late = < 24 h vor DIESER
+// Schicht → zaehlt in der Zuverlaessigkeit (pro Schicht eine Zaehlung, siehe utils/shiftCancel.js)
+model ShiftCancellation {
+  id          String   @id @default(uuid())
+  applyId     String
+  shiftId     String
+  cancelledAt DateTime @default(now())
+  late        Boolean  @default(false)
+  reason      String?
+
+  apply Apply @relation(fields: [applyId], references: [id], onDelete: Cascade)
+
+  @@unique([applyId, shiftId])
+  @@index([cancelledAt])
 }

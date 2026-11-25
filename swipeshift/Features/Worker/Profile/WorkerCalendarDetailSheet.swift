@@ -164,7 +164,9 @@ struct CalendarEntryDetailSheet: View {
             }
 
             if entry.canCancel {
-                CancelShiftButton(applyId: entry.applyId, jobTitle: entry.title, lateIfCancelledNow: entry.lateIfCancelledNow) { _ in
+                CancelShiftButton(applyId: entry.applyId, jobTitle: entry.title, lateIfCancelledNow: entry.lateIfCancelledNow,
+                                  shiftId: entry.shiftId, shiftLabel: (entry.shiftId == nil || entry.isLastShift) ? nil : entry.shiftText,
+                                  isLastShift: entry.isLastShift) { _ in
                     onCancelled()
                     dismiss()
                 }

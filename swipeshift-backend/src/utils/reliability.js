@@ -10,9 +10,9 @@
 //   - Prozentwert erst ab 3 abgeschlossenen Schichten, davor "New".
 
 const { bookedEnd } = require("./shiftBooking");
+const { LATE_CANCEL_HOURS, isLateCancellation, countLateCancellations } = require("./lateCancel");
 
 const LATE_AFTER_MINUTES = 15;
-const LATE_CANCEL_HOURS = 24;
 const AUTO_ATTEND_HOURS = 48;
 const WINDOW_DAYS = 365;          // Worker-/Employer-Ansicht: letzte 12 Monate
 const ADMIN_WINDOW_DAYS = 90;     // Admin-Hinweis: letzte 90 Tage
@@ -41,14 +41,6 @@ function toDate(value) {
 
 function normalizeAttendance(value) {
   return typeof value === "string" && ATTENDANCE_VALUES.includes(value) ? value : null;
-}
-
-// Weniger als 24 h bis zum Schichtbeginn (und noch nicht begonnen) → kurzfristig
-function isLateCancellation(startTime, now = new Date()) {
-  const start = toDate(startTime);
-  if (!start) return false;
-  const ms = start.getTime() - new Date(now).getTime();
-  return ms < LATE_CANCEL_HOURS * HOUR_MS;
 }
 
 // Darf der Worker diese Schicht stornieren? → { ok } | { ok:false, status, code, error }
@@ -168,7 +160,7 @@ function pluralize(n, one, many) {
 }
 
 /**
- * @param {Array} rows { status, attendance, disputedAt, disputeResolvedAt, lateCancellation, cancelledAt, shiftIds?, job: { endTime, startTime?, shifts? } }
+ * @param {Array} rows { status, attendance, disputedAt, disputeResolvedAt, lateCancellation, cancelledAt, shiftIds?, shiftCancellations?: [{ late, cancelledAt }], job: { endTime, startTime?, shifts? } }
  * @returns {{ finishedShifts, attended, late, noShows, lateCancellations, showUpRate, isNew, text }}
  */
 function summarizeReliability(rows, now = new Date(), { windowDays = WINDOW_DAYS } = {}) {
@@ -176,11 +168,9 @@ function summarizeReliability(rows, now = new Date(), { windowDays = WINDOW_DAYS
   let attended = 0, late = 0, noShows = 0, lateCancellations = 0;
   for (const r of Array.isArray(rows) ? rows : []) {
     if (!r) continue;
-    if (r.status === CANCELLED_BY_WORKER) {
-      const at = toDate(r.cancelledAt);
-      if (r.lateCancellation === true && at && at.getTime() >= since) lateCancellations += 1;
-      continue;
-    }
+    // Kurzfristige Absagen: je Schicht eine Zaehlung (utils/shiftCancel.js); Teil-Absagen zaehlen auch bei laufender Buchung
+    lateCancellations += countLateCancellations(r, since);
+    if (r.status === CANCELLED_BY_WORKER) continue;
     if (r.status !== "accepted" || !normalizeAttendance(r.attendance)) continue;
     if (r.disputedAt && !r.disputeResolvedAt) continue; // Einspruch offen → zaehlt noch nicht
     const end = toDate(bookedEnd(r.job, r.shiftIds)); // Ende der gebuchten Schichten
@@ -232,6 +222,7 @@ function reliabilityRowsWhere(now = new Date(), windowDays = WINDOW_DAYS) {
     OR: [
       { status: "accepted", attendance: { in: ATTENDANCE_VALUES }, job: { endTime: { gte: since } } },
       { status: CANCELLED_BY_WORKER, lateCancellation: true, cancelledAt: { gte: since } },
+      { shiftCancellations: { some: { late: true, cancelledAt: { gte: since } } } }, // kurzfristige Teil-Absagen
     ],
   };
 }

@@ -156,19 +156,24 @@ const attendanceReminder = safe("attendanceReminder", async (jobId, { pendingCou
 });
 
 // Worker hat eine angenommene Schicht storniert → Employer informieren; bei kurzfristigem Storno zusaetzlich den Worker erinnern
-const workerCancelledShift = safe("workerCancelledShift", async (applyId) => {
+// opts (Einzel-Absage einer Schicht): { late, shiftLabel, partial } — partial = Bewerbung bleibt angenommen;
+// late = diese Schicht kurzfristig (statt Apply-Flag, das auch fruehere Teil-Absagen einschliesst)
+const workerCancelledShift = safe("workerCancelledShift", async (applyId, opts = {}) => {
   const apply = await prisma.apply.findUnique({
     where: { id: applyId },
     select: { userId: true, jobId: true, status: true, lateCancellation: true, job: { select: { title: true, employerId: true } } },
   });
-  if (!apply || apply.status !== "cancelled_by_worker") return;
-  if (apply.lateCancellation) {
+  if (!apply || apply.status !== (opts.partial ? "accepted" : "cancelled_by_worker")) return;
+  const late = opts.late ?? apply.lateCancellation;
+  if (late) {
     await notify(apply.userId, copy.lateCancellationRecorded({ jobTitle: apply.job.title, jobId: apply.jobId }));
   }
   const employerId = apply.job.employerId;
   if (!employerId || await blockedBetween(employerId, apply.userId)) return;
   const workerName = await displayNameOf(apply.userId, "A worker");
-  await notify(employerId, copy.workerCancelledShift({ workerName, jobTitle: apply.job.title, jobId: apply.jobId, late: apply.lateCancellation }));
+  await notify(employerId, copy.workerCancelledShift({
+    workerName, jobTitle: apply.job.title, jobId: apply.jobId, late, shiftLabel: opts.shiftLabel, withdrawn: !opts.partial && !!opts.shiftLabel,
+  }));
 });
 
 // Worker: Admin hat den Anwesenheits-Einspruch entschieden

@@ -7,6 +7,8 @@
 //   1. Past shift   — gestern 09:00-13:00 (LA-Zeit), 2 Worker accepted, Attendance offen
 //                     → Anwesenheit erfassen / No-Show / Widerspruch / Zahlung
 //   2. Starts soon  — beginnt in ~5 h, 3 h lang, Worker 2 accepted → "late cancellation"-Warnung (< 24 h)
+//   3. Multi shift  — 3 Schichten (in ~6 h, ~30 h, ~54 h), Worker 2 accepted fuer alle drei
+//                     → "Cancel shift" pro Schicht (eine < 24 h = kurzfristig, zwei > 24 h)
 // Idempotent: ersetzt vorher alle "[TEST] "-Jobs des Employers, die zusaetzlich den Seed-Marker in der Beschreibung
 // tragen (Apply/Conversation/Message/Review... per Cascade; UserReports der Conversations werden vorher entfernt).
 // Alles in EINER Transaktion.
@@ -133,9 +135,16 @@ async function main() {
   const soonStart = new Date(Math.ceil((now.getTime() + 5 * HOUR) / 60_000) * 60_000);
   const soonShift = makeShift("s1", soonStart, new Date(soonStart.getTime() + 3 * HOUR), pay);
 
+  const multiStart = (h) => new Date(Math.ceil((now.getTime() + h * HOUR) / 60_000) * 60_000);
+  const multiShifts = [6, 30, 54].map((h, i) => {
+    const st = multiStart(h);
+    return makeShift(`s${i + 1}`, st, new Date(st.getTime() + 3 * HOUR), pay);
+  });
+
   const specs = [
-    { title: "Past shift", shift: pastShift, accepted: workers },
-    { title: "Starts soon", shift: soonShift, accepted: [workers[1]] },
+    { title: "Past shift", shifts: [pastShift], accepted: workers },
+    { title: "Starts soon", shifts: [soonShift], accepted: [workers[1]] },
+    { title: "Multi shift", shifts: multiShifts, accepted: [workers[1]] },
   ];
 
   const created = await prisma.$transaction(async (tx) => {
@@ -157,7 +166,7 @@ async function main() {
     for (const spec of specs) {
       const data = buildJobData({
         title: PREFIX + spec.title, company, location: "Los Angeles, CA", lat: 34.0522, lng: -118.2437,
-        category: "Hospitality", tags: ["Test"], payAmount: pay, shifts: [spec.shift], openSpots: 2,
+        category: "Hospitality", tags: ["Test"], payAmount: pay, shifts: spec.shifts, openSpots: 2,
         jobDescription: MARKER, tasks: ["Serve guests", "Set up and clean up"],
         dressCode: "Black shirt, dark trousers", experienceLevel: "Beginner", paymentMethod: "Same-day Pay", contractType: "Temporary",
       });
@@ -170,7 +179,7 @@ async function main() {
       for (const w of spec.accepted) {
         const acceptedAt = new Date();
         const apply = await tx.apply.create({
-          data: { userId: w.id, jobId: job.id, shiftIds: [spec.shift.id], status: "accepted", respondedAt: acceptedAt, acceptedAt },
+          data: { userId: w.id, jobId: job.id, shiftIds: spec.shifts.map((x) => x.id), status: "accepted", respondedAt: acceptedAt, acceptedAt },
         });
         const conv = await tx.conversation.create({ data: { applyId: apply.id, jobId: job.id, workerId: w.id, employerId: employer.id } });
         // Wie beim echten Apply: System-Nachricht mit senderId = Worker
@@ -188,13 +197,15 @@ async function main() {
 
   console.log(`\nTest data created for employer ${employer.email} (workers: ${workers.map((w) => w.email).join(", ")})\n`);
   for (const { job, spec } of created) {
-    console.log(`${job.title}\n  id:       ${job.id}\n  shift:    ${spec.shift.date} ${spec.shift.timeRange} (${TIME_ZONE}), ${spec.shift.startTimeISO} -> ${spec.shift.endTimeISO}\n  accepted: ${spec.accepted.map((w) => w.email).join(", ")}`);
+    console.log(`${job.title}\n  id:       ${job.id}\n  shifts:   ${spec.shifts.map((x) => `${x.id}: ${x.date} ${x.timeRange} (${TIME_ZONE}), ${x.startTimeISO} -> ${x.endTimeISO}`).join("\n            ")}\n  accepted: ${spec.accepted.map((w) => w.email).join(", ")}`);
   }
   console.log(`
 Try in the app:
   - "[TEST] Past shift": as employer record attendance (attended / late / no-show), then as worker dispute a late/no-show,
     and test payment after shift end. Attendance is still open (auto "attended" after 48 h).
   - "[TEST] Starts soon": as ${workers[1].email} cancel the shift -> "late cancellation" warning (< 24 h before start).
+  - "[TEST] Multi shift": as ${workers[1].email} cancel single shifts (first one < 24 h = late warning, the others not);
+    cancelling the last remaining shift withdraws the application.
 Note: no cron marks jobs "completed"; the past job stays "published" (attendance/payment still work after shift end).`);
   return 0;
 }

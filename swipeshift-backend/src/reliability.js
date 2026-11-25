@@ -14,6 +14,7 @@ const BATCH = 200;
 const ROW_SELECT = {
   userId: true, status: true, attendance: true, disputedAt: true, disputeResolvedAt: true,
   lateCancellation: true, cancelledAt: true, shiftIds: true,
+  shiftCancellations: { select: { late: true, cancelledAt: true } }, // kurzfristige Teil-Absagen
   job: { select: { endTime: true, startTime: true, shifts: true } }, // Ende der GEBUCHTEN Schichten (utils/shiftBooking.js)
 };
 

@@ -149,12 +149,14 @@ function lateCancellationRecorded({ jobTitle, jobId }) {
 }
 
 // Employer: ein bestaetigter Worker hat die Schicht storniert
-function workerCancelledShift({ workerName, jobTitle, jobId, late }) {
+// shiftLabel (optional): Einzel-Absage einer Schicht ("Thu, Nov 19 09:00–13:00"); withdrawn: war die letzte gebuchte Schicht
+function workerCancelledShift({ workerName, jobTitle, jobId, late, shiftLabel, withdrawn }) {
   const t = job(jobTitle);
   const w = who(workerName, "A worker");
+  const sl = shiftLabel ? plainLine(shiftLabel, 60) : "";
   return make("jobActivity", {
     title: "Worker cancelled a shift",
-    body: `${w} cancelled their shift for "${t}"${late ? " less than 24 hours before the start" : ""}. The spot is open again.`,
+    body: `${w} cancelled ${sl ? `the shift ${sl}` : "their shift"} for "${t}"${late ? " less than 24 hours before the start" : ""}. The spot is open again.${withdrawn && sl ? " This was their last shift, so the application is withdrawn." : ""}`,
     data: { type: "applicants", jobId },
     subject: `${w} cancelled: ${t}`,
   });
