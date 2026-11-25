@@ -31,7 +31,33 @@ struct swipeShiftApp: App {
                 .onOpenURL { url in
                     handleDeepLink(url)
                 }
+                .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
+                    // Universal Link (https://swipeshift.app/jobs/<id>)
+                    if let url = activity.webpageURL { handleDeepLink(url) }
+                }
         }
+    }
+
+    /// Extrahiert die Job-ID aus `swipeshift://job/<id>` oder `https://(www.)swipeshift.app/jobs/<id>`.
+    /// Gibt nil zurueck bei fremdem Host/Schema, zusaetzlichen Pfadsegmenten oder ungueltiger ID.
+    static func jobId(from url: URL) -> String? {
+        let parts = url.pathComponents.filter { $0 != "/" }
+        let candidate: String?
+        switch url.scheme?.lowercased() {
+        case "swipeshift":
+            guard url.host?.lowercased() == "job", parts.count == 1 else { return nil }
+            candidate = parts[0]
+        case "https":
+            guard let host = url.host?.lowercased(),
+                  host == "swipeshift.app" || host == "www.swipeshift.app",
+                  parts.count == 2, parts[0] == "jobs" else { return nil }
+            candidate = parts[1]
+        default:
+            return nil
+        }
+        guard let id = candidate, id.count <= 64,
+              id.range(of: "^[A-Za-z0-9_-]+$", options: .regularExpression) != nil else { return nil }
+        return id
     }
 
     private func handleDeepLink(_ url: URL) {
@@ -39,8 +65,8 @@ struct swipeShiftApp: App {
         if GIDSignIn.sharedInstance.handle(url) { return }
 
         // Geteilter Job: swipeshift://job/<id> → WorkerHomeView oeffnet das Job-Detail
-        if url.scheme == "swipeshift", url.host == "job",
-           let jobId = url.pathComponents.dropFirst().first, !jobId.isEmpty {
+        // bzw. Universal Link https://swipeshift.app/jobs/<id>
+        if let jobId = Self.jobId(from: url) {
             jobStore.pendingDeepLinkJobId = jobId
             return
         }

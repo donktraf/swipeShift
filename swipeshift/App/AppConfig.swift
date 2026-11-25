@@ -15,7 +15,7 @@ enum AppConfig {
         return URL(string: "http://localhost:3000")! //192.168.0.144
         #else
         // Production / später echte API
-        return URL(string: "https://api.swipeshift.com")!
+        return URL(string: "https://api.swipeshift.app")!
         #endif
     }
     

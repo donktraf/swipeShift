@@ -708,12 +708,13 @@ struct FlowTagsView: View {
 
 /// Baut Text + Link fuer den Share-Button im Job-Detail.
 enum JobShareContent {
-    /// Deep Link `swipeshift://job/<id>` — wird in `swipeShiftApp.handleDeepLink` ausgewertet.
-    /// TODO: Auf Universal Link (z.B. https://swipeshift.app/jobs/<id>) umstellen, sobald die
-    /// Domain live ist + apple-app-site-association hinterlegt ist. Custom-Scheme-Links sind in
-    /// manchen Messengern nicht antippbar und funktionieren nur mit installierter App.
+    /// Web-Link `https://swipeshift.app/jobs/<id>` — oeffnet als Universal Link die App (sobald das
+    /// Associated-Domains-Entitlement gesetzt ist), sonst die Website-Fallback-Seite, die
+    /// `swipeshift://job/<id>` oeffnet. Ausgewertet in `swipeShiftApp.jobId(from:)`.
+    /// TODO: Universal Links aktivieren: Associated Domains `applinks:swipeshift.app` in Xcode
+    /// (benoetigt bezahlten Apple-Developer-Account) + apple-app-site-association auf der Domain.
     static func url(for job: Job) -> URL {
-        URL(string: "swipeshift://job/\(job.id)") ?? URL(string: "swipeshift://")!
+        URL(string: "https://swipeshift.app/jobs/\(job.id)") ?? URL(string: "https://swipeshift.app")!
     }
 
     static func message(for job: Job) -> String {

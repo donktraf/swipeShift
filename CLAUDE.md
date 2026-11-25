@@ -180,6 +180,11 @@ Der ueberwiegende Teil der Wireframe-Anforderungen ist implementiert. Bekannte o
   (bezahlter Apple-Developer-Account). Ausserdem verweisen Privacy/Terms/Guide-Links
   (AccountSettingsView, WorkerProfileView) und support@swipeshift.app bereits auf die Domain,
   die Seiten existieren aber noch nicht — fuer die App-Store-Einreichung Pflicht.
+  Stand 2026-11-25: Teilen nutzt jetzt den Web-Link https://swipeshift.app/jobs/<id>, die App
+  verarbeitet Universal Links (swipeShiftApp.jobId(from:), .onOpenURL + .onContinueUserActivity;
+  swipeshift://job/<id> bleibt Rueckfall) und die Release-Backend-URL ist api.swipeshift.app.
+  Verbleibender Schritt: in Xcode Signing & Capabilities → Associated Domains →
+  `applinks:swipeshift.app` eintragen (nach Apple-Developer-Mitgliedschaft).
 • Einige Bereiche nutzen weiterhin vereinfachte MVP-Logik statt echter Business-Regeln (z.B.
   "recommended"-Sortierung basiert auf Worker.preferredCategories + payAmount, kein echtes Scoring;
   Apply-Status-Feld bei manchen Flows minimal gehalten) — kein Blocker, aber erweiterbar
