@@ -366,10 +366,7 @@ struct PostJobView: View {
     // MARK: - Kategorie
     private var categorySection: some View {
         DSSection("Category", ruled: false) {
-            LazyVGrid(
-                columns: [GridItem(.flexible(), spacing: DS.Spacing.xs), GridItem(.flexible(), spacing: DS.Spacing.xs)],
-                spacing: DS.Spacing.xs
-            ) {
+            DSFlowLayout(spacing: DS.Spacing.xs) {
                 ForEach(JobCategory.all, id: \.name) { cat in
                     DSChip(cat.name, isSelected: selectedCategory == cat.name) {
                         selectedCategory = cat.name

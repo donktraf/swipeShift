@@ -1,6 +1,6 @@
-# SwipeShift Design System (Etappe 1: Fundament)
+# SwipeShift Design System
 
-Neues System unter `DS.*`. Das alte `SS`-Theme (utils/Theme.swift) bleibt bis zur Umstellung der Screens bestehen und wird abgeloest.
+System unter `DS.*`, im ganzen Projekt eingefuehrt (Etappen 1-7). Das alte `SS`-Theme (utils/Theme.swift) wurde entfernt.
 
 ## Tokens
 - **Farben** `DS.Color.*` (DSColor.swift): bg, surface, surface2, border, text, text2, muted, primary, onPrimary, primarySoft, primaryText, success/successSoft, warning/warningSoft, danger/dangerSoft. Alle dynamisch (hell/dunkel). Markenfarbe nur in `Brand` aendern. `DS.Tone` (primary/success/warning/danger/neutral) liefert foreground + soft.
@@ -25,4 +25,6 @@ Neues System unter `DS.*`. Das alte `SS`-Theme (utils/Theme.swift) bleibt bis zu
 4. Abstaende nur aus dem 4er-Raster (`DS.Spacing`), Bildschirmrand 20.
 5. In neuen Views keine hartcodierten Farben, Schriftgroessen, Radien oder Abstaende; immer Tokens.
 6. Interaktive Elemente min. 44pt; Animationen ueber `DS.Motion`/`dsAnimation`; Haptik ueber `DS.Haptics`.
-7. Hintergrund neuer Screens: `.dsBackground()` (nicht `SS.background()`).
+7. Hintergrund neuer Screens: `.dsBackground()` .
+8. Ausnahmen: Sign in with Apple (`.white`-Style), fester heller QR-Hintergrund (TotpSetupView), Monospace-Schrift fuer Codeeingaben, SF-Symbol-Groessen via `.font(.system(size:))`.
+9. Horizontale Chip-/Pill-Reihen in gepolsterten Screens: `ScrollView(.horizontal)` mit `.contentMargins(.horizontal, DS.Spacing.screenEdge, for: .scrollContent)` und `.padding(.horizontal, -DS.Spacing.screenEdge)`, damit nichts hart am Rand abgeschnitten wird.

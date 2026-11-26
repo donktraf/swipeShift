@@ -105,7 +105,7 @@ extension DS {
 }
 
 extension View {
-    /// Vollflaechiger DS-Hintergrund (Ersatz fuer SS.background() in neuen Screens).
+    /// Vollflaechiger DS-Hintergrund (einheitlicher Screen-Hintergrund).
     func dsBackground() -> some View {
         background(DS.Color.bg.ignoresSafeArea())
     }

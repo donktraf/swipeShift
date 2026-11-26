@@ -6,6 +6,49 @@
 //
 
 import SwiftUI
+import Combine
+
+/// Gemeinsame Fehleranzeige fuer die Admin-Screens.
+private struct AdminErrorBlock: View {
+    let message: String
+    let retry: () -> Void
+
+    var body: some View {
+        VStack(spacing: DS.Spacing.sm) {
+            Text(message)
+                .dsFont(.callout)
+                .foregroundStyle(DS.Color.danger)
+                .multilineTextAlignment(.center)
+            Button("Try again", action: retry)
+                .buttonStyle(.ds(.primary, size: .medium, fullWidth: false))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, DS.Spacing.xl)
+    }
+}
+
+/// Skeleton-Platzhalter fuer Karten-Listen.
+private struct AdminCardSkeleton: View {
+    var count: Int = 3
+
+    var body: some View {
+        VStack(spacing: DS.Spacing.sm) {
+            ForEach(0..<count, id: \.self) { _ in
+                DSCard {
+                    HStack(spacing: DS.Spacing.sm) {
+                        Circle().fill(DS.Color.surface2).frame(width: 44, height: 44)
+                        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                            DSSkeletonBlock(width: 140, height: 14)
+                            DSSkeletonBlock(width: 200, height: 12)
+                            DSSkeletonBlock(width: 100, height: 12)
+                        }
+                    }
+                }
+            }
+        }
+        .dsSkeleton(true)
+    }
+}
 
 struct AdminReportsView: View {
     private enum Mode { case open, closed, reliability }
@@ -15,108 +58,100 @@ struct AdminReportsView: View {
     @State private var reports: [AdminReport] = []
     @State private var isLoading = true
     @State private var loadError: String?
+    @StateObject private var reliability = AdminReliabilityModel()
 
     var body: some View {
         SubScreenShell(title: "Reports") {
-            VStack(spacing: 16) {
+            VStack(spacing: DS.Spacing.md) {
                 Picker("Status", selection: $mode) {
                     Text("Open").tag(Mode.open)
                     Text("Closed").tag(Mode.closed)
                     Text("Reliability").tag(Mode.reliability)
                 }
                 .pickerStyle(.segmented)
-                .padding(.horizontal, 16)
+                .padding(.horizontal, DS.Spacing.screenEdge)
 
                 content
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, DS.Spacing.screenEdge)
             }
         }
-        .task(id: mode) { if mode != .reliability { await load() } }
+        .refreshable {
+            if mode == .reliability { await reliability.load(showSkeleton: false) } else { await load(showSkeleton: false) }
+        }
+        .task(id: mode) {
+            if mode == .reliability { await reliability.load(showSkeleton: reliability.data == nil) } else { await load() }
+        }
+        .onChange(of: mode) { _, _ in DS.Haptics.selection() }
     }
 
     @ViewBuilder
     private var content: some View {
         if mode == .reliability {
-            AdminReliabilitySection()
+            AdminReliabilitySection(model: reliability)
         } else if isLoading {
-            ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
+            AdminCardSkeleton()
         } else if let loadError {
-            VStack(spacing: 10) {
-                Text(loadError).font(.system(size: 13)).foregroundColor(.red).multilineTextAlignment(.center)
-                Button("Try again") { Task { await load() } }.buttonStyle(SSPrimaryButtonStyle())
-            }
-            .padding(.vertical, 24)
+            AdminErrorBlock(message: loadError) { Task { await load() } }
         } else if reports.isEmpty {
-            VStack(spacing: 8) {
-                Image(systemName: "checkmark.shield")
-                    .font(.system(size: 28)).foregroundColor(.secondary)
-                Text(showClosed ? "No closed reports yet." : "No open reports. All clear.")
-                    .font(.system(size: 14)).foregroundColor(.secondary)
-            }
-            .frame(maxWidth: .infinity).padding(.vertical, 40)
+            DSEmptyState(
+                systemIcon: "checkmark.shield",
+                title: showClosed ? "No closed reports" : "All clear",
+                message: showClosed ? "No closed reports yet." : "No open reports. All clear."
+            )
         } else {
-            VStack(spacing: 12) {
+            VStack(spacing: DS.Spacing.sm) {
                 ForEach(reports) { report in
                     NavigationLink {
-                        AdminReportDetailView(reportId: report.id) { Task { await load() } }
+                        AdminReportDetailView(reportId: report.id) { Task { await load(showSkeleton: false) } }
                     } label: { card(report) }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.dsPressable)
+                    .simultaneousGesture(TapGesture().onEnded { DS.Haptics.light() })
                 }
             }
         }
     }
 
     private func card(_ r: AdminReport) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            ChatAvatar(photoUrl: nil, emoji: r.reported.initial, size: 44)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(r.reported.name).font(.system(size: 15, weight: .semibold)).lineLimit(1)
-                Text("\(r.reported.roleLabel) · \(r.reasonLabel)")
-                    .font(.system(size: 12)).foregroundColor(.secondary)
-                HStack(spacing: 6) {
-                    if showClosed {
-                        pill(r.resolutionLabel ?? "Closed", color: .gray)
-                    } else {
-                        pill("\(r.openReportCount) report\(r.openReportCount == 1 ? "" : "s") · \(r.openReporterCount) reporter\(r.openReporterCount == 1 ? "" : "s")",
-                             color: r.openReporterCount >= 3 ? .red : .orange)
+        DSCard {
+            HStack(alignment: .top, spacing: DS.Spacing.sm) {
+                ChatAvatar(photoUrl: nil, emoji: r.reported.initial, size: 44)
+                VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                    Text(r.reported.name).dsFont(.headline).foregroundStyle(DS.Color.text).lineLimit(1)
+                    Text("\(r.reported.roleLabel) · \(r.reasonLabel)")
+                        .dsFont(.caption).foregroundStyle(DS.Color.text2)
+                    HStack(spacing: DS.Spacing.xs) {
+                        if showClosed {
+                            DSBadge(r.resolutionLabel ?? "Closed", .completed)
+                        } else {
+                            DSBadge("\(r.openReportCount) report\(r.openReportCount == 1 ? "" : "s") · \(r.openReporterCount) reporter\(r.openReporterCount == 1 ? "" : "s")",
+                                    .tone(r.openReporterCount >= 3 ? .danger : .warning))
+                        }
+                        if r.reported.isDeleted {
+                            DSBadge(r.reported.isEmailBanned ? "Deleted account · email banned" : "Deleted account",
+                                    r.reported.isEmailBanned ? .cancelled : .completed)
+                        } else if r.reported.restriction.isRestricted {
+                            DSBadge(r.reported.restriction.label, .cancelled)
+                        }
                     }
-                    if r.reported.isDeleted {
-                        pill(r.reported.isEmailBanned ? "Deleted account · email banned" : "Deleted account", color: r.reported.isEmailBanned ? .red : .gray)
-                    } else if r.reported.restriction.isRestricted {
-                        pill(r.reported.restriction.label, color: .red)
-                    }
+                    Text((showClosed ? (r.resolvedAt ?? r.createdAt) : r.createdAt).formatted(date: .abbreviated, time: .shortened))
+                        .dsFont(.caption).foregroundStyle(DS.Color.muted)
                 }
-                Text((showClosed ? (r.resolvedAt ?? r.createdAt) : r.createdAt).formatted(date: .abbreviated, time: .shortened))
-                    .font(.system(size: 11)).foregroundColor(.secondary)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(DS.Color.muted)
             }
-            Spacer(minLength: 0)
-            Image(systemName: "chevron.right")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(.secondary.opacity(0.4))
         }
-        .padding(14)
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: SS.cardRadius))
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
-    }
-
-    private func pill(_ text: String, color: Color) -> some View {
-        Text(text)
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundColor(color)
-            .padding(.horizontal, 8).padding(.vertical, 3)
-            .background(color.opacity(0.12))
-            .clipShape(Capsule())
     }
 
     @MainActor
-    private func load() async {
-        isLoading = true
+    private func load(showSkeleton: Bool = true) async {
+        if showSkeleton { isLoading = true }
         loadError = nil
         do {
             reports = try await APIClient.shared.fetchAdminReports(closed: showClosed)
         } catch {
-            loadError = error.localizedDescription
+            if !(error is CancellationError) { loadError = error.localizedDescription }
         }
         isLoading = false
     }
@@ -141,20 +176,18 @@ struct AdminReportDetailView: View {
 
     var body: some View {
         SubScreenShell(title: "Report") {
-            VStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: DS.Spacing.lg) {
                 if isLoading {
-                    ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
+                    AdminCardSkeleton(count: 2)
                 } else if let loadError {
-                    VStack(spacing: 10) {
-                        Text(loadError).font(.system(size: 13)).foregroundColor(.red).multilineTextAlignment(.center)
-                        Button("Try again") { Task { await load() } }.buttonStyle(SSPrimaryButtonStyle())
-                    }
+                    AdminErrorBlock(message: loadError) { Task { await load() } }
                 } else if let detail {
                     body(detail)
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, DS.Spacing.screenEdge)
         }
+        .refreshable { await load(showSkeleton: false) }
         .task { await load() }
         .confirmationDialog(
             confirmTitle,
@@ -211,179 +244,151 @@ struct AdminReportDetailView: View {
     @ViewBuilder
     private func body(_ d: AdminReportDetail) -> some View {
         let r = d.report
-        card {
-            HStack(spacing: 12) {
+        DSCard {
+            HStack(spacing: DS.Spacing.sm) {
                 ChatAvatar(photoUrl: r.reported.photoUrl, emoji: r.reported.initial, size: 48)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(r.reported.name).font(.system(size: 16, weight: .semibold))
+                VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
+                    Text(r.reported.name).dsFont(.headline).foregroundStyle(DS.Color.text)
                     Text("\(r.reported.roleLabel) · reported for \(r.reasonLabel.lowercased())")
-                        .font(.system(size: 12)).foregroundColor(.secondary)
+                        .dsFont(.caption).foregroundStyle(DS.Color.text2)
                     if r.reported.isDeleted {
                         let when = r.reported.deletedAt.map { " on \($0.formatted(date: .abbreviated, time: .omitted))" } ?? ""
-                        Text("Deleted account\(r.reported.deletedName.map { " (\($0))" } ?? "")\(when)")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.secondary)
+                        DSBadge("Deleted account\(r.reported.deletedName.map { " (\($0))" } ?? "")\(when)", .completed)
+                            .padding(.top, DS.Spacing.xxs)
                     } else {
-                        Text(r.reported.restriction.label)
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(r.reported.restriction.isRestricted ? .red : .green)
+                        DSBadge(r.reported.restriction.label, r.reported.restriction.isRestricted ? .cancelled : .upcoming)
+                            .padding(.top, DS.Spacing.xxs)
                     }
                 }
-                Spacer()
+                Spacer(minLength: 0)
             }
         }
 
-        section("Reporter notes (\(d.reports.count))") {
+        DSSection("Reporter notes (\(d.reports.count))") {
             ForEach(d.reports) { n in
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
                     Text("\(n.reporter.name) · \(AdminReport.label(for: n.reason))")
-                        .font(.system(size: 13, weight: .semibold))
+                        .dsFont(.callout).fontWeight(.semibold).foregroundStyle(DS.Color.text)
                     Text(n.details ?? "No details provided.")
-                        .font(.system(size: 13)).foregroundColor(n.details == nil ? .secondary : .primary)
+                        .dsFont(.callout).foregroundStyle(n.details == nil ? DS.Color.muted : DS.Color.text)
                     Text(n.createdAt.formatted(date: .abbreviated, time: .shortened))
-                        .font(.system(size: 11)).foregroundColor(.secondary)
+                        .dsFont(.caption).foregroundStyle(DS.Color.muted)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                if n.id != d.reports.last?.id { Divider() }
+                .padding(.vertical, DS.Spacing.sm)
+                if n.id != d.reports.last?.id { DSDivider() }
             }
         }
 
         if let convo = d.conversation {
-            section("Chat transcript (read-only)") {
+            DSSection("Chat transcript (read-only)") {
                 Text(([convo.jobTitle].compactMap { $0 } + convo.participants.map { "\($0.name) (\($0.roleLabel))" }).joined(separator: " · "))
-                    .font(.system(size: 12)).foregroundColor(.secondary)
+                    .dsFont(.caption).foregroundStyle(DS.Color.text2)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, DS.Spacing.xs)
                 if convo.messages.isEmpty {
-                    Text("No messages.").font(.system(size: 13)).foregroundColor(.secondary)
+                    Text("No messages.").dsFont(.callout).foregroundStyle(DS.Color.muted)
+                        .padding(.vertical, DS.Spacing.xs)
                 }
-                ForEach(convo.messages) { msg in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(msg.isSystem ? "System" : (convo.participants.first { $0.id == msg.senderId }?.name ?? "User"))
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(msg.senderId == r.reported.id ? .red : .secondary)
-                        Text(msg.text).font(.system(size: 13))
-                        Text(msg.createdAt.formatted(date: .abbreviated, time: .shortened))
-                            .font(.system(size: 10)).foregroundColor(.secondary)
+                VStack(spacing: DS.Spacing.xs) {
+                    ForEach(convo.messages) { msg in
+                        VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
+                            Text(msg.isSystem ? "System" : (convo.participants.first { $0.id == msg.senderId }?.name ?? "User"))
+                                .dsFont(.caption).fontWeight(.semibold)
+                                .foregroundStyle(msg.senderId == r.reported.id ? DS.Color.danger : DS.Color.text2)
+                            Text(msg.text).dsFont(.callout).foregroundStyle(DS.Color.text)
+                            Text(msg.createdAt.formatted(date: .abbreviated, time: .shortened))
+                                .dsFont(.caption).foregroundStyle(DS.Color.muted)
+                        }
+                        .padding(DS.Spacing.sm)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(DS.Color.surface2, in: RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
                     }
-                    .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color(uiColor: .secondarySystemGroupedBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
+                .padding(.bottom, DS.Spacing.sm)
             }
         }
 
-        section("Moderation history") {
+        DSSection("Moderation history") {
             if d.history.isEmpty {
-                Text("No previous actions.").font(.system(size: 13)).foregroundColor(.secondary)
+                Text("No previous actions.").dsFont(.callout).foregroundStyle(DS.Color.muted)
+                    .padding(.vertical, DS.Spacing.sm)
             }
             ForEach(d.history) { h in
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(h.actionLabel).font(.system(size: 13, weight: .semibold))
+                VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
+                    Text(h.actionLabel).dsFont(.callout).fontWeight(.semibold).foregroundStyle(DS.Color.text)
                     Text("\(h.admin?.name ?? "System") · \(h.createdAt.formatted(date: .abbreviated, time: .shortened))")
-                        .font(.system(size: 11)).foregroundColor(.secondary)
-                    if let n = h.note { Text(n).font(.system(size: 12)) }
+                        .dsFont(.caption).foregroundStyle(DS.Color.muted)
+                    if let n = h.note { Text(n).dsFont(.caption).foregroundStyle(DS.Color.text2) }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, DS.Spacing.sm)
+                if h.id != d.history.last?.id { DSDivider() }
             }
         }
 
         if r.status == "open" {
-            section("Decision") {
-                TextField("Internal note (optional, max 500 characters)", text: $note, axis: .vertical)
-                    .lineLimit(2...4)
-                    .font(.system(size: 14))
-                    .padding(10)
-                    .background(Color(uiColor: .secondarySystemGroupedBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .onChange(of: note) { _, v in if v.count > 500 { note = String(v.prefix(500)) } }
-                if r.reported.isDeleted {
-                    Text("This account was deleted. You can dismiss the report\(r.reported.canBan == true ? " or ban the email address so it can't be used to register again." : ".")")
-                        .font(.system(size: 12)).foregroundColor(.secondary)
-                    if r.reported.canBan == true {
-                        actionButton("Ban email address", icon: "nosign", color: .red, .ban)
+            DSSection("Decision", ruled: false) {
+                VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                    DSTextEditor("Internal note", placeholder: "Optional, max 500 characters", text: $note,
+                                 minLines: 2, maxLines: 4, maxLength: 500)
+                    if r.reported.isDeleted {
+                        Text("This account was deleted. You can dismiss the report\(r.reported.canBan == true ? " or ban the email address so it can't be used to register again." : ".")")
+                            .dsFont(.caption).foregroundStyle(DS.Color.text2)
+                        if r.reported.canBan == true {
+                            actionButton("Ban email address", icon: "nosign", variant: .destructiveSoft, .ban)
+                        }
+                    } else {
+                        actionButton("Warn", icon: "exclamationmark.triangle.fill", variant: .soft, .warn)
                     }
-                } else {
-                    actionButton("Warn", icon: "exclamationmark.triangle.fill", color: .orange, .warn)
+                    if r.reported.isAdmin != true && !r.reported.isDeleted {
+                        actionButton("Suspend 7 days", icon: "pause.circle.fill", variant: .destructiveSoft, .suspend7)
+                        actionButton("Suspend 30 days", icon: "pause.circle.fill", variant: .destructiveSoft, .suspend30)
+                        actionButton("Ban permanently", icon: "nosign", variant: .destructiveSoft, .ban)
+                    }
+                    actionButton("Dismiss report", icon: "checkmark.circle.fill", variant: .secondary, .dismiss)
                 }
-                if r.reported.isAdmin != true && !r.reported.isDeleted {
-                    actionButton("Suspend 7 days", icon: "pause.circle.fill", color: .orange, .suspend7)
-                    actionButton("Suspend 30 days", icon: "pause.circle.fill", color: .red, .suspend30)
-                    actionButton("Ban permanently", icon: "nosign", color: .red, .ban)
-                }
-                actionButton("Dismiss report", icon: "checkmark.circle.fill", color: .green, .dismiss)
             }
         } else if let label = r.resolutionLabel {
-            card { Text("Closed: \(label)").font(.system(size: 14, weight: .semibold)) }
+            DSCard { Text("Closed: \(label)").dsFont(.callout).fontWeight(.semibold).foregroundStyle(DS.Color.text) }
         }
 
         if r.reported.isEmailBanned {
-            Button { showUnbanConfirm = true } label: {
-                Text("Unban email").font(.system(size: 15, weight: .semibold))
-                    .frame(maxWidth: .infinity).padding(.vertical, 12)
-                    .foregroundColor(SS.primary)
-                    .background(SS.primary.opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-            }
-            .disabled(isWorking)
+            Button { DS.Haptics.light(); showUnbanConfirm = true } label: { Text("Unban email") }
+                .buttonStyle(.ds(.soft, size: .medium))
+                .disabled(isWorking)
         }
 
         if r.reported.restriction.isRestricted && !r.reported.isDeleted {
-            Button { showLiftConfirm = true } label: {
-                Text("Lift restriction").font(.system(size: 15, weight: .semibold))
-                    .frame(maxWidth: .infinity).padding(.vertical, 12)
-                    .foregroundColor(SS.primary)
-                    .background(SS.primary.opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-            }
-            .disabled(isWorking)
+            Button { DS.Haptics.light(); showLiftConfirm = true } label: { Text("Lift restriction") }
+                .buttonStyle(.ds(.soft, size: .medium))
+                .disabled(isWorking)
         }
 
         if let actionError {
-            Text(actionError).font(.system(size: 12)).foregroundColor(.red)
+            Text(actionError).dsFont(.caption).foregroundStyle(DS.Color.danger)
         }
     }
 
-    private func actionButton(_ title: String, icon: String, color: Color, _ action: AdminModerationAction) -> some View {
-        Button { pending = action } label: {
-            HStack {
-                Image(systemName: icon)
-                Text(title).font(.system(size: 15, weight: .semibold))
-                Spacer()
-            }
-            .foregroundColor(color)
-            .padding(12)
-            .background(color.opacity(0.1))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+    private func actionButton(_ title: String, icon: String, variant: DSButtonVariant, _ action: AdminModerationAction) -> some View {
+        Button {
+            DS.Haptics.warning()
+            pending = action
+        } label: {
+            Label(title, systemImage: icon)
         }
+        .buttonStyle(.ds(variant, size: .medium))
         .disabled(isWorking)
     }
 
-    private func card<C: View>(@ViewBuilder _ content: () -> C) -> some View {
-        content()
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(uiColor: .systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: SS.cardRadius))
-            .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
-    }
-
-    private func section<C: View>(_ title: String, @ViewBuilder _ content: () -> C) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(.system(size: 13, weight: .semibold)).foregroundColor(.secondary)
-            card { VStack(alignment: .leading, spacing: 10) { content() } }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
     @MainActor
-    private func load() async {
-        isLoading = true
+    private func load(showSkeleton: Bool = true) async {
+        if showSkeleton { isLoading = true }
         loadError = nil
         do {
             detail = try await APIClient.shared.fetchAdminReport(id: reportId)
         } catch {
-            loadError = error.localizedDescription
+            if !(error is CancellationError) { loadError = error.localizedDescription }
         }
         isLoading = false
     }
@@ -394,6 +399,7 @@ struct AdminReportDetailView: View {
         actionError = nil
         do {
             try await APIClient.shared.applyAdminAction(reportId: reportId, action: action, note: note)
+            DS.Haptics.success()
             onChanged()
             dismiss()
         } catch {
@@ -409,6 +415,7 @@ struct AdminReportDetailView: View {
         actionError = nil
         do {
             try await APIClient.shared.unbanDeletedAccount(id: id)
+            DS.Haptics.success()
             onChanged()
             await load()
         } catch {
@@ -424,6 +431,7 @@ struct AdminReportDetailView: View {
         actionError = nil
         do {
             try await APIClient.shared.liftAdminRestriction(userId: id)
+            DS.Haptics.success()
             onChanged()
             await load()
         } catch {
@@ -435,43 +443,69 @@ struct AdminReportDetailView: View {
 
 // MARK: - Reliability (auffaellige Worker + Anwesenheits-Einsprueche)
 
+@MainActor
+final class AdminReliabilityModel: ObservableObject {
+    @Published var data: AdminReliabilityResponse?
+    @Published var isLoading = true
+    @Published var loadError: String?
+
+    func load(showSkeleton: Bool = true) async {
+        if showSkeleton { isLoading = true }
+        loadError = nil
+        do { data = try await APIClient.shared.fetchAdminReliability() }
+        catch { if !(error is CancellationError) { loadError = error.localizedDescription } }
+        isLoading = false
+    }
+}
+
+private extension AttendanceStatus {
+    var badgeTone: DS.Tone {
+        switch self {
+        case .attended: return .success
+        case .late: return .warning
+        case .noShow: return .danger
+        }
+    }
+}
+
 /// Nur ein Hinweis fuer Admins — es gibt keine automatischen Einschraenkungen und keinen Einfluss auf Instant Match.
 struct AdminReliabilitySection: View {
-    @State private var data: AdminReliabilityResponse?
-    @State private var isLoading = true
-    @State private var loadError: String?
+    @ObservedObject var model: AdminReliabilityModel
     @State private var resolving: AdminAttendanceDispute?
     @State private var actionError: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            if isLoading {
-                ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
-            } else if let loadError {
-                VStack(spacing: 10) {
-                    Text(loadError).font(.system(size: 13)).foregroundColor(.red).multilineTextAlignment(.center)
-                    Button("Try again") { Task { await load() } }.buttonStyle(SSPrimaryButtonStyle())
-                }
-                .padding(.vertical, 24)
-            } else if let data {
-                sectionTitle("Open disputes (\(data.disputes.count))")
-                if data.disputes.isEmpty {
-                    emptyText("No open disputes.")
-                } else {
-                    ForEach(data.disputes) { disputeCard($0) }
+        VStack(alignment: .leading, spacing: DS.Spacing.md) {
+            if model.isLoading {
+                AdminCardSkeleton(count: 2)
+            } else if let loadError = model.loadError {
+                AdminErrorBlock(message: loadError) { Task { await model.load() } }
+            } else if let data = model.data {
+                DSSection("Open disputes (\(data.disputes.count))", ruled: false) {
+                    if data.disputes.isEmpty {
+                        emptyText("No open disputes.")
+                    } else {
+                        VStack(spacing: DS.Spacing.sm) {
+                            ForEach(data.disputes) { disputeCard($0) }
+                        }
+                        .padding(.top, DS.Spacing.xs)
+                    }
                 }
 
-                sectionTitle("Conspicuous workers · last \(data.windowDays) days")
-                Text("2 or more no-shows, or 3 or more late cancellations. This is a hint only, nothing is restricted automatically.")
-                    .font(.system(size: 12)).foregroundColor(.white.opacity(0.7))
-                if data.flagged.isEmpty {
-                    emptyText("No conspicuous workers.")
-                } else {
-                    ForEach(data.flagged) { flaggedCard($0) }
+                DSSection("Conspicuous workers · last \(data.windowDays) days", ruled: false) {
+                    Text("2 or more no-shows, or 3 or more late cancellations. This is a hint only, nothing is restricted automatically.")
+                        .dsFont(.caption).foregroundStyle(DS.Color.text2)
+                        .padding(.bottom, DS.Spacing.xs)
+                    if data.flagged.isEmpty {
+                        emptyText("No conspicuous workers.")
+                    } else {
+                        VStack(spacing: DS.Spacing.sm) {
+                            ForEach(data.flagged) { flaggedCard($0) }
+                        }
+                    }
                 }
             }
         }
-        .task { await load() }
         .confirmationDialog("Decide dispute", isPresented: Binding(get: { resolving != nil }, set: { if !$0 { resolving = nil } }), titleVisibility: .visible) {
             if let d = resolving {
                 Button("Keep entry (\(d.status?.label ?? "as recorded"))") { Task { await resolve(d, uphold: true, attendance: nil) } }
@@ -488,83 +522,59 @@ struct AdminReliabilitySection: View {
         } message: { Text(actionError ?? "") }
     }
 
-    private func sectionTitle(_ text: String) -> some View {
-        Text(text).font(.system(size: 13, weight: .semibold)).foregroundColor(.white.opacity(0.85))
-    }
-
     private func emptyText(_ text: String) -> some View {
-        Text(text).font(.system(size: 13)).foregroundColor(.white.opacity(0.6)).padding(.vertical, 6)
-    }
-
-    private func pill(_ text: String, color: Color) -> some View {
-        Text(text)
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundColor(color)
-            .padding(.horizontal, 8).padding(.vertical, 3)
-            .background(color.opacity(0.12))
-            .clipShape(Capsule())
+        Text(text).dsFont(.callout).foregroundStyle(DS.Color.muted).padding(.vertical, DS.Spacing.xs)
     }
 
     private func flaggedCard(_ f: AdminFlaggedWorker) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            ChatAvatar(photoUrl: nil, emoji: f.worker.initial, size: 44)
-            VStack(alignment: .leading, spacing: 5) {
-                Text(f.worker.name).font(.system(size: 15, weight: .semibold)).lineLimit(1)
-                HStack(spacing: 6) {
-                    if f.noShows > 0 { pill("\(f.noShows) no-show\(f.noShows == 1 ? "" : "s")", color: .red) }
-                    if f.lateCancellations > 0 { pill("\(f.lateCancellations) late cancellation\(f.lateCancellations == 1 ? "" : "s")", color: .orange) }
-                    if f.worker.restriction.isRestricted { pill(f.worker.restriction.label, color: .red) }
+        DSCard {
+            HStack(alignment: .top, spacing: DS.Spacing.sm) {
+                ChatAvatar(photoUrl: nil, emoji: f.worker.initial, size: 44)
+                VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                    Text(f.worker.name).dsFont(.headline).foregroundStyle(DS.Color.text).lineLimit(1)
+                    HStack(spacing: DS.Spacing.xs) {
+                        if f.noShows > 0 { DSBadge("\(f.noShows) no-show\(f.noShows == 1 ? "" : "s")", .cancelled) }
+                        if f.lateCancellations > 0 { DSBadge("\(f.lateCancellations) late cancellation\(f.lateCancellations == 1 ? "" : "s")", .inProgress) }
+                        if f.worker.restriction.isRestricted { DSBadge(f.worker.restriction.label, .cancelled) }
+                    }
+                    Text("\(f.finishedShifts) finished shift\(f.finishedShifts == 1 ? "" : "s") · \(f.late) late")
+                        .dsFont(.caption).foregroundStyle(DS.Color.muted)
                 }
-                Text("\(f.finishedShifts) finished shift\(f.finishedShifts == 1 ? "" : "s") · \(f.late) late")
-                    .font(.system(size: 11)).foregroundColor(.secondary)
+                Spacer(minLength: 0)
             }
-            Spacer(minLength: 0)
         }
-        .padding(14)
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: SS.cardRadius))
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
     }
 
     private func disputeCard(_ d: AdminAttendanceDispute) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(d.worker.name).font(.system(size: 15, weight: .semibold)).lineLimit(1)
-                Spacer()
-                if let status = d.status { pill(status.label, color: status.color) }
+        DSCard {
+            VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                HStack {
+                    Text(d.worker.name).dsFont(.headline).foregroundStyle(DS.Color.text).lineLimit(1)
+                    Spacer()
+                    if let status = d.status { DSBadge(status.label, .tone(status.badgeTone)) }
+                }
+                Text("\(d.jobTitle) · \(d.company)").dsFont(.caption).foregroundStyle(DS.Color.text2)
+                if let note = d.note {
+                    Text("\"\(note)\"").dsFont(.callout).foregroundStyle(DS.Color.text)
+                }
+                if d.employerDeleted == true {
+                    DSBadge("Employer account deleted", .inProgress)
+                }
+                Text("Disputed \(d.disputedAt.formatted(date: .abbreviated, time: .shortened))")
+                    .dsFont(.caption).foregroundStyle(DS.Color.muted)
+                Button("Decide") { DS.Haptics.light(); resolving = d }
+                    .buttonStyle(.ds(.primary, size: .medium))
+                    .padding(.top, DS.Spacing.xxs)
             }
-            Text("\(d.jobTitle) · \(d.company)").font(.system(size: 12)).foregroundColor(.secondary)
-            if let note = d.note {
-                Text("\"\(note)\"").font(.system(size: 13))
-            }
-            if d.employerDeleted == true {
-                Text("Employer account deleted").font(.system(size: 12, weight: .medium)).foregroundColor(.orange)
-            }
-            Text("Disputed \(d.disputedAt.formatted(date: .abbreviated, time: .shortened))")
-                .font(.system(size: 11)).foregroundColor(.secondary)
-            Button("Decide") { resolving = d }
-                .buttonStyle(SSPrimaryButtonStyle())
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: SS.cardRadius))
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
-    }
-
-    @MainActor
-    private func load() async {
-        isLoading = true; loadError = nil
-        do { data = try await APIClient.shared.fetchAdminReliability() }
-        catch { loadError = error.localizedDescription }
-        isLoading = false
     }
 
     @MainActor
     private func resolve(_ d: AdminAttendanceDispute, uphold: Bool, attendance: AttendanceStatus?) async {
         do {
             try await APIClient.shared.resolveAttendanceDispute(applyId: d.applyId, uphold: uphold, attendance: attendance)
-            await load()
+            DS.Haptics.success()
+            await model.load(showSkeleton: false)
         } catch {
             actionError = error.localizedDescription
         }

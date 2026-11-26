@@ -391,6 +391,8 @@ struct AllPostedJobsView: View {
                 }
             }
         }
+        .contentMargins(.horizontal, DS.Spacing.screenEdge, for: .scrollContent)
+        .padding(.horizontal, -DS.Spacing.screenEdge)
     }
 
     // MARK: - Loading / Empty / Error

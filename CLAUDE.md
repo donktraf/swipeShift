@@ -189,28 +189,20 @@ Der ueberwiegende Teil der Wireframe-Anforderungen ist implementiert. Bekannte o
   "recommended"-Sortierung basiert auf Worker.preferredCategories + payAmount, kein echtes Scoring;
   Apply-Status-Feld bei manchen Flows minimal gehalten) — kein Blocker, aber erweiterbar
 6. Design System
-NEU (seit Redesign Etappe 1): Alle neuen/umgebauten Views nutzen das Design-System unter
-swipeShift/UI/Design/ (Details: UI/Design/README.md):
-• Tokens: DS.Color.* (dynamisch hell/dunkel, Markenfarbe nur in `Brand` aendern), `.dsFont(.headline)`
-  (Plus Jakarta Sans, Dynamic Type), DS.Spacing (4er-Raster, Rand 20, Innenabstand 16), DS.Radius,
-  .dsCardShadow(), DS.Motion, DS.Haptics
-• Komponenten: DSSection/DSRow/DSToggleRow (flach), DSCard (nur Antippbares), DSTile (Kennzahlen),
-  DSBadge, DSChip, DSAvatar, .buttonStyle(.ds(...)), DSIconButton, DSTextField/DSTextEditor, DSStepper,
-  DSProgressSteps, .dsSkeleton(), DSEmptyState
-• Regeln: flach fuer Formulare/Einstellungen, Karte nur fuer Antippbares, Kachel fuer Zahlen; keine
-  hartcodierten Farben/Groessen in neuen Views; Reduce Motion beachten
-• Hintergrund neuer Screens: .dsBackground() (statt SS.background())
-ALT (wird abgeloest, Screens werden in spaeteren Etappen umgestellt): SS-Theme (utils/Theme.swift)
-• SS.primary → Markenfarbe (zeigt intern auf Brand.primaryLight)
-• SS.background() → Hintergrund-Gradient
-• SSPrimaryButtonStyle → alter Button-Style
-• DashboardJobCard → wiederverwendbare Job-Card (in JobSectionView definiert)
-• Karten (alt): weisser Hintergrund, RoundedRectangle(cornerRadius: 14), shadow(opacity: 0.04)
-Unveraendert gueltig:
+Alle Views nutzen das Design-System unter swipeshift/UI/Design (Details: swipeshift/UI/Design/README.md):
+• DS.Color.* (Tokens, hell/dunkel), DS.Spacing (Rand 20, Innenabstand 16), DS.Radius, .dsFont(...)
+• Hintergrund: .dsBackground()
+• Buttons: .buttonStyle(.ds(.primary/.secondary/.soft/.destructiveSoft))
+• Formulare/Einstellungen flach (DSSection/DSRow), antippbare Inhalte als DSCard, Status als DSBadge
+• Das alte SS-Theme (SS.primary, SS.background(), SSPrimaryButtonStyle, SSCard, ssTextField, utils/Theme.swift)
+  wurde entfernt — nicht wieder einfuehren. Markenfarbe nur in UI/Design/DSColor.swift (Brand).
 • TabBar: eigener AppTabBar (kein SwiftUI TabView), floating Pill-Design
 • NavigationStack lebt in WorkerHomeView und umschliesst alle Tabs
 • @MainActor fuer alle Store-Funktionen die @Published Properties aendern
 • async/await fuer alle Netzwerk-Calls
+Bewusste Ausnahmen: Sign in with Apple (.white-Style), fester heller QR-Hintergrund in TotpSetupView,
+Monospace-Schrift fuer Codeeingaben (2FA/Backup-Codes), SF-Symbol-Groessen via .font(.system(size:)).
+
 7. Architektur-Entscheidungen (nicht aendern)
 • Auth-Screens: immer fullScreenCover, nie NavigationLink
 • NavigationStack: liegt in WorkerHomeView, umschliesst alle Tabs

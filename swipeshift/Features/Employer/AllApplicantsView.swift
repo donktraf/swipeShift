@@ -104,6 +104,8 @@ struct AllApplicantsView: View {
                         }
                     }
                 }
+        .contentMargins(.horizontal, DS.Spacing.screenEdge, for: .scrollContent)
+        .padding(.horizontal, -DS.Spacing.screenEdge)
 
                 if isLoading && applicants.isEmpty {
                     skeleton
