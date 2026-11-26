@@ -11,57 +11,55 @@ import SwiftUI
 
 // MARK: - Nachrichten-Blasen
 
-/// System-Nachricht: zentriert, kursiv (z.B. "Bewerbung angenommen", "Schicht abgeschlossen")
+/// Radius 18, die Schwanzseite (unten) nur 4
+private func bubbleShape(tailOnTrailing: Bool) -> UnevenRoundedRectangle {
+    UnevenRoundedRectangle(
+        topLeadingRadius: 18,
+        bottomLeadingRadius: tailOnTrailing ? 18 : 4,
+        bottomTrailingRadius: tailOnTrailing ? 4 : 18,
+        topTrailingRadius: 18,
+        style: .continuous
+    )
+}
+
+/// System-Nachricht: zentriert, neutrale Pill (z.B. "Bewerbung angenommen", "Schicht abgeschlossen")
 struct SystemMessageBubble: View {
     let text: String
 
     var body: some View {
         HStack {
-            Spacer(minLength: 24)
+            Spacer(minLength: DS.Spacing.lg)
             Text(text)
-                .font(.system(size: 12, weight: .medium))
-                .italic()
-                .foregroundColor(.secondary)
+                .dsFont(.caption)
+                .foregroundStyle(DS.Color.text2)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background(Color(uiColor: .secondarySystemGroupedBackground))
-                .clipShape(Capsule())
-            Spacer(minLength: 24)
+                .padding(.horizontal, DS.Spacing.md)
+                .padding(.vertical, DS.Spacing.xs)
+                .background(DS.Color.surface2, in: Capsule())
+            Spacer(minLength: DS.Spacing.lg)
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, DS.Spacing.xxs)
     }
 }
 
-/// Nachricht vom Worker (rechts, lila)
+/// Eigene Nachricht (rechts, primary)
 struct UserBubble: View {
     let message: ChatMessage
 
     var body: some View {
         HStack {
             Spacer(minLength: 60)
-            VStack(alignment: .trailing, spacing: 3) {
+            VStack(alignment: .trailing, spacing: DS.Spacing.xxs) {
                 Text(message.text)
-                    .font(.system(size: 15))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(SS.primary)
-                    .clipShape(
-                        RoundedRectangle(cornerRadius: 18)
-                    )
-                    .clipShape(
-                        .rect(
-                            topLeadingRadius: 18,
-                            bottomLeadingRadius: 18,
-                            bottomTrailingRadius: 4,
-                            topTrailingRadius: 18
-                        )
-                    )
-                HStack(spacing: 4) {
+                    .dsFont(.body)
+                    .foregroundStyle(DS.Color.onPrimary)
+                    .padding(.horizontal, DS.Spacing.md)
+                    .padding(.vertical, DS.Spacing.sm)
+                    .background(DS.Color.primary, in: bubbleShape(tailOnTrailing: true))
+                HStack(spacing: DS.Spacing.xxs) {
                     Text(message.timestamp.timeLabel)
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary)
+                        .font(DS.Font.make(11, .medium, relativeTo: .caption2))
+                        .foregroundStyle(DS.Color.muted)
                     ReadReceiptIcon(message: message)
                 }
             }
@@ -69,38 +67,25 @@ struct UserBubble: View {
     }
 }
 
-/// Nachricht vom Arbeitgeber (links, grau)
+/// Fremde Nachricht (links, surface2)
 struct EmployerBubble: View {
     let message: ChatMessage
     let logoEmoji: String
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            Text(logoEmoji)
-                .font(.system(size: 16))
-                .frame(width: 28, height: 28)
-                .background(Color(uiColor: .secondarySystemGroupedBackground))
-                .clipShape(Circle())
+        HStack(alignment: .bottom, spacing: DS.Spacing.xs) {
+            DSAvatar(text: logoEmoji, size: 28, shape: .circle, tone: .neutral)
 
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
                 Text(message.text)
-                    .font(.system(size: 15))
-                    .foregroundColor(.primary)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(Color(uiColor: .systemBackground))
-                    .clipShape(
-                        .rect(
-                            topLeadingRadius: 18,
-                            bottomLeadingRadius: 4,
-                            bottomTrailingRadius: 18,
-                            topTrailingRadius: 18
-                        )
-                    )
-                    .shadow(color: .black.opacity(0.04), radius: 2, x: 0, y: 1)
+                    .dsFont(.body)
+                    .foregroundStyle(DS.Color.text)
+                    .padding(.horizontal, DS.Spacing.md)
+                    .padding(.vertical, DS.Spacing.sm)
+                    .background(DS.Color.surface2, in: bubbleShape(tailOnTrailing: false))
                 Text(message.timestamp.timeLabel)
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
+                    .font(DS.Font.make(11, .medium, relativeTo: .caption2))
+                    .foregroundStyle(DS.Color.muted)
             }
             Spacer(minLength: 60)
         }
@@ -120,17 +105,17 @@ struct ReadReceiptIcon: View {
         Group {
             if isPending {
                 Image(systemName: "clock")
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(DS.Color.muted)
             } else if message.isReadByOther {
                 ZStack(alignment: .leading) {
                     Image(systemName: "checkmark")
                     Image(systemName: "checkmark").offset(x: 4)
                 }
                 .padding(.trailing, 4)
-                .foregroundColor(SS.primary)
+                .foregroundStyle(DS.Color.primaryText)
             } else {
                 Image(systemName: "checkmark")
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(DS.Color.muted)
             }
         }
         .font(.system(size: 9, weight: .bold))
@@ -145,60 +130,49 @@ struct PresenceLine: View {
     var body: some View {
         if presence.otherIsTyping {
             Text("typing…")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundColor(SS.primary)
+                .font(DS.Font.make(12, .semibold, relativeTo: .caption))
+                .foregroundStyle(DS.Color.primaryText)
         } else if presence.otherIsOnline {
-            HStack(spacing: 4) {
-                Circle().fill(Color.green).frame(width: 6, height: 6)
+            HStack(spacing: DS.Spacing.xxs) {
+                Circle().fill(DS.Color.success).frame(width: 6, height: 6)
                 Text("Online")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
+                    .dsFont(.caption)
+                    .foregroundStyle(DS.Color.text2)
             }
         } else if let lastSeen = presence.otherLastSeenAt {
             Text("Last seen \(lastSeen.formatted(.relative(presentation: .named)))")
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
+                .dsFont(.caption)
+                .foregroundStyle(DS.Color.text2)
         }
     }
 }
 
-/// Animierte "…"-Blase, solange die Gegenseite tippt
+/// Animierte "…"-Blase, solange die Gegenseite tippt (statisch bei Reduce Motion)
 struct TypingBubble: View {
     let logoEmoji: String
     @State private var phase = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            Text(logoEmoji)
-                .font(.system(size: 16))
-                .frame(width: 28, height: 28)
-                .background(Color(uiColor: .secondarySystemGroupedBackground))
-                .clipShape(Circle())
+        HStack(alignment: .bottom, spacing: DS.Spacing.xs) {
+            DSAvatar(text: logoEmoji, size: 28, shape: .circle, tone: .neutral)
 
             HStack(spacing: 4) {
                 ForEach(0..<3) { i in
                     Circle()
-                        .fill(Color.secondary)
+                        .fill(DS.Color.muted)
                         .frame(width: 7, height: 7)
-                        .opacity(phase == i ? 1 : 0.35)
+                        .opacity(reduceMotion || phase == i ? 1 : 0.35)
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 13)
-            .background(Color(uiColor: .systemBackground))
-            .clipShape(
-                .rect(
-                    topLeadingRadius: 18,
-                    bottomLeadingRadius: 4,
-                    bottomTrailingRadius: 18,
-                    topTrailingRadius: 18
-                )
-            )
-            .shadow(color: .black.opacity(0.04), radius: 2, x: 0, y: 1)
+            .padding(.horizontal, DS.Spacing.md)
+            .padding(.vertical, 14)
+            .background(DS.Color.surface2, in: bubbleShape(tailOnTrailing: false))
             Spacer(minLength: 60)
         }
         .accessibilityLabel("Typing")
         .task {
+            guard !reduceMotion else { return }
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(400))
                 withAnimation(.easeInOut(duration: 0.2)) { phase = (phase + 1) % 3 }

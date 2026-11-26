@@ -21,41 +21,31 @@ struct MessagesView: View {
     }
 
     var body: some View {
-        ZStack {
-            SS.background().ignoresSafeArea()
+        VStack(spacing: 0) {
 
-            VStack(spacing: 0) {
+            // MARK: - Header
+            VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
+                Text("Messages")
+                    .dsFont(.display)
+                    .foregroundStyle(DS.Color.text)
+                    .accessibilityAddTraits(.isHeader)
+                Text(unread > 0 ? "\(unread) unread message\(unread == 1 ? "" : "s")" : "All read")
+                    .dsFont(.callout)
+                    .foregroundStyle(DS.Color.text2)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, DS.Spacing.screenEdge)
+            .padding(.top, DS.Spacing.xs)
+            .padding(.bottom, DS.Spacing.sm)
 
-                // MARK: - Header
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Messages")
-                            .font(.system(size: 28, weight: .bold))
-                            .foregroundColor(.white)
-                        if unread > 0 {
-                            Text("\(unread) unread message\(unread == 1 ? "" : "s")")
-                                .font(.system(size: 14))
-                                .foregroundColor(.white.opacity(0.7))
-                        } else {
-                            Text("All read")
-                                .font(.system(size: 14))
-                                .foregroundColor(.white.opacity(0.7))
-                        }
-                    }
-                    Spacer()
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
-                .padding(.bottom, 14)
-
-                // MARK: - Liste oder Leerzustand
-                if activeConversations.isEmpty {
-                    emptyView
-                } else {
-                    conversationList
-                }
+            // MARK: - Liste oder Leerzustand
+            if activeConversations.isEmpty {
+                emptyView
+            } else {
+                conversationList
             }
         }
+        .dsBackground()
         .navigationDestination(isPresented: $showPushChat) {
             if let pushConversation {
                 ChatView(conversation: pushConversation, isEmployerMode: isEmployerMode)
@@ -95,8 +85,9 @@ struct MessagesView: View {
                     } label: {
                         ConversationRow(conversation: conversation, isEmployerMode: isEmployerMode)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.dsPressable)
                     .simultaneousGesture(TapGesture().onEnded {
+                        DS.Haptics.light()
                         if isEmployerMode {
                             messageStore.markEmployerConversationAsRead(conversationId: conversation.id)
                         } else {
@@ -104,16 +95,14 @@ struct MessagesView: View {
                         }
                     })
 
-                    Divider()
-                        .padding(.leading, 74)
-                        .background(Color.white.opacity(0.08))
+                    DSDivider()
+                        .padding(.leading, DS.Spacing.screenEdge + 52 + DS.Spacing.sm)
                 }
             }
-            .background(Color(uiColor: .systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 20))
-            .padding(.horizontal, 0)
-            .padding(.bottom, 32)
+            .padding(.bottom, DS.Spacing.xxl)
         }
+        // Worker: Liste scrollt unter der schwebenden TabBar weiter
+        .contentMargins(.bottom, isEmployerMode ? 0 : DS.tabBarInset, for: .scrollContent)
         .refreshable {
             await messageStore.loadConversations()
         }
@@ -121,103 +110,86 @@ struct MessagesView: View {
 
     // MARK: - Leerzustand
     private var emptyView: some View {
-        VStack(spacing: 20) {
-            Spacer()
-
-            Image(systemName: "bubble.left.and.bubble.right")
-                .font(.system(size: 52))
-                .foregroundColor(.white.opacity(0.3))
-
-            VStack(spacing: 8) {
-                Text("No conversations yet")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.8))
+        ScrollView {
+            Group {
                 if isEmployerMode {
-                    Text("Once you accept an applicant, your chat with them will appear here.")
-                        .font(.system(size: 14))
-                        .foregroundColor(.white.opacity(0.55))
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 40)
+                    DSEmptyState(
+                        systemIcon: "bubble.left.and.bubble.right",
+                        title: "No conversations yet",
+                        message: "Once you accept an applicant, your chat with them will appear here."
+                    )
                 } else {
-                    Text("Once an employer accepts your application, your chat will appear here.")
-                        .font(.system(size: 14))
-                        .foregroundColor(.white.opacity(0.55))
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 40)
-                    NavigationLink {
-                        JobListView()
-                    } label: {
-                        Text("Browse Jobs")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(SS.primary)
-                            .padding(.horizontal, 28)
-                            .padding(.vertical, 13)
-                            .background(Color.white)
-                            .clipShape(Capsule())
-                            .shadow(color: .black.opacity(0.08), radius: 8, x: 0, y: 4)
+                    VStack(spacing: DS.Spacing.xs) {
+                        DSEmptyState(
+                            systemIcon: "bubble.left.and.bubble.right",
+                            title: "No conversations yet",
+                            message: "Once an employer accepts your application, your chat will appear here."
+                        )
+                        NavigationLink {
+                            JobListView()
+                        } label: {
+                            Text("Browse Jobs")
+                        }
+                        .buttonStyle(.ds(.primary, size: .medium, fullWidth: false))
                     }
                 }
             }
-
-            Spacer()
+            .padding(.top, DS.Spacing.xxl)
         }
+        .refreshable { await messageStore.loadConversations() }
     }
 }
 
-// MARK: - ConversationRow
+// MARK: - ConversationRow (flache Zeile)
 private struct ConversationRow: View {
     let conversation: Conversation
     var isEmployerMode: Bool = false
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(alignment: .top, spacing: DS.Spacing.sm) {
+            ChatAvatar(photoUrl: conversation.counterpartPhotoUrl, emoji: conversation.logoEmoji, size: 52)
 
-            // Logo
-            ZStack(alignment: .topTrailing) {
-                ChatAvatar(photoUrl: conversation.counterpartPhotoUrl, emoji: conversation.logoEmoji, size: 50)
-
-                // Ungelesen-Punkt
-                if !conversation.isRead {
-                    Circle()
-                        .fill(SS.primary)
-                        .frame(width: 12, height: 12)
-                        .overlay(Circle().stroke(Color.white, lineWidth: 2))
-                        .offset(x: 2, y: -2)
-                }
-            }
-
-            // Text
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
+                HStack(spacing: DS.Spacing.xs) {
                     // Employer: worker name as title; Worker: job title as title
                     Text(isEmployerMode ? conversation.company : conversation.jobTitle)
-                        .font(.system(size: 15, weight: conversation.isRead ? .semibold : .bold))
-                        .foregroundColor(.primary)
+                        .font(DS.Font.make(15, conversation.isRead ? .semibold : .bold))
+                        .foregroundStyle(DS.Color.text)
                         .lineLimit(1)
-
-                    StatusBadge(status: conversation.status)
-
-                    Spacer()
-
+                    Spacer(minLength: DS.Spacing.xxs)
                     Text(conversation.lastMessageTime.relativeLabel)
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
+                        .dsFont(.caption)
+                        .foregroundStyle(conversation.isRead ? DS.Color.muted : DS.Color.primaryText)
                 }
 
-                Text(isEmployerMode ? conversation.jobTitle : conversation.company)
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
+                HStack(spacing: DS.Spacing.xs) {
+                    Text(isEmployerMode ? conversation.jobTitle : conversation.company)
+                        .dsFont(.caption)
+                        .foregroundStyle(DS.Color.text2)
+                        .lineLimit(1)
+                    StatusBadge(status: conversation.status)
+                }
 
-                Text(conversation.blockedByMe ? "Blocked" : conversation.lastMessage)
-                    .font(.system(size: 13))
-                    .foregroundColor(conversation.isRead ? .secondary : .primary)
-                    .fontWeight(conversation.isRead ? .regular : .medium)
-                    .lineLimit(1)
+                HStack(spacing: DS.Spacing.xs) {
+                    Text(conversation.blockedByMe ? "Blocked" : conversation.lastMessage)
+                        .font(DS.Font.make(14, conversation.isRead ? .regular : .semibold))
+                        .foregroundStyle(conversation.isRead ? DS.Color.text2 : DS.Color.text)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    // Ungelesen-Punkt nur bei ungelesener Nachricht
+                    if !conversation.isRead {
+                        Circle()
+                            .fill(DS.Color.primary)
+                            .frame(width: 10, height: 10)
+                            .accessibilityLabel("Unread")
+                    }
+                }
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(Color(uiColor: .systemBackground))
+        .padding(.horizontal, DS.Spacing.screenEdge)
+        .padding(.vertical, DS.Spacing.sm)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
     }
 }
 
@@ -225,23 +197,13 @@ private struct ConversationRow: View {
 struct StatusBadge: View {
     let status: ConversationStatus
 
-    private var colors: (background: Color, foreground: Color) {
-        switch status {
-        case .today:     return (Color.blue.opacity(0.15),   .blue)
-        case .upcoming:  return (Color.green.opacity(0.15),  .green)
-        case .completed: return (Color.gray.opacity(0.12),   .gray)
-        case .cancelled: return (Color.red.opacity(0.12),    .red)
-        }
-    }
-
     var body: some View {
-        Text(status.label)
-            .font(.system(size: 10, weight: .semibold))
-            .foregroundColor(colors.foreground)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .background(colors.background)
-            .clipShape(Capsule())
+        switch status {
+        case .today:     DSBadge(status.label, .today)
+        case .upcoming:  DSBadge(status.label, .upcoming)
+        case .completed: DSBadge(status.label, .completed)
+        case .cancelled: DSBadge(status.label, .cancelled)
+        }
     }
 }
 

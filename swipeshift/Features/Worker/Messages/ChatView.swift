@@ -56,19 +56,16 @@ struct ChatView: View {
     }
 
     var body: some View {
-        ZStack {
-            Color(uiColor: .systemGroupedBackground).ignoresSafeArea()
-
-            VStack(spacing: 0) {
-                chatHeader
-                Divider()
-                ChatJobInfoCard(conversation: live, onViewJob: openJobDetails, isLoadingJob: loadingJobDetail)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
-                messageList
-                inputBar
-            }
+        VStack(spacing: 0) {
+            chatHeader
+            DSDivider()
+            ChatJobInfoCard(conversation: live, onViewJob: openJobDetails, isLoadingJob: loadingJobDetail)
+                .padding(.horizontal, DS.Spacing.screenEdge)
+                .padding(.top, DS.Spacing.xs)
+            messageList
+            inputBar
         }
+        .dsBackground()
         .navigationBarHidden(true)
         .onAppear {
             if isEmployerMode {
@@ -180,7 +177,7 @@ struct ChatView: View {
     private var messageList: some View {
         ScrollViewReader { proxy in
             ScrollView(showsIndicators: false) {
-                LazyVStack(spacing: 6) {
+                LazyVStack(spacing: DS.Spacing.xs) {
                     safetyNotice
                     ForEach(Array(currentMessages.enumerated()), id: \.element.id) { index, message in
                         if index == 0 || !Calendar.current.isDate(
@@ -201,9 +198,9 @@ struct ChatView: View {
                             .transition(.opacity.combined(with: .move(edge: .bottom)))
                     }
                 }
-                .animation(.easeOut(duration: 0.2), value: showTypingIndicator)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                .dsAnimation(.snappy, value: showTypingIndicator)
+                .padding(.horizontal, DS.Spacing.screenEdge)
+                .padding(.vertical, DS.Spacing.sm)
                 // Unsichtbarer Anker am Ende für automatisches Scrollen
                 Color.clear.frame(height: 1).id("bottom")
             }
@@ -237,68 +234,87 @@ struct ChatView: View {
     }
 
     private var readOnlyBar: some View {
-        VStack(spacing: 0) {
-            Divider()
-            if conversation.status == .completed { completionSection }
-            HStack(spacing: 10) {
-                Image(systemName: conversation.status == .completed ? "checkmark.circle.fill" : "xmark.circle.fill")
-                    .foregroundColor(conversation.status == .completed ? .green : .red)
-                    .font(.system(size: 16))
-                Text(conversation.status == .completed
-                    ? "This conversation is closed."
-                    : "This shift was cancelled.")
-                    .font(.system(size: 13))
-                    .foregroundColor(.secondary)
+        let completed = conversation.status == .completed
+        let tone: DS.Tone = completed ? .success : .danger
+        return VStack(spacing: DS.Spacing.xs) {
+            if completed { completionSection }
+            // Getoenter Block: Hinweis + Rating-Link
+            HStack(spacing: DS.Spacing.xs) {
+                Image(systemName: completed ? "checkmark.circle.fill" : "xmark.circle.fill")
+                    .foregroundStyle(tone.foreground)
+                    .accessibilityHidden(true)
+                Text(completed ? "This conversation is closed." : "This shift was cancelled.")
+                    .dsFont(.callout)
+                    .foregroundStyle(DS.Color.text)
 
-                Spacer()
+                Spacer(minLength: DS.Spacing.xs)
 
                 // Rating-Link bei Completed
-                if conversation.status == .completed {
+                if completed {
                     if reviewSubmitted {
                         Label("Review Submitted", systemImage: "star.fill")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(.secondary)
+                            .dsFont(.callout)
+                            .foregroundStyle(DS.Color.text2)
                     } else {
-                        Button("Leave Review") { showRatingSheet = true }
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(SS.primary)
+                        Button("Leave Review") {
+                            DS.Haptics.light()
+                            showRatingSheet = true
+                        }
+                        .font(DS.Font.make(14, .bold))
+                        .foregroundStyle(DS.Color.primaryText)
+                        .frame(minHeight: 44)
+                        .buttonStyle(.dsPressable)
                     }
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .background(Color(uiColor: .systemBackground))
-            .padding(.bottom, 20)
+            .padding(DS.Spacing.inset)
+            .background(tone.soft, in: RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
         }
+        .padding(.horizontal, DS.Spacing.screenEdge)
+        .padding(.vertical, DS.Spacing.sm)
+        .background(DS.Color.bg)
+    }
+
+    private var canSend: Bool {
+        !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var activeInputBar: some View {
         VStack(spacing: 0) {
-            Divider()
-            HStack(spacing: 10) {
-                TextField("Message...", text: $inputText, axis: .vertical)
-                    .font(.system(size: 15))
+            DSDivider()
+            HStack(alignment: .bottom, spacing: DS.Spacing.xs) {
+                // Look wie DSTextField (ohne Label)
+                TextField("Message...", text: $inputText,
+                          prompt: Text("Message...").foregroundStyle(DS.Color.muted), axis: .vertical)
+                    .font(DS.Font.make(15, .medium))
+                    .foregroundStyle(DS.Color.text)
+                    .tint(DS.Color.primary)
                     .lineLimit(1...5)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                    .background(Color(uiColor: .secondarySystemGroupedBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 20))
+                    .padding(.horizontal, DS.Spacing.inset)
+                    .padding(.vertical, DS.Spacing.sm)
+                    .frame(minHeight: 48)
+                    .background(DS.Color.surface, in: RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
+                            .strokeBorder(DS.Color.border, lineWidth: 1)
+                    )
 
                 Button {
                     sendMessage()
                 } label: {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 32))
-                        .foregroundColor(inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                            ? Color.gray.opacity(0.3)
-                            : SS.primary)
+                    Image(systemName: "arrow.up")
+                        .font(DS.Font.make(17, .bold))
+                        .foregroundStyle(DS.Color.onPrimary)
+                        .frame(width: 48, height: 48)
+                        .background(canSend ? DS.Color.primary : DS.Color.muted.opacity(0.4), in: Circle())
                 }
-                .disabled(inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .buttonStyle(.dsPressable)
+                .disabled(!canSend)
+                .accessibilityLabel("Send message")
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(Color(uiColor: .systemBackground))
-            .padding(.bottom, 16)
+            .padding(.horizontal, DS.Spacing.screenEdge)
+            .padding(.vertical, DS.Spacing.xs)
+            .background(DS.Color.bg)
         }
     }
 
@@ -313,6 +329,7 @@ struct ChatView: View {
     private func sendMessage() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+        DS.Haptics.light()
         inputText = ""
         if isEmployerMode {
             messageStore.sendEmployerMessage(conversationId: conversation.id, text: text)
@@ -340,9 +357,9 @@ private struct ChatReviewFormLoader: View {
             if isLoaded {
                 ReviewFormSheet(review: review, initialDraft: draft, onSuccess: onSuccess)
             } else {
-                VStack(spacing: 14) {
+                VStack(spacing: DS.Spacing.sm) {
                     ProgressView()
-                    Text("Loading review…").font(.system(size: 13)).foregroundColor(.secondary)
+                    Text("Loading review…").dsFont(.callout).foregroundStyle(DS.Color.text2)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }

@@ -64,11 +64,13 @@ struct ReportUserSheet: View {
             Group {
                 if submitted { confirmation } else { form }
             }
+            .dsBackground()
             .navigationTitle("Report \(conversation.company)")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(submitted ? "Done" : "Cancel") { dismiss() }
+                        .tint(DS.Color.primaryText)
                 }
             }
             .alert("Could not send report", isPresented: Binding(
@@ -81,64 +83,72 @@ struct ReportUserSheet: View {
             }
         }
         .presentationDetents([.large])
+        .presentationCornerRadius(DS.Radius.sheet)
+        .presentationBackground(DS.Color.bg)
     }
 
     private var form: some View {
-        Form {
-            Section("Reason") {
-                ForEach(ReportReason.allCases) { item in
-                    Button {
-                        reason = item
-                    } label: {
-                        HStack {
-                            Text(item.title).foregroundColor(.primary)
-                            Spacer()
-                            if item == reason {
-                                Image(systemName: "checkmark").foregroundColor(SS.primary)
+        ScrollView {
+            VStack(alignment: .leading, spacing: DS.Spacing.xl) {
+                DSSection("Reason") {
+                    VStack(spacing: 0) {
+                        ForEach(ReportReason.allCases) { item in
+                            Button {
+                                DS.Haptics.selection()
+                                reason = item
+                            } label: {
+                                HStack {
+                                    Text(item.title)
+                                        .dsFont(.body)
+                                        .foregroundStyle(DS.Color.text)
+                                    Spacer()
+                                    if item == reason {
+                                        Image(systemName: "checkmark")
+                                            .font(DS.Font.make(15, .bold))
+                                            .foregroundStyle(DS.Color.primary)
+                                    }
+                                }
+                                .frame(minHeight: 48)
+                                .contentShape(Rectangle())
                             }
+                            .buttonStyle(.dsPressable)
+                            .accessibilityAddTraits(item == reason ? .isSelected : [])
+                            if item != ReportReason.allCases.last { DSDivider() }
                         }
                     }
                 }
-            }
-            Section("Details (optional)") {
-                TextEditor(text: $details)
-                    .frame(minHeight: 100)
-                    .onChange(of: details) { _, newValue in
-                        if newValue.count > maxDetails { details = String(newValue.prefix(maxDetails)) }
-                    }
-                Text("\(details.count)/\(maxDetails)")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
-            }
-            Section {
+
+                DSTextEditor("Details (optional)", text: $details, maxLength: maxDetails)
+
                 Button {
                     Task { await submit() }
                 } label: {
-                    HStack {
-                        Spacer()
-                        if isSending { ProgressView() } else { Text("Send report").fontWeight(.semibold) }
-                        Spacer()
-                    }
+                    if isSending { ProgressView().tint(DS.Color.onPrimary) } else { Text("Send report") }
                 }
+                .buttonStyle(.ds(.primary, size: .large))
                 .disabled(isSending)
             }
+            .padding(.horizontal, DS.Spacing.screenEdge)
+            .padding(.vertical, DS.Spacing.lg)
         }
     }
 
     private var confirmation: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: DS.Spacing.sm) {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 52))
-                .foregroundColor(.green)
+                .foregroundStyle(DS.Color.success)
+                .accessibilityHidden(true)
             Text("Thanks – our team will review this.")
-                .font(.system(size: 17, weight: .semibold))
+                .dsFont(.headline)
+                .foregroundStyle(DS.Color.text)
                 .multilineTextAlignment(.center)
             Text("You can also block this user from the chat menu.")
-                .font(.system(size: 14))
-                .foregroundColor(.secondary)
+                .dsFont(.callout)
+                .foregroundStyle(DS.Color.text2)
                 .multilineTextAlignment(.center)
         }
-        .padding(32)
+        .padding(DS.Spacing.xxl)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
@@ -154,6 +164,7 @@ struct ReportUserSheet: View {
                 reason: reason.rawValue,
                 details: trimmed.isEmpty ? nil : trimmed
             )
+            DS.Haptics.success()
             submitted = true
         } catch {
             errorMessage = error.localizedDescription
@@ -177,7 +188,7 @@ struct ChatAvatar: View {
 
     var body: some View {
         ZStack {
-            Color(uiColor: .secondarySystemGroupedBackground)
+            DS.Color.surface2
             if let url = resolvedURL {
                 AsyncImage(url: url) { phase in
                     if let image = phase.image {
@@ -195,7 +206,7 @@ struct ChatAvatar: View {
     }
 
     private var placeholder: some View {
-        Text(emoji).font(.system(size: size * 0.55))
+        DSAvatar(text: emoji, size: size, shape: .circle)
     }
 }
 
@@ -219,14 +230,13 @@ struct DateSeparator: View {
 
     var body: some View {
         Text(Self.label(for: date))
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundColor(.secondary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
-            .background(Color(uiColor: .secondarySystemGroupedBackground))
-            .clipShape(Capsule())
+            .dsFont(.caption)
+            .foregroundStyle(DS.Color.text2)
+            .padding(.horizontal, DS.Spacing.sm)
+            .padding(.vertical, DS.Spacing.xxs)
+            .background(DS.Color.surface2, in: Capsule())
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 6)
+            .padding(.vertical, DS.Spacing.xs)
     }
 }
 
@@ -239,56 +249,59 @@ struct ChatJobInfoCard: View {
     @State private var expanded = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            Button {
-                withAnimation(.easeOut(duration: 0.2)) { expanded.toggle() }
-            } label: {
-                HStack {
-                    Label("Quick job info", systemImage: "briefcase")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.primary)
-                    Spacer()
-                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.secondary)
+        DSCard {
+            VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                Button {
+                    DS.Haptics.selection()
+                    expanded.toggle()
+                } label: {
+                    HStack(spacing: DS.Spacing.xs) {
+                        Image(systemName: "briefcase")
+                            .foregroundStyle(DS.Color.primaryText)
+                        Text("Quick job info")
+                            .dsFont(.callout)
+                            .foregroundStyle(DS.Color.text)
+                        Spacer()
+                        Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                            .font(DS.Font.make(12, .bold))
+                            .foregroundStyle(DS.Color.muted)
+                    }
+                    .frame(minHeight: 28)
+                    .contentShape(Rectangle())
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-            }
-            .buttonStyle(.plain)
+                .buttonStyle(.dsPressable)
+                .accessibilityLabel("Quick job info, \(expanded ? "expanded" : "collapsed")")
 
-            if expanded {
-                VStack(alignment: .leading, spacing: 8) {
-                    infoRow("calendar", conversation.shiftSummary)
-                    if !conversation.location.isEmpty { infoRow("mappin.and.ellipse", conversation.location) }
-                    if !conversation.payDisplay.isEmpty { infoRow("banknote", conversation.payDisplay) }
-                    HStack(spacing: 8) {
-                        Image(systemName: "flag").frame(width: 18).foregroundColor(.secondary)
-                        StatusBadge(status: conversation.status)
-                    }
-                    Button(action: onViewJob) {
-                        HStack {
-                            if isLoadingJob { ProgressView().tint(.white) }
-                            Text("View job details")
+                if expanded {
+                    VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                        infoRow("calendar", conversation.shiftSummary)
+                        if !conversation.location.isEmpty { infoRow("mappin.and.ellipse", conversation.location) }
+                        if !conversation.payDisplay.isEmpty { infoRow("banknote", conversation.payDisplay) }
+                        HStack(spacing: DS.Spacing.xs) {
+                            Image(systemName: "flag").frame(width: 18).foregroundStyle(DS.Color.muted)
+                            StatusBadge(status: conversation.status)
                         }
+                        Button(action: onViewJob) {
+                            HStack(spacing: DS.Spacing.xs) {
+                                if isLoadingJob { ProgressView().tint(DS.Color.onPrimary) }
+                                Text("View job details")
+                            }
+                        }
+                        .buttonStyle(.ds(.primary, size: .medium))
+                        .disabled(isLoadingJob)
+                        .padding(.top, DS.Spacing.xxs)
                     }
-                    .buttonStyle(SSPrimaryButtonStyle())
-                    .disabled(isLoadingJob)
-                    .padding(.top, 4)
+                    .transition(.opacity)
                 }
-                .padding(.horizontal, 14)
-                .padding(.bottom, 12)
             }
+            .dsAnimation(.snappy, value: expanded)
         }
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .shadow(color: .black.opacity(0.04), radius: 6, x: 0, y: 2)
     }
 
     private func infoRow(_ icon: String, _ text: String) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: icon).frame(width: 18).foregroundColor(.secondary)
-            Text(text).font(.system(size: 13)).foregroundColor(.primary)
+        HStack(alignment: .top, spacing: DS.Spacing.xs) {
+            Image(systemName: icon).frame(width: 18).foregroundStyle(DS.Color.muted)
+            Text(text).dsFont(.callout).foregroundStyle(DS.Color.text)
             Spacer(minLength: 0)
         }
     }

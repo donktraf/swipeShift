@@ -11,12 +11,16 @@ extension ChatView {
 
     // MARK: - Header
     var chatHeader: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: DS.Spacing.sm) {
             Button { dismiss() } label: {
                 Image(systemName: "chevron.left")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundColor(.primary)
+                    .font(DS.Font.make(17, .semibold))
+                    .foregroundStyle(DS.Color.text)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(.dsPressable)
+            .accessibilityLabel("Back")
 
             // Avatar: Employer → Worker-Foto; Worker → Firmenlogo (tippbar → Company Profile)
             if isEmployerMode {
@@ -30,25 +34,26 @@ extension ChatView {
                 } label: {
                     ChatAvatar(photoUrl: live.counterpartPhotoUrl, emoji: conversation.logoEmoji)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.dsPressable)
             }
 
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: DS.Spacing.xs) {
                     // `company` wird serverseitig je nach Rolle bereits mit dem richtigen
                     // Anzeigenamen befuellt (Worker: Firma; Employer: Worker-Name).
                     Text(conversation.company)
-                        .font(.system(size: 16, weight: .semibold))
+                        .dsFont(.headline)
+                        .foregroundStyle(DS.Color.text)
                         .lineLimit(1)
                     StatusBadge(status: conversation.status)
                 }
                 Text(conversation.jobTitle)
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
+                    .dsFont(.caption)
+                    .foregroundStyle(DS.Color.text2)
                     .lineLimit(1)
                 Text(live.shiftSummary)
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
+                    .dsFont(.caption)
+                    .foregroundStyle(DS.Color.text2)
                     .lineLimit(1)
                 if !isReadOnly && !live.isBlocked {
                     PresenceLine(presence: presence)
@@ -59,9 +64,10 @@ extension ChatView {
 
             optionsMenu
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(Color(uiColor: .systemBackground))
+        .padding(.leading, DS.Spacing.xs)
+        .padding(.trailing, DS.Spacing.screenEdge)
+        .padding(.vertical, DS.Spacing.xs)
+        .background(DS.Color.bg)
     }
 
     // MARK: - "..."-Menue (kontextuell)
@@ -95,41 +101,45 @@ extension ChatView {
         } label: {
             Image(systemName: "ellipsis.circle")
                 .font(.system(size: 22))
-                .foregroundColor(SS.primary)
-                .frame(width: 32, height: 32)
+                .foregroundStyle(DS.Color.primaryText)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
         }
+        .accessibilityLabel("More options")
     }
 
     // MARK: - Hinweise
     var safetyNotice: some View {
         Label(ChatSafety.safetyNotice, systemImage: "lock.shield")
-            .font(.system(size: 11))
-            .foregroundColor(.secondary)
+            .dsFont(.caption)
+            .foregroundStyle(DS.Color.muted)
             .multilineTextAlignment(.center)
             .frame(maxWidth: .infinity)
-            .padding(.bottom, 6)
+            .padding(.bottom, DS.Spacing.xs)
     }
 
     var blockedBar: some View {
-        VStack(spacing: 0) {
-            Divider()
-            HStack(spacing: 10) {
-                Image(systemName: "hand.raised.fill").foregroundColor(.orange)
-                Text(live.blockedByMe ? "You blocked this user." : "You can't reply to this conversation.")
-                    .font(.system(size: 13))
-                    .foregroundColor(.secondary)
-                Spacer()
-                if live.blockedByMe {
-                    Button("Unblock") { showBlockConfirm = true }
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(SS.primary)
-                }
+        HStack(spacing: DS.Spacing.xs) {
+            Image(systemName: "hand.raised.fill")
+                .foregroundStyle(DS.Tone.warning.foreground)
+                .accessibilityHidden(true)
+            Text(live.blockedByMe ? "You blocked this user." : "You can't reply to this conversation.")
+                .dsFont(.callout)
+                .foregroundStyle(DS.Color.text)
+            Spacer(minLength: DS.Spacing.xs)
+            if live.blockedByMe {
+                Button("Unblock") { showBlockConfirm = true }
+                    .font(DS.Font.make(14, .bold))
+                    .foregroundStyle(DS.Color.primaryText)
+                    .frame(minHeight: 44)
+                    .buttonStyle(.dsPressable)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .background(Color(uiColor: .systemBackground))
-            .padding(.bottom, 20)
         }
+        .padding(DS.Spacing.inset)
+        .background(DS.Tone.warning.soft, in: RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
+        .padding(.horizontal, DS.Spacing.screenEdge)
+        .padding(.vertical, DS.Spacing.sm)
+        .background(DS.Color.bg)
     }
 
     // MARK: - Abschluss: Zahlungsstatus + Save
@@ -143,27 +153,32 @@ extension ChatView {
             return live.isCounterpartSaved ? "Company saved" : "Save company"
         }()
 
-        return VStack(spacing: 10) {
-            HStack(spacing: 8) {
+        return VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+            HStack(spacing: DS.Spacing.xs) {
                 Image(systemName: live.isPaid ? "checkmark.seal.fill" : "clock.fill")
-                    .foregroundColor(live.isPaid ? .green : .orange)
+                    .foregroundStyle(live.isPaid ? DS.Tone.success.foreground : DS.Tone.warning.foreground)
+                    .accessibilityHidden(true)
                 Text(paidText)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(.primary)
+                    .dsFont(.callout)
+                    .foregroundStyle(DS.Color.text)
                 Spacer(minLength: 0)
             }
-            HStack {
-                Button { Task { await toggleSaved() } } label: {
-                    Label(saveTitle, systemImage: live.isCounterpartSaved ? "bookmark.fill" : "bookmark")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(SS.primary)
-                }
-                .disabled(isBusy)
-                Spacer()
+            Button { Task { await toggleSaved() } } label: {
+                Label(saveTitle, systemImage: live.isCounterpartSaved ? "bookmark.fill" : "bookmark")
+                    .font(DS.Font.make(14, .bold))
+                    .foregroundStyle(DS.Color.primaryText)
+                    .frame(minHeight: 44, alignment: .leading)
             }
+            .buttonStyle(.dsPressable)
+            .disabled(isBusy)
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 12)
+        .padding(DS.Spacing.inset)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DS.Color.surface, in: RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
+                .strokeBorder(DS.Color.border, lineWidth: 1)
+        )
     }
 
     // MARK: - Ziel: Worker-Profil (Employer)
