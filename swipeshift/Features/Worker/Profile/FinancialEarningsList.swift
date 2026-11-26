@@ -51,9 +51,9 @@ struct EarningMonthSection: View {
     let group: EarningMonthGroup
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
             Text(group.title)
-                .font(.system(size: 12, weight: .semibold)).foregroundColor(.white.opacity(0.7))
+                .dsFont(.sectionLabel).foregroundStyle(DS.Color.muted)
             ForEach(group.items) { EarningRow(item: $0) }
         }
     }
@@ -62,11 +62,11 @@ struct EarningMonthSection: View {
 struct EarningRow: View {
     let item: WorkerEarningItem
 
-    private var statusLabel: (String, Color) {
+    private var statusBadge: DSBadge {
         switch item.displayStatus {
-        case .upcoming:  return ("Upcoming", .green)
-        case .completed: return ("Completed", .secondary)
-        case .paid:      return ("Paid", .orange)
+        case .upcoming:  return DSBadge("Upcoming", .upcoming)
+        case .completed: return DSBadge("Completed", .completed)
+        case .paid:      return DSBadge("Paid", .tone(.warning))
         }
     }
 
@@ -79,26 +79,23 @@ struct EarningRow: View {
     }
 
     var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(item.jobTitle).font(.system(size: 14, weight: .semibold)).foregroundColor(.primary)
-                Text("\(item.company) · \(item.bookedShifts?.cardLabel ?? item.shiftText)")
-                    .font(.system(size: 12)).foregroundColor(.secondary)
-                if let rateLine {
-                    Text(rateLine).font(.system(size: 12)).foregroundColor(.secondary)
+        DSCard {
+            HStack(alignment: .top, spacing: DS.Spacing.sm) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.jobTitle).dsFont(.callout).foregroundStyle(DS.Color.text)
+                    Text("\(item.company) · \(item.bookedShifts?.cardLabel ?? item.shiftText)")
+                        .dsFont(.caption).foregroundStyle(DS.Color.muted)
+                    if let rateLine {
+                        Text(rateLine).dsFont(.caption).foregroundStyle(DS.Color.muted)
+                    }
+                }
+                Spacer(minLength: DS.Spacing.xs)
+                VStack(alignment: .trailing, spacing: DS.Spacing.xxs) {
+                    Text(Money.format(item.amount))
+                        .font(DS.Font.make(15, .bold)).foregroundStyle(DS.Color.text)
+                    statusBadge
                 }
             }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(Money.format(item.amount)).font(.system(size: 15, weight: .bold)).foregroundColor(.primary)
-                Text(statusLabel.0)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(statusLabel.1)
-            }
         }
-        .padding(12)
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
     }
 }

@@ -11,39 +11,24 @@ struct AccountSettingsView: View {
     @EnvironmentObject var userStore: UserStore
 
     var body: some View {
-        SubScreenShell(title: "Account Settings") {
-            VStack(spacing: 16) {
-                settingsGroup([
-                    AnyView(NavigationLink { AccountSecurityView()       } label: { SettingsNavRow(icon: "person.badge.shield.checkmark.fill", label: "Account & Security") }),
-                    AnyView(NavigationLink { NotificationSettingsView()  } label: { SettingsNavRow(icon: "bell.badge.fill",                    label: "Notifications") }),
-                    AnyView(NavigationLink { PaymentsPayoutsView()       } label: { SettingsNavRow(icon: "creditcard.fill",                    label: "Payments & Payouts") }),
-                    AnyView(NavigationLink { PrivacyDataView()           } label: { SettingsNavRow(icon: "hand.raised.fill",                   label: "Privacy & Data") }),
-                    AnyView(NavigationLink { AppPreferencesView()        } label: { SettingsNavRow(icon: "slider.horizontal.3",                label: "App Preferences") }),
-                ])
+        SubScreenShell(title: "Account Settings", padded: true) {
+            VStack(alignment: .leading, spacing: DS.Spacing.xl) {
+                DSSection("Settings") {
+                    ProfileNavRow(icon: "person.badge.shield.checkmark.fill", label: "Account & Security") { AccountSecurityView() }
+                    ProfileNavRow(icon: "bell.badge.fill",                    label: "Notifications") { NotificationSettingsView() }
+                    ProfileNavRow(icon: "creditcard.fill",                    label: "Payments & Payouts") { PaymentsPayoutsView() }
+                    ProfileNavRow(icon: "hand.raised.fill",                   label: "Privacy & Data") { PrivacyDataView() }
+                    ProfileNavRow(icon: "slider.horizontal.3",                label: "App Preferences") { AppPreferencesView() }
+                }
 
                 // Nur fuer Admin-Konten (Flag kommt aus GET /auth/me; das Backend prueft jeden Request erneut)
                 if userStore.currentUser?.isAdmin == true {
-                    settingsGroup([
-                        AnyView(NavigationLink { AdminReportsView() } label: { SettingsNavRow(icon: "shield.lefthalf.filled", label: "Admin: Reports") }),
-                    ])
-                }
-            }
-            .padding(.horizontal, 16)
-        }
-    }
-
-    private func settingsGroup(_ rows: [AnyView]) -> some View {
-        VStack(spacing: 0) {
-            ForEach(rows.indices, id: \.self) { i in
-                rows[i]
-                if i < rows.count - 1 {
-                    Divider().padding(.leading, 52)
+                    DSSection("Admin") {
+                        ProfileNavRow(icon: "shield.lefthalf.filled", label: "Admin: Reports") { AdminReportsView() }
+                    }
                 }
             }
         }
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
     }
 }
 
@@ -81,14 +66,12 @@ struct AccountSecurityView: View {
     }
 
     var body: some View {
-        SubScreenShell(title: "Account & Security") {
-            VStack(spacing: 16) {
+        SubScreenShell(title: "Account & Security", padded: true) {
+            VStack(alignment: .leading, spacing: DS.Spacing.xl) {
                 // Zugangsdaten
                 sectionCard("Credentials") {
                     SettingsActionRow(icon: "envelope.fill", label: "Change Email") { showChangeEmail = true }
-                    Divider().padding(.leading, 52)
                     SettingsActionRow(icon: "phone.fill", label: "Change Phone") { showChangePhone = true }
-                    Divider().padding(.leading, 52)
                     if isSocialUser {
                         SettingsActionRow(icon: "lock.badge.plus", label: "Set Password") { showSetPassword = true }
                     } else {
@@ -98,51 +81,40 @@ struct AccountSecurityView: View {
 
                 // Sicherheit
                 sectionCard("Security") {
-                    HStack(spacing: 14) {
-                        Image(systemName: "shield.checkerboard")
-                            .font(.system(size: 16))
-                            .foregroundColor(SS.primary)
-                            .frame(width: 28)
-                            .padding(.leading, 14)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Two-Factor Authentication")
-                                .font(.system(size: 15))
-                            Text(twoFactorEnabled
-                                 ? (twoFactorMethod == .totp
-                                    ? "On · authenticator app code when you sign in"
-                                    : "On · we email you a code when you sign in")
-                                 : "Off · add a code by email when you sign in")
-                                .font(.system(size: 12))
-                                .foregroundColor(.secondary)
-                        }
-                        Spacer()
+                    DSRow(
+                        "Two-Factor Authentication",
+                        subtitle: twoFactorEnabled
+                            ? (twoFactorMethod == .totp
+                               ? "On · authenticator app code when you sign in"
+                               : "On · we email you a code when you sign in")
+                            : "Off · add a code by email when you sign in",
+                        systemIcon: "shield.checkerboard"
+                    ) {
                         if isRequestingCode {
-                            ProgressView().padding(.trailing, 14)
+                            ProgressView()
                         } else {
-                            Toggle("", isOn: Binding(
+                            Toggle("Two-Factor Authentication", isOn: Binding(
                                 get: { twoFactorEnabled },
                                 set: { wantsOn in
+                                    DS.Haptics.selection()
                                     if wantsOn { showMethodChoice = true }
                                     else { showDisableConfirm = true }
                                 }
                             ))
                             .labelsHidden()
-                            .padding(.trailing, 14)
+                            .tint(DS.Color.primary)
                         }
                     }
-                    .padding(.vertical, 14)
 
                     if let twoFactorError {
                         Text(twoFactorError)
-                            .font(.system(size: 12))
-                            .foregroundColor(.red)
-                            .padding(.horizontal, 14)
-                            .padding(.bottom, 12)
+                            .dsFont(.caption)
+                            .foregroundStyle(DS.Color.danger)
+                            .padding(.vertical, DS.Spacing.xs)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
                     if twoFactorEnabled {
-                        Divider().padding(.leading, 52)
                         if twoFactorMethod == .totp {
                             SettingsActionRow(icon: "envelope.badge.fill", label: "Switch to email codes") { showSwitchToEmail = true }
                         } else {
@@ -151,39 +123,22 @@ struct AccountSecurityView: View {
                     }
 
                     if twoFactorEnabled && twoFactorMethod == .totp {
-                        Divider().padding(.leading, 52)
-                        HStack(spacing: 14) {
-                            Image(systemName: "key.fill")
-                                .font(.system(size: 16))
-                                .foregroundColor(SS.primary)
-                                .frame(width: 28)
-                                .padding(.leading, 14)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Backup Codes")
-                                    .font(.system(size: 15))
-                                Text(backupRemaining.map { "\($0) of 8 left" } ?? "Loading…")
-                                    .font(.system(size: 12))
-                                    .foregroundColor((backupRemaining ?? 8) <= 2 ? .red : .secondary)
-                            }
-                            Spacer()
+                        DSRow(
+                            "Backup Codes",
+                            subtitle: backupRemaining.map { "\($0) of 8 left" } ?? "Loading…",
+                            systemIcon: "key.fill",
+                            iconTone: (backupRemaining ?? 8) <= 2 ? .danger : .primary
+                        ) {
                             Button("Regenerate") { showRegenerate = true }
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundColor(SS.primary)
-                                .padding(.trailing, 14)
+                                .font(DS.Font.make(13, .semibold, relativeTo: .footnote))
+                                .foregroundStyle(DS.Color.primaryText)
+                                .frame(minHeight: 44)
                         }
-                        .padding(.vertical, 14)
                     }
 
-                    Divider().padding(.leading, 52)
-
-                    NavigationLink {
-                        ActiveSessionsView()
-                    } label: {
-                        SettingsNavRow(icon: "iphone.and.arrow.forward", label: "Active Sessions")
-                    }
+                    ProfileNavRow(icon: "iphone.and.arrow.forward", label: "Active Sessions") { ActiveSessionsView() }
                 }
             }
-            .padding(.horizontal, 16)
         }
         // refreshMe (nicht ...IfPossible): ein Netzwerkfehler soll hier nicht ausloggen
         .task {
@@ -314,46 +269,40 @@ struct ActiveSessionsView: View {
     private var otherSessions: [DeviceSessionDTO] { sessions.filter { !$0.isCurrent } }
 
     var body: some View {
-        SubScreenShell(title: "Active Sessions") {
-            VStack(spacing: 16) {
+        SubScreenShell(title: "Active Sessions", padded: true) {
+            VStack(alignment: .leading, spacing: DS.Spacing.md) {
                 if isLoading && sessions.isEmpty {
-                    ProgressView()
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 40)
+                    VStack(spacing: DS.Spacing.sm) {
+                        DSSkeletonBlock(height: 70, radius: DS.Radius.card)
+                        DSSkeletonBlock(height: 70, radius: DS.Radius.card)
+                    }
+                    .accessibilityLabel("Loading devices")
                 } else if let loadError, sessions.isEmpty {
-                    VStack(spacing: 12) {
+                    VStack(spacing: DS.Spacing.sm) {
                         Text(loadError)
-                            .font(.system(size: 14))
-                            .foregroundColor(.secondary)
+                            .dsFont(.callout)
+                            .foregroundStyle(DS.Color.muted)
                             .multilineTextAlignment(.center)
                         Button("Try Again") { Task { await load() } }
-                            .font(.system(size: 14, weight: .semibold))
+                            .buttonStyle(.ds(.soft, size: .medium, fullWidth: false))
                     }
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 40)
+                    .padding(.vertical, DS.Spacing.xxl)
                 } else {
                     Text("These devices are signed in to your account. If you don't recognize one, sign it out and change your password.")
-                        .font(.system(size: 13))
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 4)
+                        .dsFont(.callout)
+                        .foregroundStyle(DS.Color.muted)
 
-                    VStack(spacing: 0) {
+                    DSSection("Devices") {
                         ForEach(sessions) { session in
                             sessionRow(session)
-                            if session.id != sessions.last?.id {
-                                Divider().padding(.leading, 60)
-                            }
                         }
                     }
-                    .background(Color(uiColor: .systemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
-                    .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
 
                     if let actionError {
                         Text(actionError)
-                            .font(.system(size: 13))
-                            .foregroundColor(.red)
-                            .padding(.horizontal, 4)
+                            .dsFont(.callout)
+                            .foregroundStyle(DS.Color.danger)
                     }
 
                     if !otherSessions.isEmpty {
@@ -361,24 +310,16 @@ struct ActiveSessionsView: View {
                             showSignOutOthersAlert = true
                         } label: {
                             Text("Sign out of all other devices")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.red)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 14)
-                                .background(Color(uiColor: .systemBackground))
-                                .clipShape(RoundedRectangle(cornerRadius: 14))
-                                .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.ds(.destructiveSoft))
                     } else {
                         Text("No other devices are signed in.")
-                            .font(.system(size: 13))
-                            .foregroundColor(.secondary)
+                            .dsFont(.callout)
+                            .foregroundStyle(DS.Color.muted)
                             .frame(maxWidth: .infinity)
                     }
                 }
             }
-            .padding(.horizontal, 16)
         }
         .task { await load() }
         .refreshable { await load() }
@@ -401,57 +342,29 @@ struct ActiveSessionsView: View {
     }
 
     private func sessionRow(_ session: DeviceSessionDTO) -> some View {
-        HStack(spacing: 14) {
-            Image(systemName: session.iconName)
-                .font(.system(size: 22))
-                .foregroundColor(session.isCurrent ? SS.primary : .secondary)
-                .frame(width: 32)
-                .padding(.leading, 14)
-
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(session.displayName)
-                        .font(.system(size: 14, weight: .semibold))
-                    if session.isCurrent {
-                        Text("This Device")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 2)
-                            .background(SS.primary)
-                            .clipShape(Capsule())
-                    }
+        DSRow(
+            session.displayName,
+            subtitle: detailLine(for: session) + "\nSigned in \(session.createdAt.formatted(date: .abbreviated, time: .omitted))",
+            systemIcon: session.iconName,
+            iconTone: session.isCurrent ? .primary : .neutral
+        ) {
+            if session.isCurrent {
+                DSBadge("This Device", .today)
+            } else if busySessionId == session.id {
+                ProgressView()
+            } else {
+                Button {
+                    sessionToRevoke = session
+                } label: {
+                    Text("Sign Out")
+                        .font(DS.Font.make(12, .semibold, relativeTo: .caption))
+                        .foregroundStyle(DS.Color.danger)
+                        .padding(.horizontal, DS.Spacing.sm)
+                        .frame(minHeight: 44)
                 }
-                Text(detailLine(for: session))
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
-                Text("Signed in \(session.createdAt.formatted(date: .abbreviated, time: .omitted))")
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
-            }
-
-            Spacer()
-
-            if !session.isCurrent {
-                if busySessionId == session.id {
-                    ProgressView().padding(.trailing, 14)
-                } else {
-                    Button {
-                        sessionToRevoke = session
-                    } label: {
-                        Text("Sign Out")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.red)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .overlay(Capsule().stroke(Color.red.opacity(0.5), lineWidth: 1))
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.trailing, 14)
-                }
+                .buttonStyle(.dsPressable)
             }
         }
-        .padding(.vertical, 14)
     }
 
     // Ort kommt vom Geraet selbst (grober App-Standort, "City, ST") — keine IP-Ortung
@@ -505,15 +418,15 @@ struct NotificationSettingsView: View {
     private struct CategoryRow: Identifiable {
         let id: WritableKeyPath<NotificationSettingsDTO, NotificationChannelDTO>
         let icon: String
-        let color: Color
+        let tone: DS.Tone
         let label: String
     }
 
     private let rows: [CategoryRow] = [
-        .init(id: \.jobActivity, icon: "briefcase.fill",      color: SS.primary, label: "Job Activity"),
-        .init(id: \.payments,    icon: "dollarsign.circle.fill", color: .green,     label: "Payments"),
-        .init(id: \.messages,    icon: "bubble.left.fill",     color: .blue,      label: "Messages"),
-        .init(id: \.account,     icon: "person.fill",          color: .orange,    label: "Account"),
+        .init(id: \.jobActivity, icon: "briefcase.fill",         tone: .primary, label: "Job Activity"),
+        .init(id: \.payments,    icon: "dollarsign.circle.fill",  tone: .success, label: "Payments"),
+        .init(id: \.messages,    icon: "bubble.left.fill",        tone: .primary, label: "Messages"),
+        .init(id: \.account,     icon: "person.fill",             tone: .warning, label: "Account"),
     ]
 
     @State private var settings: AccountSettingsDTO?
@@ -523,21 +436,26 @@ struct NotificationSettingsView: View {
     @ObservedObject private var push = PushNotificationManager.shared
 
     var body: some View {
-        SubScreenShell(title: "Notifications") {
-            VStack(spacing: 16) {
+        SubScreenShell(title: "Notifications", padded: true) {
+            VStack(alignment: .leading, spacing: DS.Spacing.lg) {
                 if let settings {
                     content(settings)
                 } else if let loadError {
-                    VStack(spacing: 12) {
-                        Text(loadError).font(.system(size: 14)).foregroundColor(.secondary)
+                    VStack(spacing: DS.Spacing.sm) {
+                        Text(loadError).dsFont(.callout).foregroundStyle(DS.Color.muted)
                             .multilineTextAlignment(.center)
                         Button("Try Again") { Task { await load() } }
-                            .font(.system(size: 14, weight: .semibold))
+                            .buttonStyle(.ds(.soft, size: .medium, fullWidth: false))
                     }
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 40)
+                    .padding(.vertical, DS.Spacing.xxl)
                 } else {
-                    ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
+                    VStack(spacing: DS.Spacing.sm) {
+                        DSSkeletonBlock(height: 56, radius: DS.Radius.card)
+                        DSSkeletonBlock(height: 56, radius: DS.Radius.card)
+                        DSSkeletonBlock(height: 56, radius: DS.Radius.card)
+                    }
+                    .accessibilityLabel("Loading notification settings")
                 }
             }
         }
@@ -553,29 +471,22 @@ struct NotificationSettingsView: View {
     @ViewBuilder
     private var systemPermissionHint: some View {
         if push.authorizationStatus == .denied {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: DS.Spacing.sm) {
                 Label("Push notifications are turned off for SwipeShift in iOS Settings, so you won't receive any push messages.",
                       systemImage: "bell.slash.fill")
-                    .font(.system(size: 13))
-                    .foregroundColor(.primary)
+                    .dsFont(.callout)
+                    .foregroundStyle(DS.Color.text)
                 Button("Open Settings") {
                     if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
                 }
-                .font(.system(size: 14, weight: .semibold))
+                .buttonStyle(.ds(.soft, size: .medium, fullWidth: false))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(14)
-            .background(Color.orange.opacity(0.12))
-            .clipShape(RoundedRectangle(cornerRadius: 14))
-            .padding(.horizontal, 16)
+            .padding(DS.Spacing.inset)
+            .background(DS.Color.warningSoft, in: RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
         } else if push.authorizationStatus == .notDetermined {
             Button("Allow Push Notifications") { Task { await push.requestPermission() } }
-                .font(.system(size: 14, weight: .semibold))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .background(Color(uiColor: .systemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-                .padding(.horizontal, 16)
+                .buttonStyle(.ds(.soft, size: .medium))
         }
     }
 
@@ -583,118 +494,60 @@ struct NotificationSettingsView: View {
     private func content(_ current: AccountSettingsDTO) -> some View {
         systemPermissionHint
 
-        // Kanal-Header
-        HStack {
-            Spacer()
-            Text("Push")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(.secondary)
-                .frame(width: 50)
-            Text("E-Mail")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(.secondary)
-                .frame(width: 50)
-                .padding(.trailing, 14)
-        }
-        .padding(.horizontal, 16)
+        // Kategorien (Push + E-Mail je Kategorie)
+        DSSection("Categories") {
+            HStack {
+                Spacer()
+                Text("Push")
+                    .font(DS.Font.make(12, .semibold, relativeTo: .caption))
+                    .foregroundStyle(DS.Color.muted)
+                    .frame(width: 51)
+                Text("E-Mail")
+                    .font(DS.Font.make(12, .semibold, relativeTo: .caption))
+                    .foregroundStyle(DS.Color.muted)
+                    .frame(width: 51)
+            }
+            .padding(.bottom, DS.Spacing.xxs)
 
-        // Kategorien
-        VStack(spacing: 0) {
-            ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
-                HStack(spacing: 12) {
-                    ZStack {
-                        Circle()
-                            .fill(row.color.opacity(0.12))
-                            .frame(width: 34, height: 34)
-                        Image(systemName: row.icon)
-                            .font(.system(size: 14))
-                            .foregroundColor(row.color)
-                    }
-                    .padding(.leading, 14)
-
-                    Text(row.label)
-                        .font(.system(size: 15))
-
-                    Spacer()
-
-                    Toggle("", isOn: channelBinding(row.id, \.push))
+            ForEach(rows) { row in
+                DSRow(row.label, systemIcon: row.icon, iconTone: row.tone) {
+                    Toggle("\(row.label) push", isOn: channelBinding(row.id, \.push))
                         .labelsHidden()
-                        .frame(width: 50)
-
-                    Toggle("", isOn: channelBinding(row.id, \.email))
+                        .tint(DS.Color.primary)
+                        .frame(width: 51)
+                    Toggle("\(row.label) email", isOn: channelBinding(row.id, \.email))
                         .labelsHidden()
-                        .frame(width: 50)
-                        .padding(.trailing, 14)
-                }
-                .padding(.vertical, 12)
-
-                if index < rows.count - 1 {
-                    Divider().padding(.leading, 62)
+                        .tint(DS.Color.primary)
+                        .frame(width: 51)
                 }
             }
         }
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
-        .padding(.horizontal, 16)
 
         // Ruhige Stunden
-        VStack(spacing: 0) {
-            HStack(spacing: 14) {
-                Image(systemName: "moon.fill")
-                    .font(.system(size: 16))
-                    .foregroundColor(SS.primary)
-                    .frame(width: 28)
-                    .padding(.leading, 14)
-                Text("Quiet Hours")
-                    .font(.system(size: 15))
-                Spacer()
-                Toggle("", isOn: quietBinding(\.enabled))
-                    .labelsHidden()
-                    .padding(.trailing, 14)
-            }
-            .padding(.vertical, 14)
+        DSSection("Quiet Hours") {
+            DSToggleRow("Quiet Hours", systemIcon: "moon.fill", isOn: quietBinding(\.enabled))
 
             if current.quietHours.enabled {
-                Divider().padding(.leading, 52)
-                HStack(spacing: 14) {
-                    Image(systemName: "clock.fill")
-                        .font(.system(size: 16))
-                        .foregroundColor(.secondary)
-                        .frame(width: 28)
-                        .padding(.leading, 14)
-                    Text("From")
-                        .font(.system(size: 15))
-                        .foregroundColor(.secondary)
-                    DatePicker("", selection: timeBinding(\.from), displayedComponents: .hourAndMinute)
+                DSRow("From", systemIcon: "clock.fill", iconTone: .neutral) {
+                    DatePicker("From", selection: timeBinding(\.from), displayedComponents: .hourAndMinute)
                         .labelsHidden()
-                    Text("to")
-                        .font(.system(size: 15))
-                        .foregroundColor(.secondary)
-                    DatePicker("", selection: timeBinding(\.to), displayedComponents: .hourAndMinute)
+                    Text("to").dsFont(.body).foregroundStyle(DS.Color.muted)
+                    DatePicker("To", selection: timeBinding(\.to), displayedComponents: .hourAndMinute)
                         .labelsHidden()
-                        .padding(.trailing, 14)
                 }
-                .padding(.vertical, 10)
             }
         }
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
-        .padding(.horizontal, 16)
-        .animation(.easeInOut(duration: 0.2), value: current.quietHours.enabled)
+        .dsAnimation(.standard, value: current.quietHours.enabled)
 
         if let saveError {
             Text(saveError)
-                .font(.system(size: 12))
-                .foregroundColor(.red)
-                .padding(.horizontal, 20)
+                .dsFont(.caption)
+                .foregroundStyle(DS.Color.danger)
         }
 
         Text("Quiet Hours mute push notifications only. Emails are still sent, and security emails (sign-in codes, password changes) are always delivered.")
-            .font(.system(size: 12))
-            .foregroundColor(.secondary)
-            .padding(.horizontal, 20)
+            .dsFont(.caption)
+            .foregroundStyle(DS.Color.muted)
     }
 
     // MARK: Bindings (jede Aenderung wird sofort gespeichert)
@@ -707,6 +560,7 @@ struct NotificationSettingsView: View {
             get: { settings?.notifications[keyPath: category][keyPath: channel] ?? false },
             set: { newValue in
                 guard var updated = settings else { return }
+                DS.Haptics.selection()
                 updated.notifications[keyPath: category][keyPath: channel] = newValue
                 save(updated, patch: AccountSettingsPatch(notifications: updated.notifications))
             }
@@ -813,15 +667,19 @@ struct PaymentsPayoutsView: View {
     @State private var reauthMethods:     [String]?       // gesetzt = Re-Auth-Sheet sichtbar
 
     var body: some View {
-        SubScreenShell(title: "Payments & Payouts") {
-            VStack(spacing: 16) {
+        SubScreenShell(title: "Payments & Payouts", padded: true) {
+            VStack(alignment: .leading, spacing: DS.Spacing.xl) {
                 if isLoading {
-                    ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
+                    VStack(spacing: DS.Spacing.sm) {
+                        DSSkeletonBlock(height: 56, radius: DS.Radius.control)
+                        DSSkeletonBlock(height: 56, radius: DS.Radius.control)
+                        DSSkeletonBlock(height: 56, radius: DS.Radius.control)
+                    }
+                    .accessibilityLabel("Loading payout settings")
                 } else {
                     form
                 }
             }
-            .padding(.horizontal, 16)
         }
         .task { await load() }
         .task { await feeConfig.refresh() }
@@ -841,107 +699,88 @@ struct PaymentsPayoutsView: View {
     private var form: some View {
         // Methode wählen
         sectionCard("Payout Method") {
-            HStack(spacing: 0) {
-                ForEach(PayoutMethod.allCases, id: \.self) { method in
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.2)) { selectedMethod = method }
-                    } label: {
-                        Text(method.label)
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(selectedMethod == method ? .white : .secondary)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 10)
-                            .background(selectedMethod == method ? SS.primary : Color.clear)
-                            .clipShape(Capsule())
+            VStack(alignment: .leading, spacing: DS.Spacing.md) {
+                HStack(spacing: DS.Spacing.xxs) {
+                    ForEach(PayoutMethod.allCases, id: \.self) { method in
+                        Button {
+                            DS.Haptics.selection()
+                            selectedMethod = method
+                        } label: {
+                            Text(method.label)
+                                .font(DS.Font.make(14, .semibold, relativeTo: .callout))
+                                .foregroundStyle(selectedMethod == method ? DS.Color.onPrimary : DS.Color.text2)
+                                .frame(maxWidth: .infinity, minHeight: 36)
+                                .background(selectedMethod == method ? DS.Color.primary : Color.clear, in: Capsule())
+                                .frame(minHeight: 44)
+                                .contentShape(Capsule())
+                        }
+                        .buttonStyle(.dsPressable)
+                        .accessibilityAddTraits(selectedMethod == method ? .isSelected : [])
                     }
-                    .buttonStyle(.plain)
+                }
+                .padding(DS.Spacing.xxs)
+                .background(DS.Color.surface2, in: Capsule())
+                .dsAnimation(.snappy, value: selectedMethod)
+
+                if selectedMethod == .bank {
+                    bankForm
+                } else {
+                    DSTextField("PayPal E-Mail", placeholder: "name@example.com", text: $paypalEmail)
+                        .keyboardType(.emailAddress)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
                 }
             }
-            .padding(4)
-            .background(Color.gray.opacity(0.1))
-            .clipShape(Capsule())
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-
-            Divider().padding(.horizontal, 14)
-
-            if selectedMethod == .bank {
-                bankForm
-            } else {
-                inputRow(icon: "p.circle.fill", placeholder: "PayPal E-Mail", text: $paypalEmail)
-                    .keyboardType(.emailAddress)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-            }
+            .padding(.vertical, DS.Spacing.sm)
         }
 
         // Auszahlungsrhythmus
         sectionCard("Payout Frequency") {
-            VStack(spacing: 0) {
-                ForEach(PayoutFrequency.allCases, id: \.self) { freq in
-                    Button {
-                        selectedFrequency = freq
-                    } label: {
-                        HStack(spacing: 14) {
-                            Image(systemName: selectedFrequency == freq ? "checkmark.circle.fill" : "circle")
-                                .font(.system(size: 18))
-                                .foregroundColor(selectedFrequency == freq ? SS.primary : .secondary)
-                                .frame(width: 28)
-                                .padding(.leading, 14)
-                            Text(freq.label)
-                                .font(.system(size: 15))
-                                .foregroundColor(.primary)
-                            Spacer()
-                            Text(freq == .instant ? "\(PlatformFees.percentLabel(feeConfig.instantPayoutFeePercent)) fee" : "Free")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(freq == .instant ? .orange : .green)
-                                .padding(.trailing, 14)
-                        }
-                        .padding(.vertical, 14)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    if freq != PayoutFrequency.allCases.last {
-                        Divider().padding(.leading, 52)
-                    }
+            ForEach(PayoutFrequency.allCases, id: \.self) { freq in
+                DSRow(
+                    freq.label,
+                    systemIcon: selectedFrequency == freq ? "checkmark.circle.fill" : "circle",
+                    iconTone: selectedFrequency == freq ? .primary : .neutral,
+                    action: { selectedFrequency = freq }
+                ) {
+                    Text(freq == .instant ? "\(PlatformFees.percentLabel(feeConfig.instantPayoutFeePercent)) fee" : "Free")
+                        .font(DS.Font.make(12, .semibold, relativeTo: .caption))
+                        .foregroundStyle(freq == .instant ? DS.Color.warning : DS.Color.success)
                 }
-                Divider().padding(.horizontal, 14)
-                Text("Standard payouts (weekly or monthly) are free. Instant payouts will cost \(PlatformFees.percentLabel(feeConfig.instantPayoutFeePercent)) once in-app payouts launch. You always earn the full hourly wage; there are no platform fees for workers.")
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(14)
+                .accessibilityAddTraits(selectedFrequency == freq ? .isSelected : [])
             }
+            Text("Standard payouts (weekly or monthly) are free. Instant payouts will cost \(PlatformFees.percentLabel(feeConfig.instantPayoutFeePercent)) once in-app payouts launch. You always earn the full hourly wage; there are no platform fees for workers.")
+                .dsFont(.caption)
+                .foregroundStyle(DS.Color.muted)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, DS.Spacing.sm)
         }
 
         if let errorMessage {
             Text(errorMessage)
-                .font(.system(size: 13))
-                .foregroundColor(.red)
-                .padding(.horizontal, 4)
+                .dsFont(.callout)
+                .foregroundStyle(DS.Color.danger)
         } else if showSavedToast {
             Label("Saved", systemImage: "checkmark.circle.fill")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(.green)
+                .font(DS.Font.make(13, .semibold, relativeTo: .footnote))
+                .foregroundStyle(DS.Color.success)
         }
 
         // Speichern
         Button { Task { await savePayout() } } label: {
             if isSaving {
-                ProgressView().tint(.white).frame(maxWidth: .infinity)
+                ProgressView().tint(DS.Color.onPrimary)
             } else {
-                Text("Save").fontWeight(.semibold).frame(maxWidth: .infinity)
+                Text("Save")
             }
         }
-        .buttonStyle(SSPrimaryButtonStyle())
+        .buttonStyle(.ds(.primary))
         .disabled(isSaving || !canSave)
-        .opacity(canSave ? 1 : 0.5)
 
         // TODO: Echte Auszahlungen (Zahlungsdienstleister) gibt es noch nicht — Daten werden nur hinterlegt
         Text("Payouts aren't active yet. Your details are stored encrypted and will be used once payouts launch.")
-            .font(.system(size: 12))
-            .foregroundColor(.secondary)
-            .padding(.horizontal, 4)
+            .dsFont(.caption)
+            .foregroundStyle(DS.Color.muted)
     }
 
     // MARK: Bank form (US)
@@ -1002,102 +841,46 @@ struct PaymentsPayoutsView: View {
 
     @ViewBuilder
     private var bankForm: some View {
-        inputRow(icon: "person.fill", placeholder: "Account holder name", text: $holderName)
+        DSTextField("Account holder name", placeholder: "Name on the account", text: $holderName)
             .textContentType(.name)
             .autocorrectionDisabled()
-        Divider().padding(.horizontal, 14)
 
-        inputRow(icon: "building.columns.fill", placeholder: "Routing number (9 digits)", text: $routingNumber)
+        DSTextField("Routing number (9 digits)", placeholder: "123456789", text: $routingNumber, error: routingError)
             .keyboardType(.numberPad)
             .autocorrectionDisabled()
-        fieldError(routingError)
-        Divider().padding(.horizontal, 14)
 
         if let savedBank, !isChangingAccount {
-            HStack(spacing: 12) {
-                Image(systemName: "number")
-                    .font(.system(size: 16))
-                    .foregroundColor(SS.primary)
-                    .frame(width: 28)
-                    .padding(.leading, 14)
-                Text("•••• \(savedBank.accountLast4) saved")
-                    .font(.system(size: 15))
-                Spacer()
+            DSRow("•••• \(savedBank.accountLast4) saved", systemIcon: "number", showsDivider: false) {
                 Button("Change") { isChangingAccount = true }
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(SS.primary)
-                    .padding(.trailing, 14)
+                    .font(DS.Font.make(14, .semibold, relativeTo: .callout))
+                    .foregroundStyle(DS.Color.primaryText)
+                    .frame(minHeight: 44)
             }
-            .padding(.vertical, 14)
         } else {
-            secureInputRow(icon: "number", placeholder: "Account number", text: $accountNumber)
-            fieldError(accountError)
-            Divider().padding(.horizontal, 14)
-            secureInputRow(icon: "number", placeholder: "Confirm account number", text: $confirmAccount)
-            fieldError(confirmError)
+            DSTextField("Account number", placeholder: "Account number", text: $accountNumber, error: accountError, isSecure: true)
+                .keyboardType(.numberPad)
+                .textContentType(.none)
+                .autocorrectionDisabled()
+            DSTextField("Confirm account number", placeholder: "Confirm account number", text: $confirmAccount, error: confirmError, isSecure: true)
+                .keyboardType(.numberPad)
+                .textContentType(.none)
+                .autocorrectionDisabled()
             if savedBank != nil {
                 Button("Keep saved account number") {
                     isChangingAccount = false
                     accountNumber = ""
                     confirmAccount = ""
                 }
-                .font(.system(size: 13))
-                .foregroundColor(.secondary)
-                .padding(.horizontal, 14)
-                .padding(.bottom, 8)
+                .dsFont(.callout)
+                .foregroundStyle(DS.Color.muted)
+                .frame(minHeight: 44)
             }
         }
-        Divider().padding(.horizontal, 14)
 
         Picker("Account type", selection: $accountType) {
             ForEach(BankAccountType.allCases, id: \.self) { Text($0.label).tag($0) }
         }
         .pickerStyle(.segmented)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-    }
-
-    @ViewBuilder
-    private func fieldError(_ message: String?) -> some View {
-        if let message {
-            Text(message)
-                .font(.system(size: 12))
-                .foregroundColor(.red)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 14)
-                .padding(.bottom, 8)
-        }
-    }
-
-    private func secureInputRow(icon: String, placeholder: String, text: Binding<String>) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 16))
-                .foregroundColor(SS.primary)
-                .frame(width: 28)
-                .padding(.leading, 14)
-            SecureField(placeholder, text: text)
-                .font(.system(size: 15))
-                .keyboardType(.numberPad)
-                .textContentType(.none)
-                .autocorrectionDisabled()
-                .padding(.trailing, 14)
-        }
-        .padding(.vertical, 14)
-    }
-
-    private func inputRow(icon: String, placeholder: String, text: Binding<String>) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 16))
-                .foregroundColor(SS.primary)
-                .frame(width: 28)
-                .padding(.leading, 14)
-            TextField(placeholder, text: text)
-                .font(.system(size: 15))
-                .padding(.trailing, 14)
-        }
-        .padding(.vertical, 14)
     }
 
     private func apply(_ payout: PayoutSettingsDTO) {
@@ -1203,69 +986,63 @@ struct ReauthSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Confirm it's you")
-                    .font(.system(size: 22, weight: .bold))
-                Text("For your security, please confirm your identity before changing payout details.")
-                    .font(.system(size: 14))
-                    .foregroundColor(.secondary)
+            ScrollView {
+                VStack(alignment: .leading, spacing: DS.Spacing.md) {
+                    Text("Confirm it's you")
+                        .dsFont(.title)
+                        .foregroundStyle(DS.Color.text)
+                    Text("For your security, please confirm your identity before changing payout details.")
+                        .dsFont(.body)
+                        .foregroundStyle(DS.Color.text2)
 
-                if methods.count > 1 {
-                    Picker("Method", selection: $method) {
-                        ForEach(methods, id: \.self) { Text(title($0)).tag($0) }
+                    if methods.count > 1 {
+                        Picker("Method", selection: $method) {
+                            ForEach(methods, id: \.self) { Text(title($0)).tag($0) }
+                        }
+                        .pickerStyle(.segmented)
+                        .onChange(of: method) { _, _ in secret = ""; errorMessage = nil }
                     }
-                    .pickerStyle(.segmented)
-                    .onChange(of: method) { _, _ in secret = ""; errorMessage = nil }
-                }
 
-                switch method {
-                case "totp":
-                    Text("Enter the 6-digit code from your authenticator app, or one of your backup codes.")
-                        .font(.system(size: 13)).foregroundColor(.secondary)
-                    TextField("Code", text: $secret)
-                        .textContentType(.oneTimeCode)
-                        .textInputAutocapitalization(.characters)
-                        .autocorrectionDisabled()
-                        .focused($focused)
-                        .textFieldStyle(.roundedBorder)
-                case "password":
-                    SecureField("Password", text: $secret)
-                        .textContentType(.password)
-                        .focused($focused)
-                        .textFieldStyle(.roundedBorder)
-                default:
-                    if codeSent {
-                        Text("We sent a 6-digit code to \(emailHint).")
-                            .font(.system(size: 13)).foregroundColor(.secondary)
-                        TextField("6-digit code", text: $secret)
-                            .keyboardType(.numberPad)
+                    switch method {
+                    case "totp":
+                        Text("Enter the 6-digit code from your authenticator app, or one of your backup codes.")
+                            .dsFont(.callout).foregroundStyle(DS.Color.muted)
+                        DSTextField("Code", placeholder: "Code", text: $secret)
                             .textContentType(.oneTimeCode)
-                            .focused($focused)
-                            .textFieldStyle(.roundedBorder)
+                            .textInputAutocapitalization(.characters)
+                            .autocorrectionDisabled()
+                    case "password":
+                        DSTextField("Password", placeholder: "Password", text: $secret, isSecure: true)
+                            .textContentType(.password)
+                    default:
+                        if codeSent {
+                            Text("We sent a 6-digit code to \(emailHint).")
+                                .dsFont(.callout).foregroundStyle(DS.Color.muted)
+                            DSTextField("6-digit code", placeholder: "123456", text: $secret)
+                                .keyboardType(.numberPad)
+                                .textContentType(.oneTimeCode)
+                        }
+                        Button(codeSent ? "Send a new code" : "Send code to \(emailHint)") {
+                            Task { await sendCode() }
+                        }
+                        .buttonStyle(.ds(.soft, size: .medium))
+                        .disabled(isBusy)
                     }
-                    Button(codeSent ? "Send a new code" : "Send code to \(emailHint)") {
-                        Task { await sendCode() }
+
+                    if let errorMessage {
+                        Text(errorMessage).dsFont(.callout).foregroundStyle(DS.Color.danger)
                     }
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(SS.primary)
-                    .disabled(isBusy)
-                }
 
-                if let errorMessage {
-                    Text(errorMessage).font(.system(size: 13)).foregroundColor(.red)
+                    Button { Task { await submit() } } label: {
+                        if isBusy { ProgressView().tint(DS.Color.onPrimary) }
+                        else { Text("Confirm") }
+                    }
+                    .buttonStyle(.ds(.primary))
+                    .disabled(!canSubmit)
                 }
-
-                Button { Task { await submit() } } label: {
-                    if isBusy { ProgressView().tint(.white).frame(maxWidth: .infinity) }
-                    else { Text("Confirm").fontWeight(.semibold).frame(maxWidth: .infinity) }
-                }
-                .buttonStyle(SSPrimaryButtonStyle())
-                .disabled(!canSubmit)
-                .opacity(canSubmit ? 1 : 0.5)
-
-                Spacer()
+                .padding(DS.Spacing.screenEdge)
             }
-            .padding(20)
+            .dsBackground()
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { Button("Cancel") { dismiss() } }
             }
@@ -1329,14 +1106,13 @@ struct PrivacyDataView: View {
     @State private var deleteError: String?
 
     var body: some View {
-        SubScreenShell(title: "Privacy & Data") {
-            VStack(spacing: 16) {
+        SubScreenShell(title: "Privacy & Data", padded: true) {
+            VStack(alignment: .leading, spacing: DS.Spacing.xl) {
                 // Dokumente
                 sectionCard("Legal") {
                     SettingsActionRow(icon: "doc.text.fill",    label: "Privacy Policy") {
                         openURL(AppConfig.websiteURL.appendingPathComponent("privacy"))
                     }
-                    Divider().padding(.leading, 52)
                     SettingsActionRow(icon: "doc.badge.gearshape.fill", label: "Terms of Service") {
                         openURL(AppConfig.websiteURL.appendingPathComponent("terms"))
                     }
@@ -1344,78 +1120,45 @@ struct PrivacyDataView: View {
 
                 // Blockierte Nutzer
                 sectionCard("Safety") {
-                    NavigationLink {
-                        BlockedUsersView()
-                    } label: {
-                        SettingsNavRow(icon: "hand.raised.slash.fill", label: "Blocked users")
-                    }
+                    ProfileNavRow(icon: "hand.raised.slash.fill", label: "Blocked users") { BlockedUsersView() }
                 }
 
                 // Konto-Status
                 sectionCard("Account Status") {
-                    HStack(spacing: 14) {
-                        Image(systemName: "pause.circle.fill")
-                            .font(.system(size: 16))
-                            .foregroundColor(.orange)
-                            .frame(width: 28)
-                            .padding(.leading, 14)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Pause Account")
-                                .font(.system(size: 15))
-                            Text(pauseSubtitle)
-                                .font(.system(size: 11))
-                                .foregroundColor(.secondary)
-                        }
-                        Spacer()
+                    DSRow("Pause Account", subtitle: pauseSubtitle, systemIcon: "pause.circle.fill", iconTone: .warning) {
                         if isUpdatingPause {
-                            ProgressView().padding(.trailing, 14)
+                            ProgressView()
                         } else {
-                            Toggle("", isOn: Binding(
+                            Toggle("Pause Account", isOn: Binding(
                                 get: { accountPaused },
                                 set: { wantsPause in
+                                    DS.Haptics.selection()
                                     if wantsPause { showPauseConfirm = true } else { Task { await setPaused(false) } }
                                 }
                             ))
                             .labelsHidden()
-                            .padding(.trailing, 14)
+                            .tint(DS.Color.primary)
                         }
                     }
-                    .padding(.vertical, 14)
 
                     if let pauseError {
                         Text(pauseError)
-                            .font(.system(size: 12))
-                            .foregroundColor(.red)
-                            .padding(.horizontal, 14)
-                            .padding(.bottom, 12)
+                            .dsFont(.caption)
+                            .foregroundStyle(DS.Color.danger)
+                            .padding(.vertical, DS.Spacing.xs)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
 
                 // Konto löschen
                 Button {
+                    DS.Haptics.warning()
                     showDeleteAlert = true
                 } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: "trash.fill")
-                            .font(.system(size: 14))
-                        Text("Delete Account")
-                            .font(.system(size: 15, weight: .semibold))
-                    }
-                    .foregroundColor(.red)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(Color(uiColor: .systemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14)
-                            .stroke(Color.red.opacity(0.3), lineWidth: 1)
-                    )
-                    .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
+                    Label("Delete Account", systemImage: "trash.fill")
                 }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 0)
+                .buttonStyle(.ds(.destructiveSoft))
             }
-            .padding(.horizontal, 16)
         }
         .alert("Delete Account?", isPresented: $showDeleteAlert) {
             Button("Delete Permanently", role: .destructive) {
@@ -1506,65 +1249,32 @@ struct AppPreferencesView: View {
     }
 
     var body: some View {
-        SubScreenShell(title: "App Preferences") {
-            VStack(spacing: 16) {
+        SubScreenShell(title: "App Preferences", padded: true) {
+            VStack(alignment: .leading, spacing: DS.Spacing.xl) {
                 // Erscheinungsbild
                 sectionCard("Appearance") {
-                    VStack(spacing: 0) {
-                        ForEach(AppColorSchemePreference.allCases, id: \.self) { scheme in
-                            Button {
-                                colorSchemeRaw = scheme.rawValue
-                            } label: {
-                                HStack(spacing: 14) {
-                                    Image(systemName: schemeIcon(scheme))
-                                        .font(.system(size: 16))
-                                        .foregroundColor(SS.primary)
-                                        .frame(width: 28)
-                                        .padding(.leading, 14)
-                                    Text(scheme.label)
-                                        .font(.system(size: 15))
-                                        .foregroundColor(.primary)
-                                    Spacer()
-                                    if colorScheme == scheme {
-                                        Image(systemName: "checkmark")
-                                            .font(.system(size: 14, weight: .semibold))
-                                            .foregroundColor(SS.primary)
-                                            .padding(.trailing, 14)
-                                    }
-                                }
-                                .padding(.vertical, 14)
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            if scheme != AppColorSchemePreference.allCases.last {
-                                Divider().padding(.leading, 52)
+                    ForEach(AppColorSchemePreference.allCases, id: \.self) { scheme in
+                        DSRow(scheme.label, systemIcon: schemeIcon(scheme), action: {
+                            DS.Haptics.selection()
+                            colorSchemeRaw = scheme.rawValue
+                        }) {
+                            if colorScheme == scheme {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(DS.Color.primary)
+                                    .accessibilityHidden(true)
                             }
                         }
+                        .accessibilityAddTraits(colorScheme == scheme ? .isSelected : [])
                     }
                 }
 
                 // Sprache — die App ist bisher nur auf Englisch; keine Auswahl ohne Wirkung anbieten.
                 // TODO: Mit Lokalisierung (Localizable.xcstrings) hier auf die iOS-App-Spracheinstellung verlinken
                 sectionCard("Language") {
-                    HStack(spacing: 14) {
-                        Image(systemName: "globe")
-                            .font(.system(size: 16))
-                            .foregroundColor(SS.primary)
-                            .frame(width: 28)
-                            .padding(.leading, 14)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("English")
-                                .font(.system(size: 15))
-                            Text("More languages are coming soon.")
-                                .font(.system(size: 12))
-                                .foregroundColor(.secondary)
-                        }
-                        Spacer()
-                    }
-                    .padding(.vertical, 14)
+                    DSRow("English", subtitle: "More languages are coming soon.", systemIcon: "globe")
                 }
             }
-            .padding(.horizontal, 16)
         }
     }
 
@@ -1591,24 +1301,18 @@ private struct ChangeEmailSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("New Email Address") {
-                    TextField("name@example.com", text: $newEmail)
-                        .keyboardType(.emailAddress)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                }
-                Section("Confirm Current Password") {
-                    SecureField("Password", text: $password)
-                }
+            sheetScroll {
+                DSTextField("New Email Address", placeholder: "name@example.com", text: $newEmail)
+                    .keyboardType(.emailAddress)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                DSTextField("Confirm Current Password", placeholder: "Password", text: $password, isSecure: true)
                 if let errorMsg {
-                    Section { Text(errorMsg).font(.system(size: 13)).foregroundColor(.red) }
+                    Text(errorMsg).dsFont(.callout).foregroundStyle(DS.Color.danger)
                 }
-                Section {
-                    Text("After saving, you will receive a verification email at the new address.")
-                        .font(.system(size: 13))
-                        .foregroundColor(.secondary)
-                }
+                Text("After saving, you will receive a verification email at the new address.")
+                    .dsFont(.callout)
+                    .foregroundStyle(DS.Color.muted)
             }
             .navigationTitle("Change Email")
             .navigationBarTitleDisplayMode(.inline)
@@ -1661,13 +1365,11 @@ private struct ChangePhoneSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("New Phone Number") {
-                    TextField("+1 555 123 4567", text: $phone)
-                        .keyboardType(.phonePad)
-                }
+            sheetScroll {
+                DSTextField("New Phone Number", placeholder: "+1 555 123 4567", text: $phone)
+                    .keyboardType(.phonePad)
                 if let errorMsg {
-                    Section { Text(errorMsg).font(.system(size: 13)).foregroundColor(.red) }
+                    Text(errorMsg).dsFont(.callout).foregroundStyle(DS.Color.danger)
                 }
             }
             .navigationTitle("Change Phone")
@@ -1715,22 +1417,16 @@ private struct ChangePasswordSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Current Password") {
-                    SecureField("••••••••", text: $current)
-                }
-                Section("New Password (min. 8 characters)") {
-                    SecureField("New password", text: $newPass)
-                    SecureField("Repeat password", text: $confirm)
-                }
+            sheetScroll {
+                DSTextField("Current Password", placeholder: "••••••••", text: $current, isSecure: true)
+                DSTextField("New Password (min. 8 characters)", placeholder: "New password", text: $newPass, isSecure: true)
+                DSTextField("Repeat password", placeholder: "Repeat password", text: $confirm, isSecure: true)
                 if !newPass.isEmpty && newPass != confirm {
-                    Section {
-                        Text("Passwords do not match.")
-                            .font(.system(size: 13)).foregroundColor(.red)
-                    }
+                    Text("Passwords do not match.")
+                        .dsFont(.callout).foregroundStyle(DS.Color.danger)
                 }
                 if let errorMsg {
-                    Section { Text(errorMsg).font(.system(size: 13)).foregroundColor(.red) }
+                    Text(errorMsg).dsFont(.callout).foregroundStyle(DS.Color.danger)
                 }
             }
             .navigationTitle("Change Password")
@@ -1783,29 +1479,21 @@ private struct SetPasswordSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    Text("You signed in with Google or Apple. Set a password to also log in with your email address.")
-                        .font(.system(size: 13))
-                        .foregroundColor(.secondary)
-                }
-                Section("New Password (min. 8 characters)") {
-                    SecureField("New password", text: $newPass)
-                    SecureField("Repeat password", text: $confirm)
-                }
+            sheetScroll {
+                Text("You signed in with Google or Apple. Set a password to also log in with your email address.")
+                    .dsFont(.callout)
+                    .foregroundStyle(DS.Color.muted)
+                DSTextField("New Password (min. 8 characters)", placeholder: "New password", text: $newPass, isSecure: true)
+                DSTextField("Repeat password", placeholder: "Repeat password", text: $confirm, isSecure: true)
                 if !newPass.isEmpty && newPass != confirm {
-                    Section {
-                        Text("Passwords do not match.")
-                            .font(.system(size: 13))
-                            .foregroundColor(.red)
-                    }
+                    Text("Passwords do not match.")
+                        .dsFont(.callout)
+                        .foregroundStyle(DS.Color.danger)
                 }
                 if let errorMessage {
-                    Section {
-                        Text(errorMessage)
-                            .font(.system(size: 13))
-                            .foregroundColor(.red)
-                    }
+                    Text(errorMessage)
+                        .dsFont(.callout)
+                        .foregroundStyle(DS.Color.danger)
                 }
             }
             .navigationTitle("Set Password")
@@ -1850,72 +1538,28 @@ private struct SetPasswordSheet: View {
 
 // MARK: - Shared Helpers
 
+/// Flache Gruppe mit Sektionslabel (Zeilen zeichnen ihre Trennlinien selbst).
 private func sectionCard<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-    VStack(alignment: .leading, spacing: 8) {
-        Text(title)
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundColor(.secondary)
-            .padding(.horizontal, 4)
-
-        VStack(spacing: 0) {
-            content()
-        }
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
-    }
+    DSSection(title) { content() }
 }
 
-private struct SettingsNavRow: View {
-    let icon: String
-    let label: String
-
-    var body: some View {
-        HStack(spacing: 14) {
-            Image(systemName: icon)
-                .font(.system(size: 16))
-                .foregroundColor(SS.primary)
-                .frame(width: 28)
-                .padding(.leading, 14)
-            Text(label)
-                .font(.system(size: 15))
-                .foregroundColor(.primary)
-            Spacer()
-            Image(systemName: "chevron.right")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(.secondary.opacity(0.4))
-                .padding(.trailing, 14)
-        }
-        .padding(.vertical, 14)
-        .contentShape(Rectangle())
+/// Scrollbarer, flacher Formularinhalt fuer die Aenderungs-Sheets (16er Innenabstand in den Feldern, 20 Rand).
+private func sheetScroll<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+    ScrollView {
+        VStack(alignment: .leading, spacing: DS.Spacing.md) { content() }
+            .padding(DS.Spacing.screenEdge)
     }
+    .scrollDismissesKeyboard(.interactively)
+    .dsBackground()
 }
 
+/// Aktionszeile (Button) mit Icon-Kachel und Chevron.
 private struct SettingsActionRow: View {
     let icon: String
     let label: String
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 14) {
-                Image(systemName: icon)
-                    .font(.system(size: 16))
-                    .foregroundColor(SS.primary)
-                    .frame(width: 28)
-                    .padding(.leading, 14)
-                Text(label)
-                    .font(.system(size: 15))
-                    .foregroundColor(.primary)
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.secondary.opacity(0.4))
-                    .padding(.trailing, 14)
-            }
-            .padding(.vertical, 14)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
+        DSRow(label, systemIcon: icon, showsChevron: true, action: action)
     }
 }

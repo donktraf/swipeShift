@@ -141,10 +141,10 @@ extension ApplicationStatus {
     /// Wireframe: Confirmed gruen, Applied grau. Completed in Markenfarbe, Cancelled gedaempft.
     var calendarColor: Color {
         switch self {
-        case .confirmed: return .green
-        case .applied:   return .gray
-        case .completed: return SS.primary
-        case .cancelled: return .gray.opacity(0.45)
+        case .confirmed: return DS.Color.success
+        case .applied:   return DS.Color.muted
+        case .completed: return DS.Color.primary
+        case .cancelled: return DS.Color.border
         }
     }
 
@@ -171,14 +171,13 @@ struct CalendarDayCell: View {
     var body: some View {
         VStack(spacing: 3) {
             Text("\(day)")
-                .font(.system(size: 13, weight: isToday ? .bold : .regular))
-                .foregroundColor(isToday ? .white : .primary)
+                .font(DS.Font.make(13, isToday ? .bold : .regular, relativeTo: .footnote))
+                .foregroundStyle(isToday ? DS.Color.onPrimary : DS.Color.text)
                 .frame(width: 32, height: 32)
-                .background(isToday ? SS.primary : Color.clear)
-                .clipShape(Circle())
+                .background(isToday ? DS.Color.primary : Color.clear, in: Circle())
                 .overlay(alignment: .topTrailing) {
                     if hasConflict {
-                        Circle().fill(Color.orange).frame(width: 7, height: 7)
+                        Circle().fill(DS.Color.warning).frame(width: 7, height: 7)
                     }
                 }
 
@@ -191,7 +190,8 @@ struct CalendarDayCell: View {
             }
             .frame(height: 5)
         }
-        .frame(height: 44)
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(day), \(entries.count) jobs\(hasConflict ? ", overlapping shifts" : "")")
     }
@@ -203,62 +203,58 @@ struct CalendarEntryRow: View {
     let entry: CalendarEntry
 
     var body: some View {
-        HStack(spacing: 12) {
-            Rectangle()
-                .fill(entry.status.calendarColor)
-                .frame(width: 3)
-                .clipShape(Capsule())
+        DSCard {
+            HStack(spacing: DS.Spacing.sm) {
+                Capsule()
+                    .fill(entry.status.calendarColor)
+                    .frame(width: 3)
 
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 4) {
-                    if entry.status == .cancelled {
-                        Image(systemName: "xmark.circle.fill").foregroundColor(.red).font(.system(size: 12))
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: DS.Spacing.xxs) {
+                        if entry.status == .cancelled {
+                            Image(systemName: "xmark.circle.fill").foregroundStyle(DS.Color.danger).font(.system(size: 12))
+                        }
+                        Text(entry.title)
+                            .dsFont(.callout)
+                            .foregroundStyle(DS.Color.text)
+                            .strikethrough(entry.status == .cancelled)
                     }
-                    Text(entry.title)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.primary)
-                        .strikethrough(entry.status == .cancelled)
+                    Text("\(entry.start.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))) · \(entry.timeLabel)")
+                        .dsFont(.caption)
+                        .foregroundStyle(DS.Color.muted)
+                    Text(entry.company)
+                        .dsFont(.caption)
+                        .foregroundStyle(DS.Color.muted)
+                    if entry.status == .cancelled, let reason = entry.cancellationReason {
+                        Text(reason)
+                            .dsFont(.caption).italic()
+                            .foregroundStyle(DS.Color.muted)
+                            .lineLimit(2)
+                    }
+                    if entry.status == .completed, let a = entry.attendance.flatMap(AttendanceStatus.init(rawValue:)) {
+                        let review = entry.disputeStatus == "pending"
+                        Label(review ? "Under review" : a.label, systemImage: review ? "hourglass" : a.icon)
+                            .font(DS.Font.make(11, .semibold, relativeTo: .caption2))
+                            .foregroundStyle(review ? DS.Color.warning : a.color)
+                    }
+                    if entry.hasConflict {
+                        Label("Overlaps with another shift", systemImage: "exclamationmark.triangle.fill")
+                            .font(DS.Font.make(11, .semibold, relativeTo: .caption2))
+                            .foregroundStyle(DS.Color.warning)
+                    }
                 }
-                Text("\(entry.start.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))) · \(entry.timeLabel)")
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
-                Text(entry.company)
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
-                if entry.status == .cancelled, let reason = entry.cancellationReason {
-                    Text(reason)
-                        .font(.system(size: 11)).italic()
-                        .foregroundColor(.secondary)
-                        .lineLimit(2)
-                }
-                if entry.status == .completed, let a = entry.attendance.flatMap(AttendanceStatus.init(rawValue:)) {
-                    let review = entry.disputeStatus == "pending"
-                    Label(review ? "Under review" : a.label, systemImage: review ? "hourglass" : a.icon)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(review ? .orange : a.color)
-                }
-                if entry.hasConflict {
-                    Label("Overlaps with another shift", systemImage: "exclamationmark.triangle.fill")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(.orange)
-                }
-            }
 
-            Spacer(minLength: 8)
+                Spacer(minLength: DS.Spacing.xs)
 
-            VStack(alignment: .trailing, spacing: 4) {
-                CalendarStatusBadge(status: entry.status)
-                if let payment = entry.paymentStatus {
-                    CalendarPaymentBadge(paymentStatus: payment)
+                VStack(alignment: .trailing, spacing: DS.Spacing.xxs) {
+                    CalendarStatusBadge(status: entry.status)
+                    if let payment = entry.paymentStatus {
+                        CalendarPaymentBadge(paymentStatus: payment)
+                    }
                 }
             }
         }
-        .padding(12)
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
         .opacity(entry.isPast() ? 0.7 : 1)
-        .contentShape(Rectangle())
     }
 }
 
@@ -266,12 +262,12 @@ struct CalendarStatusBadge: View {
     let status: ApplicationStatus
 
     var body: some View {
-        Text(status.calendarLabel)
-            .font(.system(size: 11, weight: .bold))
-            .foregroundColor(status == .cancelled ? .secondary : .white)
-            .padding(.horizontal, 8).padding(.vertical, 4)
-            .background(status == .cancelled ? Color(uiColor: .systemGray5) : status.calendarColor)
-            .clipShape(Capsule())
+        switch status {
+        case .confirmed: DSBadge(status.calendarLabel, .upcoming)          // gruen
+        case .applied:   DSBadge(status.calendarLabel, .tone(.neutral))    // grau
+        case .completed: DSBadge(status.calendarLabel, .completed)
+        case .cancelled: DSBadge(status.calendarLabel, .cancelled)
+        }
     }
 }
 
@@ -282,8 +278,8 @@ struct CalendarPaymentBadge: View {
 
     var body: some View {
         Label(isPaid ? "Paid" : "Pending payout", systemImage: isPaid ? "checkmark.circle.fill" : "clock")
-            .font(.system(size: 10, weight: .semibold))
-            .foregroundColor(isPaid ? .teal : .orange)
+            .font(DS.Font.make(10, .semibold, relativeTo: .caption2))
+            .foregroundStyle(isPaid ? DS.Color.success : DS.Color.warning)
     }
 }
 
@@ -297,14 +293,14 @@ struct CalendarWeekDayColumn: View {
     private var isToday: Bool { Calendar.current.isDateInToday(date) }
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: DS.Spacing.xs) {
             VStack(spacing: 2) {
                 Text(date.formatted(.dateTime.weekday(.abbreviated)))
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(isToday ? SS.primary : .secondary)
+                    .font(DS.Font.make(11, .semibold, relativeTo: .caption2))
+                    .foregroundStyle(isToday ? DS.Color.primaryText : DS.Color.muted)
                 Text(date.formatted(.dateTime.day()))
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(isToday ? SS.primary : .primary)
+                    .font(DS.Font.make(16, .bold, relativeTo: .headline))
+                    .foregroundStyle(isToday ? DS.Color.primaryText : DS.Color.text)
             }
 
             VStack(spacing: 6) {
@@ -317,23 +313,24 @@ struct CalendarWeekDayColumn: View {
                                 }
                                 Text(entry.title).lineLimit(2)
                             }
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(DS.Font.make(11, .semibold, relativeTo: .caption2))
                             Text(entry.start.formatted(date: .omitted, time: .shortened))
-                                .font(.system(size: 10))
+                                .font(DS.Font.make(10, .regular, relativeTo: .caption2))
                         }
-                        .foregroundColor(entry.status == .cancelled ? .secondary : .white)
+                        .foregroundStyle(entry.status == .cancelled ? DS.Color.muted : DS.Color.onPrimary)
                         .strikethrough(entry.status == .cancelled)
                         .padding(.horizontal, 6).padding(.vertical, 6)
-                        .frame(maxWidth: .infinity)
-                        .background(entry.status == .cancelled ? Color(uiColor: .systemGray5) : entry.status.calendarColor)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(entry.status == .cancelled ? DS.Color.surface2 : entry.status.calendarColor,
+                                    in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(entry.hasConflict ? Color.orange : .clear, lineWidth: 2)
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(entry.hasConflict ? DS.Color.warning : .clear, lineWidth: 2)
                         )
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
                         .opacity(entry.isPast() ? 0.6 : 1)
+                        .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.dsPressable)
                 }
                 if entries.isEmpty {
                     Color.clear.frame(height: 30)
@@ -341,9 +338,12 @@ struct CalendarWeekDayColumn: View {
             }
         }
         .frame(width: 80)
-        .padding(10)
-        .background(Color(uiColor: .systemBackground).opacity(isToday ? 1 : 0.7))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
+        .padding(DS.Spacing.xs)
+        .background(isToday ? DS.Color.primarySoft : DS.Color.surface,
+                    in: RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
+                .strokeBorder(DS.Color.border, lineWidth: 1)
+        )
     }
 }

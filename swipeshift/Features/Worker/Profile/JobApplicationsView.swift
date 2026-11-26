@@ -48,26 +48,27 @@ struct JobApplicationsView: View {
     }
 
     var body: some View {
-        SubScreenShell(title: "Job Applications") {
-            VStack(spacing: 16) {
-                tabSelector.padding(.horizontal, 16)
+        SubScreenShell(title: "Job Applications", padded: true) {
+            VStack(alignment: .leading, spacing: DS.Spacing.md) {
+                tabSelector
 
-                if isLoading {
-                    ProgressView().frame(maxWidth: .infinity).padding(.top, 60)
+                if isLoading && applications.isEmpty {
+                    skeleton
                 } else if let err = errorMessage {
-                    VStack(spacing: 12) {
-                        Text(err).font(.system(size: 13)).foregroundColor(.white.opacity(0.5))
-                            .multilineTextAlignment(.center).padding(.horizontal, 24)
+                    VStack(spacing: DS.Spacing.sm) {
+                        Text(err).dsFont(.callout).foregroundStyle(DS.Color.muted)
+                            .multilineTextAlignment(.center)
                         Button("Retry") { Task { await load() } }
-                            .font(.system(size: 14, weight: .semibold)).foregroundColor(SS.primary)
+                            .buttonStyle(.ds(.soft, size: .medium, fullWidth: false))
                     }
-                    .padding(.top, 60)
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, DS.Spacing.xxl)
                 } else if filtered.isEmpty {
                     emptyState
                 } else {
-                    VStack(spacing: 20) {
+                    VStack(alignment: .leading, spacing: DS.Spacing.lg) {
                         ForEach(groups) { group in
-                            VStack(spacing: 10) {
+                            VStack(spacing: DS.Spacing.sm) {
                                 monthHeader(group)
                                 ForEach(group.items) { item in
                                     ApplicationCard(
@@ -84,12 +85,29 @@ struct JobApplicationsView: View {
                             }
                         }
                     }
-                    .padding(.horizontal, 16)
                 }
             }
         }
+        .refreshable { await load() }
         .task { await load() }
         .applicationNavigation(navigation)
+    }
+
+    // MARK: - Skeleton
+
+    private var skeleton: some View {
+        VStack(spacing: DS.Spacing.sm) {
+            ForEach(0..<3, id: \.self) { _ in
+                DSCard {
+                    VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                        DSSkeletonBlock(width: 160, height: 16)
+                        DSSkeletonBlock(width: 110, height: 12)
+                        DSSkeletonBlock(height: 12)
+                    }
+                }
+            }
+        }
+        .accessibilityLabel("Loading applications")
     }
 
     // MARK: - Month Header
@@ -97,50 +115,50 @@ struct JobApplicationsView: View {
     private func monthHeader(_ group: ApplicationMonthGroup) -> some View {
         HStack {
             Text(group.title)
-                .font(.system(size: 14, weight: .bold)).foregroundColor(.white)
+                .dsFont(.sectionLabel).foregroundStyle(DS.Color.muted)
             Text("· \(group.items.count) \(group.items.count == 1 ? "job" : "jobs")")
-                .font(.system(size: 12, weight: .medium)).foregroundColor(.white.opacity(0.6))
+                .dsFont(.caption).foregroundStyle(DS.Color.muted)
             Spacer()
             if let total = group.totalEarnings {
                 Text("\(Money.format(total)) \(selectedTab == .completed ? "earned" : "expected")")
-                    .font(.system(size: 12, weight: .semibold)).foregroundColor(.white.opacity(0.75))
+                    .font(DS.Font.make(12, .semibold, relativeTo: .caption)).foregroundStyle(DS.Color.text2)
             }
         }
     }
 
-    // MARK: - Tab Selector
+    // MARK: - Tab Selector (segmentierte Pills)
 
     private var tabSelector: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: DS.Spacing.xxs) {
             ForEach(tabs, id: \.0) { (label, tab) in
-                Button { selectedTab = tab } label: {
+                Button {
+                    DS.Haptics.selection()
+                    selectedTab = tab
+                } label: {
                     Text(label)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(selectedTab == tab ? .white : .secondary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .background(selectedTab == tab ? SS.primary : Color.clear)
-                        .clipShape(Capsule())
+                        .font(DS.Font.make(12, .semibold, relativeTo: .caption))
+                        .foregroundStyle(selectedTab == tab ? DS.Color.onPrimary : DS.Color.text2)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .frame(maxWidth: .infinity, minHeight: 36)
+                        .background(selectedTab == tab ? DS.Color.primary : Color.clear, in: Capsule())
+                        .frame(minHeight: 44)
+                        .contentShape(Capsule())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.dsPressable)
+                .accessibilityAddTraits(selectedTab == tab ? .isSelected : [])
             }
         }
-        .padding(4)
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(Capsule())
-        .shadow(color: .black.opacity(0.06), radius: 4, x: 0, y: 2)
+        .padding(DS.Spacing.xxs)
+        .background(DS.Color.surface2, in: Capsule())
+        .dsAnimation(.snappy, value: selectedTab)
     }
 
     // MARK: - Empty State
 
     private var emptyState: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "tray")
-                .font(.system(size: 40)).foregroundColor(.white.opacity(0.3))
-            Text("No jobs in this category")
-                .font(.system(size: 15)).foregroundColor(.white.opacity(0.5))
-        }
-        .frame(maxWidth: .infinity).padding(.top, 60)
+        DSEmptyState(systemIcon: "tray", title: "No jobs here",
+                     message: "No jobs in this category")
     }
 
     // MARK: - Load

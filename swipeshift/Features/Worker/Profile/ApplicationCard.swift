@@ -25,145 +25,125 @@ struct ApplicationCard: View {
     @State private var hasReviewed       = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Header
-            HStack(spacing: 12) {
-                Text(item.logoEmoji)
-                    .font(.system(size: 28)).frame(width: 48, height: 48)
-                    .background(Color.gray.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+        DSCard {
+            VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                // Header
+                HStack(spacing: DS.Spacing.sm) {
+                    DSAvatar(text: item.logoEmoji, size: 48, shape: .roundedSquare)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(item.jobTitle)
-                        .font(.system(size: 15, weight: .semibold)).foregroundColor(.primary)
-                    Text(item.company)
-                        .font(.system(size: 13)).foregroundColor(.secondary)
-                    Text(metaLine)
-                        .font(.system(size: 11)).foregroundColor(.secondary.opacity(0.8))
-                }
-                Spacer()
-                statusBadge
-            }
-            .padding(14)
-
-            Divider().padding(.horizontal, 14)
-
-            // Details
-            HStack(spacing: 16) {
-                Label(item.bookedShifts?.cardLabel ?? item.shiftText, systemImage: "calendar")
-                Label(item.payText,   systemImage: "dollarsign.circle")
-                Label(item.location,  systemImage: "mappin")
-            }
-            .font(.system(size: 12)).foregroundColor(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 14).padding(.vertical, 10)
-            .lineLimit(1)
-
-            // Zahlungsstatus (nur abgeschlossene Jobs)
-            if status == .completed, let payment = item.paymentStatus {
-                Label(payment == "paid" ? "Paid" : "Payment pending",
-                      systemImage: payment == "paid" ? "checkmark.seal.fill" : "hourglass")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(payment == "paid" ? .green : .orange)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 14).padding(.bottom, 10)
-            }
-
-            // Grund der Stornierung/Ablehnung (Employer-Angabe oder Standardtext vom Backend)
-            if status == .cancelled, let reason = item.cancellationReason {
-                Label(reason, systemImage: "xmark.circle.fill")
-                    .font(.system(size: 12)).foregroundColor(.red.opacity(0.85))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 14).padding(.bottom, item.lateCancellation == true ? 4 : 10)
-            }
-            if status == .cancelled, item.lateCancellation == true {
-                Text("This counted as a late cancellation (less than 24 hours before the start).")
-                    .font(.system(size: 11)).foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 14).padding(.bottom, 10)
-            }
-
-            // Vom Employer erfasste Anwesenheit (+ einmaliger Einspruch)
-            if status == .completed {
-                AttendanceStatusRow(item: item, onChanged: onChanged)
-            }
-
-            Divider().padding(.horizontal, 14)
-            quickActions
-
-            // Bestaetigte, noch nicht begonnene Schicht stornieren (< 24 h = kurzfristig, Warnung im Dialog)
-            // Bestaetigte, noch nicht begonnene Schicht(en) absagen (< 24 h = kurzfristig, Warnung im Dialog).
-            // Mit gebuchten Schichten immer pro Schicht; ohne Schichtliste (Altbestand) die ganze Buchung.
-            let booked = item.bookedShifts ?? []
-            if status == .confirmed {
-                if booked.isEmpty {
-                    if item.canCancel == true {
-                        Divider().padding(.horizontal, 14)
-                        CancelShiftButton(applyId: item.id, jobTitle: item.jobTitle,
-                                          lateIfCancelledNow: item.lateIfCancelledNow == true) { _ in onChanged() }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.jobTitle)
+                            .dsFont(.headline).foregroundStyle(DS.Color.text)
+                        Text(item.company)
+                            .dsFont(.callout).foregroundStyle(DS.Color.text2)
+                        Text(metaLine)
+                            .dsFont(.caption).foregroundStyle(DS.Color.muted)
                     }
-                } else {
-                    ForEach(booked.filter { $0.canCancel == true }) { shift in
-                        Divider().padding(.horizontal, 14)
-                        CancelShiftButton(applyId: item.id, jobTitle: item.jobTitle,
-                                          lateIfCancelledNow: shift.lateIfCancelledNow == true,
-                                          shiftId: shift.id,
-                                          shiftLabel: booked.count > 1 ? (shift.fullLabel.isEmpty ? shift.shortLabel : shift.fullLabel) : nil,
-                                          isLastShift: booked.count == 1) { _ in onChanged() }
-                    }
+                    Spacer(minLength: DS.Spacing.xs)
+                    statusBadge
                 }
-            }
 
-            if status == .applied {
-                Divider().padding(.horizontal, 14)
-                Button {
-                    showWithdrawAlert = true
-                } label: {
-                    Text(isWithdrawing ? "Withdrawing…" : "Withdraw Application")
-                        .font(.system(size: 13, weight: .semibold)).foregroundColor(.red)
-                        .frame(maxWidth: .infinity).padding(.vertical, 10)
+                DSDivider()
+
+                // Details
+                VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
+                    Label(item.bookedShifts?.cardLabel ?? item.shiftText, systemImage: "calendar")
+                    Label(item.payText,   systemImage: "dollarsign.circle")
+                    Label(item.location,  systemImage: "mappin")
                 }
-                .buttonStyle(.plain)
-                .disabled(isWithdrawing)
-                .alert("Withdraw Application?", isPresented: $showWithdrawAlert) {
-                    Button("Withdraw", role: .destructive) {
-                        Task {
-                            isWithdrawing = true
-                            try? await APIClient.shared.withdrawApplication(applyId: item.id)
-                            onWithdraw()
+                .dsFont(.caption).foregroundStyle(DS.Color.muted)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .lineLimit(1)
+
+                // Zahlungsstatus (nur abgeschlossene Jobs)
+                if status == .completed, let payment = item.paymentStatus {
+                    Label(payment == "paid" ? "Paid" : "Payment pending",
+                          systemImage: payment == "paid" ? "checkmark.seal.fill" : "hourglass")
+                        .font(DS.Font.make(12, .semibold, relativeTo: .caption))
+                        .foregroundStyle(payment == "paid" ? DS.Color.success : DS.Color.warning)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                // Grund der Stornierung/Ablehnung (Employer-Angabe oder Standardtext vom Backend)
+                if status == .cancelled, let reason = item.cancellationReason {
+                    Label(reason, systemImage: "xmark.circle.fill")
+                        .dsFont(.caption).foregroundStyle(DS.Color.danger)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                if status == .cancelled, item.lateCancellation == true {
+                    Text("This counted as a late cancellation (less than 24 hours before the start).")
+                        .dsFont(.caption).foregroundStyle(DS.Color.muted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                // Vom Employer erfasste Anwesenheit (+ einmaliger Einspruch)
+                if status == .completed {
+                    AttendanceStatusRow(item: item, onChanged: onChanged)
+                }
+
+                quickActions
+
+                // Bestaetigte, noch nicht begonnene Schicht(en) absagen (< 24 h = kurzfristig, Warnung im Dialog).
+                // Mit gebuchten Schichten immer pro Schicht; ohne Schichtliste (Altbestand) die ganze Buchung.
+                let booked = item.bookedShifts ?? []
+                if status == .confirmed {
+                    if booked.isEmpty {
+                        if item.canCancel == true {
+                            CancelShiftButton(applyId: item.id, jobTitle: item.jobTitle,
+                                              lateIfCancelledNow: item.lateIfCancelledNow == true) { _ in onChanged() }
+                        }
+                    } else {
+                        ForEach(booked.filter { $0.canCancel == true }) { shift in
+                            CancelShiftButton(applyId: item.id, jobTitle: item.jobTitle,
+                                              lateIfCancelledNow: shift.lateIfCancelledNow == true,
+                                              shiftId: shift.id,
+                                              shiftLabel: booked.count > 1 ? (shift.fullLabel.isEmpty ? shift.shortLabel : shift.fullLabel) : nil,
+                                              isLastShift: booked.count == 1) { _ in onChanged() }
                         }
                     }
-                    Button("Cancel", role: .cancel) {}
-                } message: {
-                    Text("Your application for \(item.jobTitle) will be removed.")
                 }
-            }
 
-            if status == .completed {
-                Divider().padding(.horizontal, 14)
-                Button { showRatingSheet = true } label: {
-                    Label(hasReviewed ? "Review Submitted" : "Leave a Review",
-                          systemImage: hasReviewed ? "star.fill" : "star")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(hasReviewed ? .secondary : SS.primary)
-                        .frame(maxWidth: .infinity).padding(.vertical, 10)
+                if status == .applied {
+                    Button {
+                        showWithdrawAlert = true
+                    } label: {
+                        Text(isWithdrawing ? "Withdrawing…" : "Withdraw Application")
+                    }
+                    .buttonStyle(.ds(.destructiveSoft, size: .medium))
+                    .disabled(isWithdrawing)
+                    .alert("Withdraw Application?", isPresented: $showWithdrawAlert) {
+                        Button("Withdraw", role: .destructive) {
+                            Task {
+                                isWithdrawing = true
+                                try? await APIClient.shared.withdrawApplication(applyId: item.id)
+                                onWithdraw()
+                            }
+                        }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text("Your application for \(item.jobTitle) will be removed.")
+                    }
                 }
-                .buttonStyle(.plain)
-                .disabled(hasReviewed)
-                .sheet(isPresented: $showRatingSheet) {
-                    EmployerRatingSheet(
-                        applyId:     item.id,
-                        companyName: item.company,
-                        jobTitle:    item.jobTitle
-                    ) {
-                        hasReviewed = true
+
+                if status == .completed {
+                    Button { showRatingSheet = true } label: {
+                        Label(hasReviewed ? "Review Submitted" : "Leave a Review",
+                              systemImage: hasReviewed ? "star.fill" : "star")
+                    }
+                    .buttonStyle(.ds(.soft, size: .medium))
+                    .disabled(hasReviewed)
+                    .sheet(isPresented: $showRatingSheet) {
+                        EmployerRatingSheet(
+                            applyId:     item.id,
+                            companyName: item.company,
+                            jobTitle:    item.jobTitle
+                        ) {
+                            hasReviewed = true
+                        }
                     }
                 }
             }
         }
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
     }
 
     /// "Applied Nov 3 · Hospitality"
@@ -179,35 +159,27 @@ struct ApplicationCard: View {
     }
 
     private var quickActions: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: DS.Spacing.xs) {
             Button(action: onViewJob) {
                 Label("View job", systemImage: "doc.text.magnifyingglass")
-                    .font(.system(size: 13, weight: .semibold)).foregroundColor(SS.primary)
-                    .frame(maxWidth: .infinity).padding(.vertical, 10)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.ds(.secondary, size: .medium))
             if canChat {
-                Divider().frame(height: 20)
                 Button(action: onOpenChat) {
                     Label("Chat", systemImage: "bubble.left.and.bubble.right.fill")
-                        .font(.system(size: 13, weight: .semibold)).foregroundColor(SS.primary)
-                        .frame(maxWidth: .infinity).padding(.vertical, 10)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.ds(.secondary, size: .medium))
             }
         }
     }
 
+    @ViewBuilder
     private var statusBadge: some View {
-        let (label, color): (String, Color) = switch status {
-        case .confirmed: ("Confirmed", .green)
-        case .applied:   ("Applied",   SS.primary)
-        case .completed: ("Completed", .gray)
-        case .cancelled: ("Cancelled", .red)
+        switch status {
+        case .confirmed: DSBadge("Confirmed", .upcoming)
+        case .applied:   DSBadge("Applied", .tone(.primary))
+        case .completed: DSBadge("Completed", .completed)
+        case .cancelled: DSBadge("Cancelled", .cancelled)
         }
-        return Text(label)
-            .font(.system(size: 11, weight: .bold)).foregroundColor(.white)
-            .padding(.horizontal, 8).padding(.vertical, 4)
-            .background(color).clipShape(Capsule())
     }
 }

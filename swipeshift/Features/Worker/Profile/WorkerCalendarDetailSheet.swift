@@ -22,17 +22,17 @@ struct CalendarEntryDetailSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: DS.Spacing.md) {
                     header
                     if entry.hasConflict { conflictWarning }
                     if entry.status == .cancelled { cancellationBox }
-                    detailsCard
-                    if let notes = entry.jobNotes { notesCard(notes) }
+                    detailsSection
+                    if let notes = entry.jobNotes { notesSection(notes) }
                     actions
                 }
-                .padding(20)
+                .padding(DS.Spacing.screenEdge)
             }
-            .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
+            .dsBackground()
             .navigationTitle("Shift Details")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -44,14 +44,10 @@ struct CalendarEntryDetailSheet: View {
     }
 
     private var header: some View {
-        HStack(spacing: 12) {
-            Text(entry.logoEmoji)
-                .font(.system(size: 26))
-                .frame(width: 50, height: 50)
-                .background(Color(uiColor: .secondarySystemGroupedBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-            VStack(alignment: .leading, spacing: 4) {
-                Text(entry.title).font(.system(size: 17, weight: .bold))
+        HStack(spacing: DS.Spacing.sm) {
+            DSAvatar(text: entry.logoEmoji, size: 50, shape: .roundedSquare)
+            VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
+                Text(entry.title).dsFont(.headline).foregroundStyle(DS.Color.text)
                 CalendarStatusBadge(status: entry.status)
             }
             Spacer()
@@ -61,71 +57,58 @@ struct CalendarEntryDetailSheet: View {
     private var conflictWarning: some View {
         Label("This shift overlaps with another job in your calendar. Please check your schedule.",
               systemImage: "exclamationmark.triangle.fill")
-            .font(.system(size: 13, weight: .medium))
-            .foregroundColor(.orange)
-            .padding(12)
+            .font(DS.Font.make(13, .medium, relativeTo: .footnote))
+            .foregroundStyle(DS.Color.warning)
+            .padding(DS.Spacing.sm)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.orange.opacity(0.12))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .background(DS.Color.warningSoft, in: RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
     }
 
     private var cancellationBox: some View {
         Label(entry.cancellationReason ?? "This job was cancelled.", systemImage: "xmark.circle.fill")
-            .font(.system(size: 13, weight: .medium))
-            .foregroundColor(.red)
-            .padding(12)
+            .font(DS.Font.make(13, .medium, relativeTo: .footnote))
+            .foregroundStyle(DS.Color.danger)
+            .padding(DS.Spacing.sm)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.red.opacity(0.08))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .background(DS.Color.dangerSoft, in: RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
     }
 
-    private var detailsCard: some View {
-        VStack(spacing: 0) {
+    private var detailsSection: some View {
+        DSSection("Details") {
             detailRow(icon: "calendar", label: "Date",
-                      value: entry.start.formatted(.dateTime.weekday(.wide).day().month(.wide).year()))
-            Divider().padding(.leading, 44)
+                      value: entry.start.formatted(.dateTime.weekday(.wide).day().month(.wide).year()), first: true)
             detailRow(icon: "clock", label: "Time", value: entry.timeLabel)
-            Divider().padding(.leading, 44)
             detailRow(icon: "mappin.and.ellipse", label: "Location", value: entry.location)
             if let miles = entry.distanceMiles {
-                Divider().padding(.leading, 44)
                 detailRow(icon: "location", label: "Distance", value: String(format: "%.1f mi away", miles))
             }
             if let category = entry.category {
-                Divider().padding(.leading, 44)
                 detailRow(icon: "tag", label: "Category", value: category)
             }
-            Divider().padding(.leading, 44)
             detailRow(icon: "building.2", label: "Employer", value: entry.company)
-            Divider().padding(.leading, 44)
             detailRow(icon: "dollarsign.circle", label: "Pay", value: payValue)
             if entry.status == .completed, entry.attendance != nil {
-                Divider().padding(.leading, 44)
                 AttendanceInfoRow(attendance: entry.attendance, disputeStatus: entry.disputeStatus)
             }
             if let payment = entry.paymentStatus {
-                Divider().padding(.leading, 44)
                 detailRow(icon: payment == "paid" ? "checkmark.seal" : "hourglass",
                           label: "Payment", value: payment == "paid" ? "Paid" : "Pending payout")
             }
         }
-        .background(Color(uiColor: .secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
     /// Hinweise des Employers (Treffpunkt, mitbringen, ...)
-    private func notesCard(_ notes: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Label("Notes from the employer", systemImage: "note.text")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(SS.primary)
-            Text(notes)
-                .font(.system(size: 14))
-                .frame(maxWidth: .infinity, alignment: .leading)
+    private func notesSection(_ notes: String) -> some View {
+        DSCard {
+            VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                Label("Notes from the employer", systemImage: "note.text")
+                    .font(DS.Font.make(13, .semibold, relativeTo: .footnote))
+                    .foregroundStyle(DS.Color.primaryText)
+                Text(notes)
+                    .dsFont(.body).foregroundStyle(DS.Color.text)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
-        .padding(12)
-        .background(Color(uiColor: .secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
     private var payValue: String {
@@ -133,34 +116,26 @@ struct CalendarEntryDetailSheet: View {
         return "\(entry.payText) · \(Money.format(earnings)) for this shift"
     }
 
-    private func detailRow(icon: String, label: String, value: String) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: icon).foregroundColor(SS.primary).frame(width: 20)
-            Text(label).font(.system(size: 14)).foregroundColor(.secondary)
-            Spacer(minLength: 12)
-            Text(value).font(.system(size: 14, weight: .medium)).multilineTextAlignment(.trailing)
+    private func detailRow(icon: String, label: String, value: String, first: Bool = false) -> some View {
+        DSRow(label, systemIcon: icon, showsDivider: !first) {
+            Text(value)
+                .font(DS.Font.make(15, .medium)).foregroundStyle(DS.Color.text)
+                .multilineTextAlignment(.trailing)
         }
-        .padding(.horizontal, 12).padding(.vertical, 12)
     }
 
     private var actions: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: DS.Spacing.xs) {
             Button(action: onViewJob) {
                 Label("View Job Details", systemImage: "doc.text.magnifyingglass")
-                    .frame(maxWidth: .infinity)
             }
-            .buttonStyle(SSPrimaryButtonStyle())
+            .buttonStyle(.ds(.primary))
 
             if entry.canOpenChat {
                 Button(action: onOpenChat) {
                     Label("Open Chat", systemImage: "bubble.left.and.bubble.right.fill")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(SS.primary)
-                        .frame(maxWidth: .infinity).padding(.vertical, 14)
-                        .background(SS.primary.opacity(0.1))
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.ds(.soft))
             }
 
             if entry.canCancel {

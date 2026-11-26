@@ -19,29 +19,30 @@ struct EditEmployerProfileView: View {
     var body: some View {
         SubScreenShell(title: "Edit Profile") {
             VStack(spacing: 0) {
-                // Tab Switcher
-                HStack(spacing: 0) {
+                // Tab Switcher (segmentierte Pills)
+                HStack(spacing: DS.Spacing.xxs) {
                     ForEach(ProfileTab.allCases, id: \.self) { tab in
                         Button {
-                            withAnimation(.easeInOut(duration: 0.15)) { selectedTab = tab }
+                            DS.Haptics.selection()
+                            selectedTab = tab
                         } label: {
                             Text(tab.rawValue)
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(selectedTab == tab ? .white : .white.opacity(0.5))
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 10)
-                                .background(
-                                    selectedTab == tab
-                                        ? SS.primary
-                                        : Color.white.opacity(0.08)
-                                )
+                                .font(DS.Font.make(14, .semibold, relativeTo: .callout))
+                                .foregroundStyle(selectedTab == tab ? DS.Color.onPrimary : DS.Color.text2)
+                                .frame(maxWidth: .infinity, minHeight: 36)
+                                .background(selectedTab == tab ? DS.Color.primary : Color.clear, in: Capsule())
+                                .frame(minHeight: 44)
+                                .contentShape(Capsule())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.dsPressable)
+                        .accessibilityAddTraits(selectedTab == tab ? .isSelected : [])
                     }
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .padding(.horizontal, 16)
-                .padding(.bottom, 20)
+                .padding(DS.Spacing.xxs)
+                .background(DS.Color.surface2, in: Capsule())
+                .dsAnimation(.snappy, value: selectedTab)
+                .padding(.horizontal, DS.Spacing.screenEdge)
+                .padding(.bottom, DS.Spacing.lg)
 
                 switch selectedTab {
                 case .company:  CompanyInfoTab()
@@ -90,137 +91,78 @@ private struct CompanyInfoTab: View {
     private let sizeOptions = ["1–10", "11–50", "51–200", "201–500", "500+"]
 
     var body: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: DS.Spacing.xl) {
             // Logo
-            VStack(spacing: 10) {
-                ZStack {
-                    Circle()
-                        .fill(Color.white.opacity(0.15))
+            VStack(spacing: DS.Spacing.sm) {
+                if let img = selectedLogo {
+                    Image(uiImage: img)
+                        .resizable()
+                        .scaledToFill()
                         .frame(width: 80, height: 80)
-                    if let img = selectedLogo {
-                        Image(uiImage: img)
-                            .resizable()
-                            .scaledToFill()
-                            .frame(width: 80, height: 80)
-                            .clipShape(Circle())
-                    } else {
-                        Text("🏢")
-                            .font(.system(size: 36))
-                    }
+                        .clipShape(Circle())
+                        .accessibilityHidden(true)
+                } else {
+                    DSAvatar(text: "🏢", size: 80, shape: .circle)
                 }
                 Button("Change Logo") { showLogoPicker = true }
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.white)
+                    .buttonStyle(.ds(.soft, size: .medium, fullWidth: false))
             }
             .frame(maxWidth: .infinity)
-            .padding(.bottom, 4)
             .sheet(isPresented: $showLogoPicker) {
                 ImagePicker(image: $selectedLogo)
             }
 
             // Basic Info
             empSection(title: "Company Details") {
-                empRow(label: "Company Name") {
-                    TextField("Acme Corp", text: $companyName)
-                }
-                empRow(label: "Work Email") {
-                    TextField("hello@company.com", text: $email)
-                        .keyboardType(.emailAddress)
-                        .textContentType(.emailAddress)
-                }
-                empRow(label: "Phone") {
-                    TextField("+49 711 000 0000", text: $phone)
-                        .keyboardType(.phonePad)
-                }
-                empRow(label: "Website") {
-                    TextField("https://company.com", text: $website)
-                        .keyboardType(.URL)
-                }
+                DSTextField("Company Name", placeholder: "Acme Corp", text: $companyName)
+                DSTextField("Work Email", placeholder: "hello@company.com", text: $email)
+                    .keyboardType(.emailAddress)
+                    .textContentType(.emailAddress)
+                    .textInputAutocapitalization(.never)
+                DSTextField("Phone", placeholder: "+49 711 000 0000", text: $phone)
+                    .keyboardType(.phonePad)
+                DSTextField("Website", placeholder: "https://company.com", text: $website)
+                    .keyboardType(.URL)
+                    .textInputAutocapitalization(.never)
                 empRow(label: "Company Size") {
-                    Picker("", selection: $companySize) {
+                    Picker("Company Size", selection: $companySize) {
                         ForEach(sizeOptions, id: \.self) { Text($0).tag($0) }
                     }
                     .pickerStyle(.menu)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .tint(DS.Color.primaryText)
                 }
             }
 
             // Business Areas
             empSection(title: "Business Areas") {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Select all that apply")
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 14)
-                        .padding(.top, 4)
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                        ForEach(allAreas, id: \.self) { area in
-                            let on = businessAreas.contains(area)
-                            Button {
-                                if on { businessAreas.remove(area) }
-                                else  { businessAreas.insert(area) }
-                            } label: {
-                                Text(area)
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundColor(on ? .white : .secondary)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 8)
-                                    .background(on ? SS.primary : Color.gray.opacity(0.1))
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                            }
-                            .buttonStyle(.plain)
+                Text("Select all that apply")
+                    .dsFont(.caption)
+                    .foregroundStyle(DS.Color.muted)
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: DS.Spacing.xs), GridItem(.flexible())], spacing: DS.Spacing.xs) {
+                    ForEach(allAreas, id: \.self) { area in
+                        let on = businessAreas.contains(area)
+                        DSChip(area, isSelected: on) {
+                            if on { businessAreas.remove(area) }
+                            else  { businessAreas.insert(area) }
                         }
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.bottom, 10)
                 }
             }
 
             // Locations
             empSection(title: "Locations") {
-                empRow(label: "Primary Location") {
-                    TextField("Stuttgart, Germany", text: $primaryLocation)
-                        .textContentType(.addressCity)
-                }
+                DSTextField("Primary Location", placeholder: "Stuttgart, Germany", text: $primaryLocation)
+                    .textContentType(.addressCity)
 
-                if !locations.isEmpty {
-                    ForEach(locations, id: \.self) { loc in
-                        HStack {
-                            Text(loc)
-                                .font(.system(size: 14))
-                                .foregroundColor(.primary)
-                                .padding(.leading, 14)
-                            Spacer()
-                            Button {
-                                locations.removeAll { $0 == loc }
-                            } label: {
-                                Image(systemName: "minus.circle.fill")
-                                    .foregroundColor(.red.opacity(0.7))
-                                    .padding(.trailing, 14)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .padding(.vertical, 12)
-                        Divider().padding(.leading, 14)
-                    }
+                ForEach(locations, id: \.self) { loc in
+                    locationRow(loc) { locations.removeAll { $0 == loc } }
                 }
 
                 // Add location row
-                HStack {
-                    TextField("Add location...", text: $newLocationText)
-                        .font(.system(size: 14))
-                        .padding(.leading, 14)
-                    Button {
-                        let t = newLocationText.trimmingCharacters(in: .whitespaces)
-                        if !t.isEmpty { locations.append(t); newLocationText = "" }
-                    } label: {
-                        Image(systemName: "plus.circle.fill")
-                            .foregroundColor(SS.primary)
-                            .padding(.trailing, 14)
-                    }
-                    .buttonStyle(.plain)
+                addLocationRow(text: $newLocationText) {
+                    let t = newLocationText.trimmingCharacters(in: .whitespaces)
+                    if !t.isEmpty { locations.append(t); newLocationText = "" }
                 }
-                .padding(.vertical, 12)
             }
 
             // Oeffentliche Infos (Slogan, Social, Adresse, Ansprechpartner)
@@ -228,22 +170,7 @@ private struct CompanyInfoTab: View {
 
             // Bio
             empSection(title: "Company Bio") {
-                VStack(alignment: .leading, spacing: 6) {
-                    TextEditor(text: $companyBio)
-                        .frame(minHeight: 80)
-                        .font(.system(size: 14))
-                        .padding(.horizontal, 10)
-                        .padding(.top, 4)
-                        .onChange(of: companyBio) { _, new in
-                            if new.count > 500 { companyBio = String(new.prefix(500)) }
-                        }
-                    Text("\(companyBio.count)/500")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                        .padding(.horizontal, 14)
-                        .padding(.bottom, 8)
-                }
+                DSTextEditor("Company Bio", placeholder: "Tell workers about your company", text: $companyBio, minLines: 3, maxLines: 8, maxLength: 500)
             }
 
             // Legal
@@ -257,21 +184,17 @@ private struct CompanyInfoTab: View {
 
             // Save
             Button { Task { await save() } } label: {
-                Group {
-                    if isSaving { ProgressView().tint(.white) }
-                    else { Text("Save Changes") }
-                }
+                if isSaving { ProgressView().tint(DS.Color.onPrimary) }
+                else { Text("Save Changes") }
             }
-            .buttonStyle(SSPrimaryButtonStyle(isEnabled: !isSaving))
-            .padding(.horizontal, 16)
+            .buttonStyle(.ds(.primary))
+            .padding(.horizontal, DS.Spacing.screenEdge)
             .disabled(isSaving)
             .alert("Could not save", isPresented: Binding(get: { saveError != nil }, set: { if !$0 { saveError = nil } })) {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text(saveError ?? "")
             }
-
-            Spacer().frame(height: 20)
         }
         .onAppear { prefill() }
     }
@@ -392,152 +315,92 @@ private struct PersonalProfileTab: View {
     }
 
     var body: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: DS.Spacing.xl) {
             // Personal Details
             empSection(title: "Personal Details") {
-                empRow(label: "First Name") {
-                    TextField("John", text: $firstName).textContentType(.givenName)
-                }
-                empRow(label: "Last Name") {
-                    TextField("Smith", text: $lastName).textContentType(.familyName)
-                }
-                empRow(label: "Work Email") {
-                    TextField("john@company.com", text: $workEmail)
-                        .keyboardType(.emailAddress)
-                        .textContentType(.emailAddress)
-                }
-                empRow(label: "Job Title") {
-                    TextField("Head of Recruitment", text: $jobTitle)
-                }
+                DSTextField("First Name", placeholder: "John", text: $firstName).textContentType(.givenName)
+                DSTextField("Last Name", placeholder: "Smith", text: $lastName).textContentType(.familyName)
+                DSTextField("Work Email", placeholder: "john@company.com", text: $workEmail)
+                    .keyboardType(.emailAddress)
+                    .textContentType(.emailAddress)
+                    .textInputAutocapitalization(.never)
+                DSTextField("Job Title", placeholder: "Head of Recruitment", text: $jobTitle)
                 empRow(label: "Role") {
-                    Picker("", selection: $role) {
+                    Picker("Role", selection: $role) {
                         ForEach(ManagerRole.allCases, id: \.self) { r in
                             Text(r.rawValue).tag(r)
                         }
                     }
                     .pickerStyle(.menu)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .tint(DS.Color.primaryText)
                 }
             }
 
             // Managed Locations
             empSection(title: "Managed Locations") {
                 ForEach(managedLocations, id: \.self) { loc in
-                    HStack {
-                        Text(loc)
-                            .font(.system(size: 14))
-                            .foregroundColor(.primary)
-                            .padding(.leading, 14)
-                        Spacer()
-                        Button {
-                            managedLocations.removeAll { $0 == loc }
-                        } label: {
-                            Image(systemName: "minus.circle.fill")
-                                .foregroundColor(.red.opacity(0.7))
-                                .padding(.trailing, 14)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .padding(.vertical, 12)
-                    Divider().padding(.leading, 14)
+                    locationRow(loc) { managedLocations.removeAll { $0 == loc } }
                 }
-                HStack {
-                    TextField("Add location...", text: $newManagedLocation)
-                        .font(.system(size: 14))
-                        .padding(.leading, 14)
-                    Button {
-                        let t = newManagedLocation.trimmingCharacters(in: .whitespaces)
-                        if !t.isEmpty { managedLocations.append(t); newManagedLocation = "" }
-                    } label: {
-                        Image(systemName: "plus.circle.fill")
-                            .foregroundColor(SS.primary)
-                            .padding(.trailing, 14)
-                    }
-                    .buttonStyle(.plain)
+                addLocationRow(text: $newManagedLocation) {
+                    let t = newManagedLocation.trimmingCharacters(in: .whitespaces)
+                    if !t.isEmpty { managedLocations.append(t); newManagedLocation = "" }
                 }
-                .padding(.vertical, 12)
             }
 
             // Team Members
             empSection(title: "Team Members") {
                 ForEach(teamMembers) { member in
-                    HStack(spacing: 12) {
-                        // Avatar
-                        ZStack {
-                            Circle().fill(SS.primary.opacity(0.15)).frame(width: 38, height: 38)
-                            Text(member.avatarLetter)
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(SS.primary)
-                        }
-                        .padding(.leading, 14)
+                    HStack(spacing: DS.Spacing.sm) {
+                        DSAvatar(text: member.avatarLetter, size: 40, shape: .circle)
 
                         VStack(alignment: .leading, spacing: 2) {
                             Text(member.name)
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.primary)
+                                .dsFont(.callout)
+                                .foregroundStyle(DS.Color.text)
                             Text(member.email)
-                                .font(.system(size: 12))
-                                .foregroundColor(.secondary)
+                                .dsFont(.caption)
+                                .foregroundStyle(DS.Color.muted)
                         }
 
-                        Spacer()
+                        Spacer(minLength: DS.Spacing.xs)
 
-                        Text(member.role.rawValue)
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(member.role == .admin ? SS.primary : .secondary)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
-                            .background((member.role == .admin ? SS.primary : Color.gray).opacity(0.1))
-                            .clipShape(Capsule())
+                        DSBadge(member.role.rawValue, member.role == .admin ? .tone(.primary) : .tone(.neutral))
 
                         Button {
+                            DS.Haptics.warning()
                             memberToRemove = member
                         } label: {
                             Image(systemName: "xmark.circle.fill")
                                 .font(.system(size: 18))
-                                .foregroundColor(.red.opacity(0.6))
-                                .padding(.trailing, 14)
+                                .foregroundStyle(DS.Color.danger)
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
-                    }
-                    .padding(.vertical, 10)
-                    if member.id != teamMembers.last?.id {
-                        Divider().padding(.leading, 64)
+                        .buttonStyle(.dsPressable)
+                        .accessibilityLabel("Remove \(member.name)")
                     }
                 }
 
                 // Invite Button
                 Button { showInviteSheet = true } label: {
                     Label("Invite Team Member", systemImage: "person.badge.plus")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(SS.primary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(SS.primary.opacity(0.07))
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.ds(.soft, size: .medium))
             }
 
             // Save
             Button { Task { await save() } } label: {
-                Group {
-                    if isSaving { ProgressView().tint(.white) }
-                    else { Text("Save Changes") }
-                }
+                if isSaving { ProgressView().tint(DS.Color.onPrimary) }
+                else { Text("Save Changes") }
             }
-            .buttonStyle(SSPrimaryButtonStyle(isEnabled: !isSaving))
-            .padding(.horizontal, 16)
+            .buttonStyle(.ds(.primary))
+            .padding(.horizontal, DS.Spacing.screenEdge)
             .disabled(isSaving)
             .alert("Could not save", isPresented: Binding(get: { saveError != nil }, set: { if !$0 { saveError = nil } })) {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text(saveError ?? "")
             }
-
-            Spacer().frame(height: 20)
         }
         .onAppear { prefill() }
         .sheet(isPresented: $showInviteSheet) {
@@ -558,24 +421,23 @@ private struct PersonalProfileTab: View {
 
     private var inviteSheet: some View {
         NavigationStack {
-            VStack(spacing: 20) {
+            VStack(spacing: DS.Spacing.lg) {
                 empSection(title: "Invite Details") {
-                    empRow(label: "Email") {
-                        TextField("colleague@company.com", text: $inviteEmail)
-                            .keyboardType(.emailAddress)
-                            .textContentType(.emailAddress)
-                    }
+                    DSTextField("Email", placeholder: "colleague@company.com", text: $inviteEmail)
+                        .keyboardType(.emailAddress)
+                        .textContentType(.emailAddress)
+                        .textInputAutocapitalization(.never)
                     empRow(label: "Role") {
-                        Picker("", selection: $inviteRole) {
+                        Picker("Role", selection: $inviteRole) {
                             ForEach(PersonalProfileTab.ManagerRole.allCases, id: \.self) { r in
                                 Text(r.rawValue).tag(r)
                             }
                         }
                         .pickerStyle(.menu)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .tint(DS.Color.primaryText)
                     }
                 }
-                .padding(.top, 20)
+                .padding(.top, DS.Spacing.lg)
 
                 Button {
                     let t = inviteEmail.trimmingCharacters(in: .whitespaces)
@@ -590,19 +452,18 @@ private struct PersonalProfileTab: View {
                 } label: {
                     Text("Send Invite")
                 }
-                .buttonStyle(SSPrimaryButtonStyle(isEnabled: !inviteEmail.isEmpty))
-                .padding(.horizontal, 16)
+                .buttonStyle(.ds(.primary))
+                .padding(.horizontal, DS.Spacing.screenEdge)
                 .disabled(inviteEmail.isEmpty)
 
                 Spacer()
             }
-            .background(SS.background().ignoresSafeArea())
+            .dsBackground()
             .navigationTitle("Invite Team Member")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { showInviteSheet = false }
-                        .foregroundColor(.white)
                 }
             }
         }
@@ -656,59 +517,89 @@ private struct PersonalProfileTab: View {
 
 // MARK: - Shared Helpers (file-private)
 
+/// Flache Gruppe: Sektionslabel + Felder mit 16er Abstand, Trennlinie unten (keine Box), 20 Seitenrand.
 private func empSection<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
-    VStack(alignment: .leading, spacing: 0) {
-        Text(title)
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundColor(.secondary)
-            .padding(.horizontal, 14)
-            .padding(.top, 10)
-            .padding(.bottom, 4)
-        content()
+    DSSection(title) {
+        VStack(alignment: .leading, spacing: DS.Spacing.md) { content() }
+            .padding(.vertical, DS.Spacing.sm)
     }
-    .background(Color(uiColor: .systemBackground))
-    .clipShape(RoundedRectangle(cornerRadius: 16))
-    .padding(.horizontal, 16)
-    .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
+    .padding(.horizontal, DS.Spacing.screenEdge)
 }
 
+/// Zeile mit Label links und Bedienelement rechts (Menues).
 private func empRow<Content: View>(label: String, @ViewBuilder content: () -> Content) -> some View {
-    VStack(spacing: 0) {
-        HStack {
-            Text(label)
-                .font(.system(size: 14))
-                .foregroundColor(.secondary)
-                .frame(width: 120, alignment: .leading)
-                .padding(.leading, 14)
-            content()
-                .font(.system(size: 14))
-                .frame(maxWidth: .infinity, alignment: .trailing)
-                .padding(.trailing, 14)
+    HStack(spacing: DS.Spacing.sm) {
+        Text(label)
+            .dsFont(.body)
+            .foregroundStyle(DS.Color.text)
+        Spacer(minLength: DS.Spacing.xs)
+        content()
+            .font(DS.Font.make(15, .medium))
+    }
+    .frame(minHeight: 44)
+}
+
+/// Eingetragener Standort mit Entfernen-Button.
+private func locationRow(_ location: String, onRemove: @escaping () -> Void) -> some View {
+    HStack {
+        Text(location)
+            .dsFont(.body)
+            .foregroundStyle(DS.Color.text)
+        Spacer(minLength: DS.Spacing.xs)
+        Button {
+            DS.Haptics.light()
+            onRemove()
+        } label: {
+            Image(systemName: "minus.circle.fill")
+                .foregroundStyle(DS.Color.danger)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
         }
-        .padding(.vertical, 12)
-        Divider().padding(.leading, 14)
+        .buttonStyle(.dsPressable)
+        .accessibilityLabel("Remove \(location)")
+    }
+    .frame(minHeight: 44)
+}
+
+/// Feld + Plus-Button zum Hinzufuegen eines Standorts.
+private func addLocationRow(text: Binding<String>, onAdd: @escaping () -> Void) -> some View {
+    HStack(alignment: .bottom, spacing: DS.Spacing.xs) {
+        DSTextField("Add location", placeholder: "Add location...", text: text)
+        Button {
+            DS.Haptics.light()
+            onAdd()
+        } label: {
+            Image(systemName: "plus.circle.fill")
+                .font(.system(size: 24))
+                .foregroundStyle(DS.Color.primary)
+                .frame(width: 50, height: 50)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.dsPressable)
+        .accessibilityLabel("Add location")
     }
 }
 
 private func legalToggle(_ label: String, isOn: Binding<Bool>, locked: Bool = false) -> some View {
-    VStack(spacing: 0) {
-        HStack(spacing: 12) {
-            Button { isOn.wrappedValue.toggle() } label: {
-                Image(systemName: isOn.wrappedValue ? "checkmark.square.fill" : "square")
-                    .font(.system(size: 20))
-                    .foregroundColor(isOn.wrappedValue ? SS.primary : .gray.opacity(0.4))
-                    .padding(.leading, 14)
-            }
-            .buttonStyle(.plain)
-            .disabled(locked)
+    Button {
+        DS.Haptics.selection()
+        isOn.wrappedValue.toggle()
+    } label: {
+        HStack(spacing: DS.Spacing.sm) {
+            Image(systemName: isOn.wrappedValue ? "checkmark.square.fill" : "square")
+                .font(.system(size: 22))
+                .foregroundStyle(isOn.wrappedValue ? DS.Color.primary : DS.Color.muted)
             Text(label)
-                .font(.system(size: 13))
-                .foregroundColor(.primary)
-                .padding(.trailing, 14)
-            Spacer()
+                .dsFont(.callout)
+                .foregroundStyle(DS.Color.text)
+                .multilineTextAlignment(.leading)
+            Spacer(minLength: 0)
         }
-        .padding(.vertical, 10)
-        .opacity(locked ? 0.6 : 1)
-        Divider().padding(.leading, 14)
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
     }
+    .buttonStyle(.plain)
+    .disabled(locked)
+    .opacity(locked ? 0.6 : 1)
+    .accessibilityAddTraits(isOn.wrappedValue ? .isSelected : [])
 }

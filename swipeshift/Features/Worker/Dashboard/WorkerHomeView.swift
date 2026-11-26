@@ -73,8 +73,7 @@ struct WorkerHomeView: View {
                 }
                 // Home scrollt unter der schwebenden TabBar weiter (Inset via .dsTabBarInset() im Tab);
                 // die übrigen Tabs behalten den festen Abstand.
-                .padding(.bottom, selectedTab == .home ? 0 : DS.tabBarInset)
-                .ignoresSafeArea(edges: selectedTab == .home ? .bottom : [])
+                .ignoresSafeArea(edges: .bottom)
 
                 // MARK: - Tab Bar
                 VStack(spacing: 0) {

@@ -70,7 +70,7 @@ struct FinancialPeriod: Equatable {
     }()
 }
 
-// MARK: - Picker (Capsule-Dropdown, fuer dunklen SubScreenShell-Hintergrund)
+// MARK: - Picker (Capsule-Dropdown, DS-Look hell/dunkel)
 
 struct FinancialPeriodPicker: View {
     @Binding var period: FinancialPeriod
@@ -96,16 +96,20 @@ struct FinancialPeriodPicker: View {
                 Label(period.option == .custom ? "Custom Range ✓" : "Custom Range…", systemImage: "calendar")
             }
         } label: {
-            HStack {
+            HStack(spacing: DS.Spacing.xs) {
                 Text(period.label)
-                    .font(.system(size: 14, weight: .semibold)).foregroundColor(.white)
+                    .font(DS.Font.make(14, .semibold, relativeTo: .callout)).foregroundStyle(DS.Color.text)
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 12, weight: .semibold)).foregroundColor(.white.opacity(0.7))
+                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.muted)
             }
-            .padding(.horizontal, 16).padding(.vertical, 8)
-            .background(Color.white.opacity(0.2)).clipShape(Capsule())
+            .padding(.horizontal, DS.Spacing.md)
+            .frame(minHeight: 44)
+            .background(DS.Color.surface, in: Capsule())
+            .overlay(Capsule().strokeBorder(DS.Color.border, lineWidth: 1))
+            .contentShape(Capsule())
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .buttonStyle(.dsPressable)
         .accessibilityLabel("Time period: \(period.label)")
         .sheet(isPresented: $showCustomRange) {
             CustomRangeSheet(initialFrom: period.customFrom, initialTo: period.customTo) { from, to in
@@ -143,14 +147,14 @@ private struct CustomRangeSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 16) {
-                Picker("", selection: $editing) {
+            VStack(spacing: DS.Spacing.md) {
+                Picker("Range edge", selection: $editing) {
                     ForEach(Edge.allCases, id: \.self) { edge in
                         Text("\(edge.rawValue): \(formatted(edge == .start ? from : to))").tag(edge)
                     }
                 }
                 .pickerStyle(.segmented)
-                .padding(.horizontal, 16)
+                .padding(.horizontal, DS.Spacing.screenEdge)
 
                 Group {
                     if editing == .start {
@@ -160,12 +164,13 @@ private struct CustomRangeSheet: View {
                     }
                 }
                 .datePickerStyle(.graphical)
-                .tint(SS.primary)
-                .padding(.horizontal, 12)
+                .tint(DS.Color.primary)
+                .padding(.horizontal, DS.Spacing.sm)
 
                 Spacer(minLength: 0)
             }
-            .padding(.top, 8)
+            .padding(.top, DS.Spacing.xs)
+            .dsBackground()
             .navigationTitle("Custom Range")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

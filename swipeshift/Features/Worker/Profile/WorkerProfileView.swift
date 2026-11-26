@@ -16,32 +16,20 @@ struct WorkerProfileView: View {
 
     var body: some View {
         ScrollView(showsIndicators: false) {
-            VStack(spacing: 0) {
+            VStack(spacing: DS.Spacing.xl) {
                 profileHeader
-                    .padding(.bottom, 24)
                 // Eigene Zuverlaessigkeit (Anwesenheit, No-Shows, kurzfristige Stornos) — nur der Worker selbst und Employer sehen sie
                 WorkerReliabilityCard()
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 16)
                 navigationList
-                Spacer().frame(height: 100)
             }
+            .padding(.horizontal, DS.Spacing.screenEdge)
+            .padding(.top, DS.Spacing.md)
+            .padding(.bottom, DS.Spacing.xl)
         }
-        .background(SS.background().ignoresSafeArea())
-        .task {
-            if let data = try? await APIClient.shared.fetchWorkerReviews() {
-                rating = data.overallRating
-                reviewCount = data.totalJobs
-            }
-            // Echte Counts für die Nav-Badges laden (analog zu den bereits live gespeisten
-            // Badges im Employer-Dashboard), statt hartcodierter Platzhalter-Zahlen.
-            async let applications = try? APIClient.shared.fetchWorkerApplications()
-            async let savedJobs    = try? APIClient.shared.fetchWorkerSaved()
-            async let savedCompanies = try? APIClient.shared.fetchSavedCompanies()
-            let (apps, jobs, companies) = await (applications, savedJobs, savedCompanies)
-            openApplicationsCount = apps?.filter { $0.displayStatus == "applied" }.count ?? 0
-            savedCount = (jobs?.count ?? 0) + (companies?.count ?? 0)
-        }
+        .dsTabBarInset()
+        .refreshable { await loadCounts() }
+        .dsBackground()
+        .task { await loadCounts() }
         .alert("Log Out?", isPresented: $showLogoutAlert) {
             Button("Log Out", role: .destructive) { userStore.logout() }
             Button("Cancel", role: .cancel) {}
@@ -50,61 +38,79 @@ struct WorkerProfileView: View {
         }
     }
 
+    private func loadCounts() async {
+        if let data = try? await APIClient.shared.fetchWorkerReviews() {
+            rating = data.overallRating
+            reviewCount = data.totalJobs
+        }
+        // Echte Counts für die Nav-Badges laden (analog zu den bereits live gespeisten
+        // Badges im Employer-Dashboard), statt hartcodierter Platzhalter-Zahlen.
+        async let applications = try? APIClient.shared.fetchWorkerApplications()
+        async let savedJobs    = try? APIClient.shared.fetchWorkerSaved()
+        async let savedCompanies = try? APIClient.shared.fetchSavedCompanies()
+        let (apps, jobs, companies) = await (applications, savedJobs, savedCompanies)
+        openApplicationsCount = apps?.filter { $0.displayStatus == "applied" }.count ?? 0
+        savedCount = (jobs?.count ?? 0) + (companies?.count ?? 0)
+    }
+
     // MARK: - Header
 
+    private var fullName: String {
+        [userStore.currentUser?.firstName, userStore.currentUser?.lastName]
+            .compactMap { $0 }
+            .joined(separator: " ")
+    }
+
     private var profileHeader: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: DS.Spacing.sm) {
             // Profilfoto
-            ZStack {
-                if let urlStr = userStore.currentUser?.profilePhotoUrl,
-                   let url = URL(string: urlStr) {
-                    AsyncImage(url: url) { image in
-                        image.resizable().scaledToFill()
-                    } placeholder: {
-                        avatarPlaceholder
-                    }
-                    .frame(width: 90, height: 90)
-                    .clipShape(Circle())
-                } else {
+            if let urlStr = userStore.currentUser?.profilePhotoUrl,
+               let url = URL(string: urlStr) {
+                AsyncImage(url: url) { image in
+                    image.resizable().scaledToFill()
+                } placeholder: {
                     avatarPlaceholder
                 }
+                .frame(width: 88, height: 88)
+                .clipShape(Circle())
+                .accessibilityHidden(true)
+            } else {
+                avatarPlaceholder
             }
 
             // Name + Verified Badge
-            VStack(spacing: 4) {
-                HStack(spacing: 6) {
-                    let name = [userStore.currentUser?.firstName,
-                                userStore.currentUser?.lastName]
-                        .compactMap { $0 }
-                        .joined(separator: " ")
-                    Text(name.isEmpty ? "My Profile" : name)
-                        .font(.system(size: 22, weight: .bold))
-                        .foregroundColor(.white)
+            VStack(spacing: DS.Spacing.xxs) {
+                HStack(spacing: DS.Spacing.xs) {
+                    Text(fullName.isEmpty ? "My Profile" : fullName)
+                        .dsFont(.title)
+                        .foregroundStyle(DS.Color.text)
                     Image(systemName: "checkmark.seal.fill")
-                        .foregroundColor(.white)
-                        .font(.system(size: 16))
+                        .font(DS.Font.make(16, .semibold))
+                        .foregroundStyle(DS.Color.primary)
+                        .accessibilityHidden(true)
                 }
 
                 Text("Verified Worker")
-                    .font(.system(size: 13))
-                    .foregroundColor(.white.opacity(0.7))
+                    .dsFont(.callout)
+                    .foregroundStyle(DS.Color.muted)
 
                 if reviewCount > 0 {
-                    HStack(spacing: 4) {
+                    HStack(spacing: DS.Spacing.xxs) {
                         Image(systemName: "star.fill")
-                            .font(.system(size: 12))
-                            .foregroundColor(.yellow)
+                            .font(DS.Font.make(12, .semibold, relativeTo: .caption))
+                            .foregroundStyle(DS.Color.warning)
                         Text(String(format: "%.1f", rating))
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(.white)
+                            .dsFont(.callout)
+                            .foregroundStyle(DS.Color.text)
                         Text("(\(reviewCount) Review\(reviewCount == 1 ? "" : "s"))")
-                            .font(.system(size: 12))
-                            .foregroundColor(.white.opacity(0.6))
+                            .dsFont(.caption)
+                            .foregroundStyle(DS.Color.muted)
                     }
+                    .accessibilityElement(children: .combine)
                 } else {
                     Text("No reviews yet")
-                        .font(.system(size: 12))
-                        .foregroundColor(.white.opacity(0.5))
+                        .dsFont(.caption)
+                        .foregroundStyle(DS.Color.muted)
                 }
             }
 
@@ -114,152 +120,111 @@ struct WorkerProfileView: View {
                     .environmentObject(userStore)
             } label: {
                 Text("Edit Profile")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 8)
-                    .background(Color.white.opacity(0.2))
-                    .clipShape(Capsule())
             }
+            .buttonStyle(.ds(.soft, size: .medium, fullWidth: false))
         }
-        .padding(.top, 16)
+        .frame(maxWidth: .infinity)
     }
 
     private var avatarPlaceholder: some View {
-        ZStack {
-            Circle()
-                .fill(Color.white.opacity(0.2))
-                .frame(width: 90, height: 90)
-            Image(systemName: "person.fill")
-                .font(.system(size: 38))
-                .foregroundColor(.white.opacity(0.6))
+        Group {
+            if fullName.isEmpty {
+                Image(systemName: "person.fill")
+                    .font(DS.Font.make(36, .semibold, relativeTo: nil))
+                    .foregroundStyle(DS.Color.primaryText)
+                    .frame(width: 88, height: 88)
+                    .background(DS.Color.primarySoft, in: Circle())
+                    .accessibilityHidden(true)
+            } else {
+                DSAvatar(text: DSAvatar.initials(from: fullName), size: 88, shape: .circle)
+            }
         }
     }
 
     // MARK: - Navigation Liste
 
     private var navigationList: some View {
-        VStack(spacing: 0) {
-            NavigationLink {
-                JobApplicationsView()
-            } label: {
-                ProfileNavItem(icon: "briefcase.fill", label: "Job Applications",
-                                badge: openApplicationsCount > 0 ? "\(openApplicationsCount)" : nil)
+        VStack(alignment: .leading, spacing: DS.Spacing.lg) {
+            DSSection("Work") {
+                ProfileNavRow(icon: "briefcase.fill", label: "Job Applications",
+                              badge: openApplicationsCount > 0 ? "\(openApplicationsCount)" : nil,
+                              showsDivider: false) { JobApplicationsView() }
+                ProfileNavRow(icon: "calendar", label: "Calendar") { WorkerCalendarView() }
+                ProfileNavRow(icon: "chart.pie.fill", label: "Financial Overview") { FinancialOverviewView() }
+                ProfileNavRow(icon: "bookmark.fill", label: "Saved",
+                              badge: savedCount > 0 ? "\(savedCount)" : nil) { SavedView() }
             }
-            Divider().padding(.leading, 52)
 
-            NavigationLink {
-                WorkerCalendarView()
-            } label: {
-                ProfileNavItem(icon: "calendar", label: "Calendar", badge: nil)
+            DSSection("You") {
+                ProfileNavRow(icon: "star.bubble.fill", label: "Your Ratings", showsDivider: false) { ReviewsView() }
+                ProfileNavRow(icon: "gearshape.fill", label: "Settings & Support") { SettingsSupportView() }
+                ProfileNavRow(icon: "person.crop.circle.badge.gearshape", label: "Account Settings") { AccountSettingsView() }
             }
-            Divider().padding(.leading, 52)
 
-            NavigationLink {
-                FinancialOverviewView()
-            } label: {
-                ProfileNavItem(icon: "chart.pie.fill", label: "Financial Overview", badge: nil)
-            }
-            Divider().padding(.leading, 52)
-
-            NavigationLink {
-                SavedView()
-            } label: {
-                ProfileNavItem(icon: "bookmark.fill", label: "Saved",
-                                badge: savedCount > 0 ? "\(savedCount)" : nil)
-            }
-            Divider().padding(.leading, 52)
-
-            NavigationLink {
-                ReviewsView()
-            } label: {
-                ProfileNavItem(icon: "star.bubble.fill", label: "Your Ratings", badge: nil)
-            }
-            Divider().padding(.leading, 52)
-
-            NavigationLink {
-                SettingsSupportView()
-            } label: {
-                ProfileNavItem(icon: "gearshape.fill", label: "Settings & Support", badge: nil)
-            }
-            Divider().padding(.leading, 52)
-
-            NavigationLink {
-                AccountSettingsView()
-            } label: {
-                ProfileNavItem(icon: "person.crop.circle.badge.gearshape", label: "Account Settings", badge: nil)
-            }
-            Divider().padding(.leading, 52)
-
-            NavigationLink {
-                HelpSupportPlaceholderView()
-            } label: {
-                ProfileNavItem(icon: "questionmark.circle.fill", label: "Help & Support", badge: nil)
-            }
-            Divider().padding(.leading, 52)
-
-            // Logout
-            Button { showLogoutAlert = true } label: {
-                HStack(spacing: 14) {
-                    Image(systemName: "rectangle.portrait.and.arrow.right")
-                        .font(.system(size: 16))
-                        .foregroundColor(.red)
-                        .frame(width: 28)
-                        .padding(.leading, 14)
-                    Text("Log Out")
-                        .font(.system(size: 15))
-                        .foregroundColor(.red)
-                    Spacer()
+            DSSection("Help") {
+                ProfileNavRow(icon: "questionmark.circle.fill", label: "Help & Support", showsDivider: false) {
+                    HelpSupportPlaceholderView()
                 }
-                .padding(.vertical, 14)
+                // Logout
+                DSRow("Log Out", systemIcon: "rectangle.portrait.and.arrow.right", iconTone: .danger) {
+                    DS.Haptics.warning()
+                    showLogoutAlert = true
+                }
             }
-            .buttonStyle(.plain)
         }
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .padding(.horizontal, 16)
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
     }
 }
 
-// MARK: - ProfileNavItem
+// MARK: - ProfileNavRow
 
-private struct ProfileNavItem: View {
+/// Press-Hintergrund fuer Zeilen, die als NavigationLink aufgebaut sind (Pendant zum Button-Stil in DSRow).
+struct DSRowLinkStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(configuration.isPressed ? DS.Color.surface2.opacity(0.6) : Color.clear)
+    }
+}
+
+/// Flache Navigationszeile mit Icon-Kachel, optionalem Zaehler und Chevron.
+struct ProfileNavRow<Destination: View>: View {
     let icon: String
     let label: String
-    let badge: String?
+    var badge: String?
+    var showsDivider: Bool = true
+    @ViewBuilder let destination: () -> Destination
 
     var body: some View {
-        HStack(spacing: 14) {
-            Image(systemName: icon)
-                .font(.system(size: 16))
-                .foregroundColor(SS.primary)
-                .frame(width: 28)
-                .padding(.leading, 14)
-
-            Text(label)
-                .font(.system(size: 15))
-                .foregroundColor(.primary)
-
-            Spacer()
-
-            if let badge {
-                Text(badge)
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(SS.primary)
-                    .clipShape(Capsule())
+        NavigationLink {
+            destination()
+        } label: {
+            DSRow(label, systemIcon: icon, showsChevron: true, showsDivider: showsDivider) {
+                if let badge {
+                    Text(badge)
+                        .font(DS.Font.make(12, .bold, relativeTo: .caption))
+                        .foregroundStyle(DS.Color.onPrimary)
+                        .padding(.horizontal, DS.Spacing.xs)
+                        .padding(.vertical, DS.Spacing.xxs)
+                        .background(DS.Color.primary, in: Capsule())
+                }
             }
-
-            Image(systemName: "chevron.right")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(.secondary.opacity(0.4))
-                .padding(.trailing, 14)
         }
-        .padding(.vertical, 14)
-        .contentShape(Rectangle())
+        .buttonStyle(DSRowLinkStyle())
+        .simultaneousGesture(TapGesture().onEnded { DS.Haptics.light() })
+    }
+}
+
+/// Wie `ProfileNavRow`, aber mit Aktion statt NavigationLink (z. B. Employer-Profil mit navigationDestination).
+struct ProfileActionRow: View {
+    let icon: String
+    let label: String
+    var showsDivider: Bool = true
+    let action: () -> Void
+
+    var body: some View {
+        DSRow(label, systemIcon: icon, showsChevron: true, showsDivider: showsDivider) {
+            DS.Haptics.light()
+            action()
+        }
     }
 }
 
@@ -269,44 +234,28 @@ struct SettingsSupportView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        SubScreenShell(title: "Settings & Support") {
-            VStack(spacing: 0) {
-                SettingsRow(icon: "bell.fill",         label: "Notifications")      {}
-                Divider().padding(.leading, 52)
+        SubScreenShell(title: "Settings & Support", padded: true) {
+            DSSection("Settings") {
+                SettingsRow(icon: "bell.fill",         label: "Notifications", showsDivider: false)      {}
                 SettingsRow(icon: "moon.fill",         label: "Dark Mode")          {}
-                Divider().padding(.leading, 52)
                 SettingsRow(icon: "globe",             label: "Language")           {}
-                Divider().padding(.leading, 52)
                 SettingsRow(icon: "questionmark.circle", label: "FAQ")              {}
-                Divider().padding(.leading, 52)
                 SettingsRow(icon: "envelope.fill",    label: "Contact Us")  {}
             }
-            .background(Color(uiColor: .systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-            .padding(.horizontal, 16)
-            .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
         }
     }
 }
 
 struct AccountSettingsPlaceholderView: View {
     var body: some View {
-        SubScreenShell(title: "Account Settings") {
-            VStack(spacing: 0) {
-                SettingsRow(icon: "envelope.fill",      label: "Change Email")       {}
-                Divider().padding(.leading, 52)
+        SubScreenShell(title: "Account Settings", padded: true) {
+            DSSection("Account") {
+                SettingsRow(icon: "envelope.fill",      label: "Change Email", showsDivider: false)       {}
                 SettingsRow(icon: "lock.fill",          label: "Change Password")     {}
-                Divider().padding(.leading, 52)
                 SettingsRow(icon: "iphone",             label: "Active Devices")       {}
-                Divider().padding(.leading, 52)
                 SettingsRow(icon: "shield.fill",        label: "Privacy & Data") {}
-                Divider().padding(.leading, 52)
-                SettingsRow(icon: "trash.fill",         label: "Delete Account", tint: .red) {}
+                SettingsRow(icon: "trash.fill",         label: "Delete Account", tone: .danger) {}
             }
-            .background(Color(uiColor: .systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-            .padding(.horizontal, 16)
-            .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
         }
     }
 }
@@ -315,118 +264,99 @@ struct HelpSupportPlaceholderView: View {
     @Environment(\.openURL) private var openURL
 
     var body: some View {
-        SubScreenShell(title: "Help & Support") {
-            VStack(spacing: 0) {
-                SettingsRow(icon: "book.fill",        label: "Guide") {
+        SubScreenShell(title: "Help & Support", padded: true) {
+            DSSection("Help") {
+                SettingsRow(icon: "book.fill",        label: "Guide", showsDivider: false) {
                     openURL(AppConfig.websiteURL.appendingPathComponent("guide"))
                 }
-                Divider().padding(.leading, 52)
                 SettingsRow(icon: "bubble.left.fill", label: "Live Chat") {
                     openURL(URL(string: "mailto:support@swipeshift.app")!)
                 }
-                Divider().padding(.leading, 52)
                 SettingsRow(icon: "doc.text.fill",    label: "Terms & Conditions") {
                     openURL(AppConfig.websiteURL.appendingPathComponent("terms"))
                 }
-                Divider().padding(.leading, 52)
                 SettingsRow(icon: "hand.raised.fill", label: "Privacy Policy") {
                     openURL(AppConfig.websiteURL.appendingPathComponent("privacy"))
                 }
             }
-            .background(Color(uiColor: .systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-            .padding(.horizontal, 16)
-            .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
         }
     }
 }
 
 // MARK: - Shared Sub-Screen Components
 
-/// Gemeinsames Shell-Layout für alle Profile-Unterseiten
+/// Gemeinsames Shell-Layout für alle Profile-Unterseiten: heller DS-Kopf (Zurück, Titel, optional Trailing)
+/// + scrollbarer Inhalt. `padded: true` setzt den Bildschirmrand (20) um den Inhalt; Aufrufer mit eigenem
+/// Rand lassen es aus.
 struct SubScreenShell<Content: View>: View {
     @Environment(\.dismiss) private var dismiss
     let title: String
+    let padded: Bool
     let trailingButton: AnyView?
     let content: Content
 
-    init(title: String, @ViewBuilder content: () -> Content) {
+    init(title: String, padded: Bool = false, @ViewBuilder content: () -> Content) {
         self.title         = title
+        self.padded        = padded
         self.trailingButton = nil
         self.content       = content()
     }
 
-    init<T: View>(title: String, @ViewBuilder trailing: () -> T, @ViewBuilder content: () -> Content) {
+    init<T: View>(title: String, padded: Bool = false, @ViewBuilder trailing: () -> T, @ViewBuilder content: () -> Content) {
         self.title          = title
+        self.padded         = padded
         self.trailingButton = AnyView(trailing())
         self.content        = content()
     }
 
     var body: some View {
-        ZStack(alignment: .top) {
-            SS.background().ignoresSafeArea()
-
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 20) {
-                    // Custom Header
-                    HStack {
-                        Button { dismiss() } label: {
-                            Image(systemName: "chevron.left")
-                                .font(.system(size: 17, weight: .semibold))
-                                .foregroundColor(.white)
-                                .padding(10)
-                                .background(Color.white.opacity(0.15))
-                                .clipShape(Circle())
-                        }
-                        Spacer()
-                        Text(title)
-                            .font(.system(size: 18, weight: .bold))
-                            .foregroundColor(.white)
-                        Spacer()
-                        if let btn = trailingButton {
-                            btn.frame(width: 40, height: 40)
-                        } else {
-                            Color.clear.frame(width: 40, height: 40)
-                        }
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: DS.Spacing.lg) {
+                // Kopf
+                HStack(spacing: DS.Spacing.sm) {
+                    DSIconButton(systemName: "chevron.left", label: "Back") { dismiss() }
+                    Spacer(minLength: 0)
+                    Text(title)
+                        .dsFont(.headline)
+                        .foregroundStyle(DS.Color.text)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .accessibilityAddTraits(.isHeader)
+                    Spacer(minLength: 0)
+                    if let btn = trailingButton {
+                        btn.frame(width: 44, height: 44)
+                    } else {
+                        Color.clear.frame(width: 44, height: 44)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
-
-                    content
-
-                    Spacer().frame(height: 40)
                 }
+                .padding(.horizontal, DS.Spacing.screenEdge)
+                .padding(.top, DS.Spacing.xs)
+
+                Group {
+                    if padded {
+                        content.padding(.horizontal, DS.Spacing.screenEdge)
+                    } else {
+                        content
+                    }
+                }
+
+                Spacer().frame(height: DS.Spacing.xxl)
             }
         }
+        .dsBackground()
         .navigationBarHidden(true)
     }
 }
 
+/// Flache Einstellungszeile (Icon-Kachel + Titel + Chevron).
 private struct SettingsRow: View {
     let icon: String
     let label: String
-    var tint: Color = SS.primary
+    var tone: DS.Tone = .primary
+    var showsDivider: Bool = true
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 14) {
-                Image(systemName: icon)
-                    .font(.system(size: 16))
-                    .foregroundColor(tint)
-                    .frame(width: 28)
-                    .padding(.leading, 14)
-                Text(label)
-                    .font(.system(size: 15))
-                    .foregroundColor(tint == .red ? .red : .primary)
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.secondary.opacity(0.4))
-                    .padding(.trailing, 14)
-            }
-            .padding(.vertical, 14)
-        }
-        .buttonStyle(.plain)
+        DSRow(label, systemIcon: icon, iconTone: tone, showsChevron: true, showsDivider: showsDivider, action: action)
     }
 }

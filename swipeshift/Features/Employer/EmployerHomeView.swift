@@ -161,41 +161,37 @@ private struct EmployerProfileTab: View {
     @State private var showSettings       = false
     @State private var showLogoutAlert = false
 
+    private var companyName: String { userStore.currentUser?.companyName ?? "My Company" }
+
     var body: some View {
         ScrollView(showsIndicators: false) {
-            VStack(spacing: 0) {
+            VStack(spacing: DS.Spacing.xl) {
 
                 // Profil-Header
-                VStack(spacing: 12) {
-                    // Company Logo Placeholder
-                    ZStack {
-                        Circle()
-                            .fill(Color.white.opacity(0.15))
-                            .frame(width: 80, height: 80)
-                        Text("🏢")
-                            .font(.system(size: 36))
-                    }
+                VStack(spacing: DS.Spacing.sm) {
+                    DSAvatar(text: "🏢", size: 80, shape: .circle)
 
-                    VStack(spacing: 4) {
-                        HStack(spacing: 6) {
-                            Text(userStore.currentUser?.companyName ?? "My Company")
-                                .font(.system(size: 22, weight: .bold))
-                                .foregroundColor(.white)
+                    VStack(spacing: DS.Spacing.xxs) {
+                        HStack(spacing: DS.Spacing.xs) {
+                            Text(companyName)
+                                .dsFont(.title)
+                                .foregroundStyle(DS.Color.text)
                             Image(systemName: "checkmark.seal.fill")
-                                .foregroundColor(SS.primary)
-                                .font(.system(size: 16))
+                                .font(DS.Font.make(16, .semibold))
+                                .foregroundStyle(DS.Color.primary)
+                                .accessibilityLabel("Verified")
                         }
 
                         if let location = userStore.currentUser?.location {
                             Text(location)
-                                .font(.system(size: 14))
-                                .foregroundColor(.white.opacity(0.7))
+                                .dsFont(.body)
+                                .foregroundStyle(DS.Color.text2)
                         }
 
                         if let industry = userStore.currentUser?.industry {
                             Text(industry)
-                                .font(.system(size: 13))
-                                .foregroundColor(.white.opacity(0.6))
+                                .dsFont(.callout)
+                                .foregroundStyle(DS.Color.muted)
                         }
                     }
 
@@ -204,61 +200,36 @@ private struct EmployerProfileTab: View {
                         showEditProfile = true
                     } label: {
                         Text("Edit Profile")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 8)
-                            .background(Color.white.opacity(0.2))
-                            .clipShape(Capsule())
                     }
+                    .buttonStyle(.ds(.soft, size: .medium, fullWidth: false))
                 }
-                .padding(.top, 16)
-                .padding(.bottom, 24)
+                .frame(maxWidth: .infinity)
 
                 // Navigation Liste
-                VStack(spacing: 0) {
-                    ProfileNavRow(icon: "briefcase",           label: "Job Management")       {}
-                    Divider().padding(.leading, 52)
-                    ProfileNavRow(icon: "bookmark",            label: "Saved Applicants")     { showSavedApplicants = true }
-                    Divider().padding(.leading, 52)
-                    ProfileNavRow(icon: "chart.bar",           label: "Financial Overview")   { showFinancial = true }
-                    Divider().padding(.leading, 52)
-                    ProfileNavRow(icon: "calendar",            label: "Calendar")             { showCalendar = true }
-                    Divider().padding(.leading, 52)
-                    ProfileNavRow(icon: "gearshape",           label: "Settings")             { showSettings = true }
-                    Divider().padding(.leading, 52)
-                    ProfileNavRow(icon: "person.crop.circle.badge.questionmark", label: "Help & Support") {}
-                    Divider().padding(.leading, 52)
-
-                    // Logout
-                    Button {
-                        showLogoutAlert = true
-                    } label: {
-                        HStack(spacing: 14) {
-                            Image(systemName: "rectangle.portrait.and.arrow.right")
-                                .font(.system(size: 16))
-                                .foregroundColor(.red)
-                                .frame(width: 28)
-                                .padding(.leading, 14)
-
-                            Text("Log Out")
-                                .font(.system(size: 15))
-                                .foregroundColor(.red)
-
-                            Spacer()
-                        }
-                        .padding(.vertical, 14)
+                VStack(alignment: .leading, spacing: DS.Spacing.lg) {
+                    DSSection("Manage") {
+                        ProfileActionRow(icon: "briefcase",   label: "Job Management",   showsDivider: false) {}
+                        ProfileActionRow(icon: "bookmark",    label: "Saved Applicants") { showSavedApplicants = true }
+                        ProfileActionRow(icon: "chart.bar",   label: "Financial Overview") { showFinancial = true }
+                        ProfileActionRow(icon: "calendar",    label: "Calendar")         { showCalendar = true }
                     }
-                    .buttonStyle(.plain)
-                }
-                .background(Color(uiColor: .systemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 16))
-                .padding(.horizontal, 16)
-                .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
+                    DSSection("Account") {
+                        ProfileActionRow(icon: "gearshape",   label: "Settings",         showsDivider: false) { showSettings = true }
+                        ProfileActionRow(icon: "person.crop.circle.badge.questionmark", label: "Help & Support") {}
 
-                Spacer().frame(height: 100)
+                        // Logout
+                        DSRow("Log Out", systemIcon: "rectangle.portrait.and.arrow.right", iconTone: .danger) {
+                            DS.Haptics.warning()
+                            showLogoutAlert = true
+                        }
+                    }
+                }
             }
+            .padding(.horizontal, DS.Spacing.screenEdge)
+            .padding(.top, DS.Spacing.md)
+            .padding(.bottom, DS.Spacing.xl)
         }
+        .dsBackground()
         .navigationDestination(isPresented: $showEditProfile) {
             EditEmployerProfileView()
                 .environmentObject(userStore)
@@ -284,36 +255,5 @@ private struct EmployerProfileTab: View {
         } message: {
             Text("You will be signed out of your account.")
         }
-    }
-}
-
-private struct ProfileNavRow: View {
-    let icon: String
-    let label: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 14) {
-                Image(systemName: icon)
-                    .font(.system(size: 16))
-                    .foregroundColor(SS.primary)
-                    .frame(width: 28)
-                    .padding(.leading, 14)
-
-                Text(label)
-                    .font(.system(size: 15))
-                    .foregroundColor(.primary)
-
-                Spacer()
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.secondary.opacity(0.4))
-                    .padding(.trailing, 14)
-            }
-            .padding(.vertical, 14)
-        }
-        .buttonStyle(.plain)
     }
 }

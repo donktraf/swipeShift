@@ -3,7 +3,7 @@
 //  swipeShift
 //
 //  Teil-Views fuer EditProfileView: Tageszeiten, Schicht-Typen, Erfahrung je Kategorie.
-//  Rendern nur den Inhalt (ohne Karte), damit sie in die vorhandenen Sections passen.
+//  Rendern nur den Inhalt (flach, ohne Karte), damit sie in die DSSection-Gruppen passen.
 //
 
 import SwiftUI
@@ -16,31 +16,19 @@ struct ProfileChipPicker<Option: Identifiable & Hashable>: View {
     @Binding var selection: Set<Option>
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
             Text(title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(.secondary)
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 8)], alignment: .leading, spacing: 8) {
+                .font(DS.Font.make(13, .semibold, relativeTo: .footnote))
+                .foregroundStyle(DS.Color.text2)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: DS.Spacing.xs)], alignment: .leading, spacing: DS.Spacing.xs) {
                 ForEach(options) { option in
                     let isOn = selection.contains(option)
-                    Button {
+                    DSChip(label(option), isSelected: isOn) {
                         if isOn { selection.remove(option) } else { selection.insert(option) }
-                    } label: {
-                        Text(label(option))
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(isOn ? .white : .secondary)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 8)
-                            .background(isOn ? SS.primary : Color.gray.opacity(0.1))
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(isOn ? .isSelected : [])
                 }
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 4)
     }
 }
 
@@ -51,32 +39,25 @@ struct ExperienceEditor: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ForEach(categories, id: \.self) { category in
-                HStack {
-                    Text(category)
-                        .font(.system(size: 14))
-                        .foregroundColor(.primary)
-                        .padding(.leading, 14)
-                    Spacer()
+            ForEach(Array(categories.enumerated()), id: \.element) { index, category in
+                DSRow(category, showsDivider: index > 0) {
                     Menu {
                         Button("None") { levels[category] = nil }
                         ForEach(ExperienceLevel.allCases) { level in
                             Button(level.title) { levels[category] = level }
                         }
                     } label: {
-                        HStack(spacing: 4) {
+                        HStack(spacing: DS.Spacing.xxs) {
                             Text(levels[category]?.title ?? "None")
-                                .font(.system(size: 14))
-                                .foregroundColor(levels[category] == nil ? .secondary : SS.primary)
+                                .dsFont(.body)
+                                .foregroundStyle(levels[category] == nil ? DS.Color.muted : DS.Color.primaryText)
                             Image(systemName: "chevron.up.chevron.down")
-                                .font(.system(size: 10))
-                                .foregroundColor(.secondary)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(DS.Color.muted)
                         }
+                        .frame(minHeight: 44)
                     }
-                    .padding(.trailing, 14)
                 }
-                .padding(.vertical, 12)
-                Divider().padding(.leading, 14)
             }
         }
     }

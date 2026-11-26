@@ -160,6 +160,7 @@ struct RadarView: View {
                             .padding(.bottom, DS.Spacing.xxl)
                         }
                         .ignoresSafeArea(.container, edges: .bottom)
+                        .dsTabBarInset()
                         .refreshable {
                             await loadJobs()
                         }

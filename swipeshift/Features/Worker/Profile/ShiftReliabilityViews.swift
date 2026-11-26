@@ -13,9 +13,9 @@ import SwiftUI
 extension AttendanceStatus {
     var color: Color {
         switch self {
-        case .attended: return .green
-        case .late:     return .orange
-        case .noShow:   return .red
+        case .attended: return DS.Color.success
+        case .late:     return DS.Color.warning
+        case .noShow:   return DS.Color.danger
         }
     }
 }
@@ -43,10 +43,8 @@ struct CancelShiftButton: View {
     var body: some View {
         Button { showConfirm = true } label: {
             Text(isCancelling ? "Cancelling…" : (shiftLabel.map { "Cancel shift · \($0)" } ?? "Cancel shift"))
-                .font(.system(size: 13, weight: .semibold)).foregroundColor(.red)
-                .frame(maxWidth: .infinity).padding(.vertical, 10)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.ds(.destructiveSoft, size: .medium))
         .disabled(isCancelling)
         .alert("Cancel this shift?", isPresented: $showConfirm) {
             Button("Cancel shift", role: .destructive) { Task { await cancel() } }
@@ -100,26 +98,29 @@ struct AttendanceStatusRow: View {
 
     var body: some View {
         if let status = item.attendanceStatus {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 6) {
-                    Image(systemName: underReview ? "hourglass" : status.icon).foregroundColor(underReview ? .orange : status.color)
+            VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
+                HStack(spacing: DS.Spacing.xs) {
+                    Image(systemName: underReview ? "hourglass" : status.icon)
+                        .foregroundStyle(underReview ? DS.Color.warning : status.color)
                     Text(underReview ? "Attendance: Under review (recorded: \(status.label))" : "Attendance: \(status.label)")
-                        .font(.system(size: 12, weight: .semibold)).foregroundColor(underReview ? .orange : status.color)
+                        .font(DS.Font.make(12, .semibold, relativeTo: .caption))
+                        .foregroundStyle(underReview ? DS.Color.warning : status.color)
                     if item.attendanceSource == "auto" {
-                        Text("· recorded automatically").font(.system(size: 11)).foregroundColor(.secondary)
+                        Text("· recorded automatically").dsFont(.caption).foregroundStyle(DS.Color.muted)
                     }
                     Spacer(minLength: 0)
                     if item.canDispute == true {
                         Button("Dispute") { showDispute = true }
-                            .font(.system(size: 12, weight: .semibold)).foregroundColor(SS.primary)
+                            .font(DS.Font.make(13, .semibold, relativeTo: .footnote))
+                            .foregroundStyle(DS.Color.primaryText)
+                            .frame(minHeight: 44)
                     }
                 }
                 if let note = disputeNote {
-                    Text(note).font(.system(size: 11)).foregroundColor(.secondary)
+                    Text(note).dsFont(.caption).foregroundStyle(DS.Color.muted)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 14).padding(.bottom, 10)
             .sheet(isPresented: $showDispute) {
                 DisputeSheet(applyId: item.id, jobTitle: item.jobTitle, status: status) { onChanged() }
             }
@@ -157,37 +158,26 @@ struct DisputeSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: DS.Spacing.md) {
                 Text("The employer recorded \"\(status.label)\" for \(jobTitle). If this is wrong, tell us what happened. You can dispute an entry only once, within 14 days, and our team will review it.")
-                    .font(.system(size: 14)).foregroundColor(.secondary)
+                    .dsFont(.body).foregroundStyle(DS.Color.text2)
                 Label("Your note is shared with the employer and our team.", systemImage: "eye")
-                    .font(.system(size: 12, weight: .medium)).foregroundColor(.secondary)
+                    .dsFont(.caption).foregroundStyle(DS.Color.muted)
 
-                TextEditor(text: $note)
-                    .frame(height: 130)
-                    .padding(8)
-                    .background(Color(uiColor: .secondarySystemGroupedBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .onChange(of: note) { _, new in
-                        if new.count > Self.maxLength { note = String(new.prefix(Self.maxLength)) }
-                    }
-                HStack {
-                    if let errorMessage {
-                        Text(errorMessage).font(.system(size: 12)).foregroundColor(.red)
-                    }
-                    Spacer()
-                    Text("\(note.count)/\(Self.maxLength)").font(.system(size: 12)).foregroundColor(.secondary)
+                DSTextEditor("Your note", placeholder: "What happened?", text: $note, minLines: 4, maxLines: 8, maxLength: Self.maxLength)
+                if let errorMessage {
+                    Text(errorMessage).dsFont(.caption).foregroundStyle(DS.Color.danger)
                 }
 
                 Button { Task { await submit() } } label: {
-                    Text(isSending ? "Sending…" : "Send dispute").frame(maxWidth: .infinity)
+                    Text(isSending ? "Sending…" : "Send dispute")
                 }
-                .buttonStyle(SSPrimaryButtonStyle())
+                .buttonStyle(.ds(.primary))
                 .disabled(trimmed.isEmpty || isSending)
                 Spacer()
             }
-            .padding(20)
-            .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
+            .padding(DS.Spacing.screenEdge)
+            .dsBackground()
             .navigationTitle("Dispute attendance")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
@@ -218,31 +208,29 @@ struct WorkerReliabilityCard: View {
     @State private var failed = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Image(systemName: "checkmark.shield.fill").foregroundColor(SS.primary)
-                Text("Your reliability").font(.system(size: 14, weight: .bold))
-                Spacer()
-            }
-            if let summary {
-                Text(summary.text).font(.system(size: 14, weight: .semibold))
-                Text(summary.isNew
-                     ? "Your show-up rate appears after 3 finished shifts. Employers see this on your applications."
-                     : "Based on your finished shifts in the last 12 months. Employers see this on your applications.")
-                    .font(.system(size: 12)).foregroundColor(.secondary)
-                Text("Cancel at least 24 hours before a shift to avoid a late cancellation.")
-                    .font(.system(size: 12)).foregroundColor(.secondary)
-            } else if failed {
-                Text("Could not load your reliability.").font(.system(size: 12)).foregroundColor(.secondary)
-            } else {
-                ProgressView()
+        DSCard {
+            VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                HStack(spacing: DS.Spacing.xs) {
+                    Image(systemName: "checkmark.shield.fill").foregroundStyle(DS.Color.primary)
+                    Text("Your reliability").dsFont(.headline).foregroundStyle(DS.Color.text)
+                    Spacer()
+                }
+                if let summary {
+                    Text(summary.text).dsFont(.callout).foregroundStyle(DS.Color.text)
+                    Text(summary.isNew
+                         ? "Your show-up rate appears after 3 finished shifts. Employers see this on your applications."
+                         : "Based on your finished shifts in the last 12 months. Employers see this on your applications.")
+                        .dsFont(.caption).foregroundStyle(DS.Color.muted)
+                    Text("Cancel at least 24 hours before a shift to avoid a late cancellation.")
+                        .dsFont(.caption).foregroundStyle(DS.Color.muted)
+                } else if failed {
+                    Text("Could not load your reliability.").dsFont(.caption).foregroundStyle(DS.Color.muted)
+                } else {
+                    DSSkeletonBlock(height: 14)
+                    DSSkeletonBlock(height: 12)
+                }
             }
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: SS.cardRadius))
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
         .task {
             do { summary = try await APIClient.shared.fetchWorkerReliability() }
             catch { failed = true }
@@ -258,15 +246,11 @@ struct AttendanceInfoRow: View {
     var body: some View {
         if let status = attendance.flatMap(AttendanceStatus.init(rawValue:)) {
             let review = disputeStatus == "pending"
-            HStack(spacing: 12) {
-                Image(systemName: "checkmark.shield").foregroundColor(SS.primary).frame(width: 20)
-                Text("Attendance").font(.system(size: 14)).foregroundColor(.secondary)
-                Spacer(minLength: 12)
+            DSRow("Attendance", systemIcon: "checkmark.shield", showsDivider: false) {
                 Text(review ? "Under review" : status.label)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(review ? .orange : status.color)
+                    .font(DS.Font.make(15, .semibold))
+                    .foregroundStyle(review ? DS.Color.warning : status.color)
             }
-            .padding(.horizontal, 12).padding(.vertical, 12)
         }
     }
 }

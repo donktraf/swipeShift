@@ -27,62 +27,66 @@ struct ReviewsView: View {
     private var topWorkerCount: Int { reviewsData?.topWorkerCount ?? reviews.filter(\.isTopWorker).count }
 
     var body: some View {
-        SubScreenShell(title: "Your Ratings") {
-            if isLoading {
-                ProgressView().frame(maxWidth: .infinity).padding(.top, 60)
+        SubScreenShell(title: "Your Ratings", padded: true) {
+            if isLoading && reviewsData == nil {
+                VStack(spacing: DS.Spacing.md) {
+                    DSSkeletonBlock(height: 140, radius: DS.Radius.card)
+                    DSSkeletonBlock(height: 160, radius: DS.Radius.card)
+                    DSSkeletonBlock(height: 100, radius: DS.Radius.card)
+                }
+                .accessibilityLabel("Loading ratings")
             } else if let err = errorMessage {
-                VStack(spacing: 12) {
-                    Text(err).font(.system(size: 13)).foregroundColor(.white.opacity(0.5))
-                        .multilineTextAlignment(.center).padding(.horizontal, 24)
+                VStack(spacing: DS.Spacing.sm) {
+                    Text(err).dsFont(.callout).foregroundStyle(DS.Color.muted)
+                        .multilineTextAlignment(.center)
                     Button("Retry") { Task { await load() } }
-                        .font(.system(size: 14, weight: .semibold)).foregroundColor(SS.primary)
-                }.padding(.top, 60)
+                        .buttonStyle(.ds(.soft, size: .medium, fullWidth: false))
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.top, DS.Spacing.xxl)
             } else if reviews.isEmpty {
-                VStack(spacing: 12) {
-                    Image(systemName: "star.slash")
-                        .font(.system(size: 44)).foregroundColor(.white.opacity(0.3))
-                    Text("No reviews yet")
-                        .font(.system(size: 15)).foregroundColor(.white.opacity(0.5))
-                }.frame(maxWidth: .infinity).padding(.top, 60)
+                DSEmptyState(systemIcon: "star.slash", title: "No reviews yet",
+                             message: "Ratings from employers will show up here after your jobs.")
             } else {
-                VStack(spacing: 20) {
+                VStack(alignment: .leading, spacing: DS.Spacing.xl) {
                     overallSection
                     skillsSection
                     reviewsSection
                 }
             }
         }
+        .refreshable { await load() }
         .task { await load() }
     }
 
     // MARK: - Overall Rating
 
     private var overallSection: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 24) {
-                VStack(spacing: 4) {
+        DSCard {
+            HStack(spacing: DS.Spacing.xl) {
+                VStack(spacing: DS.Spacing.xxs) {
                     Text(String(format: "%.1f", reviewsData?.overallRating ?? 0))
-                        .font(.system(size: 48, weight: .bold)).foregroundColor(.primary)
+                        .font(DS.Font.make(48, .extrabold, relativeTo: .largeTitle)).foregroundStyle(DS.Color.text)
                     Text("von 5")
-                        .font(.system(size: 13)).foregroundColor(.secondary)
+                        .dsFont(.callout).foregroundStyle(DS.Color.muted)
                 }
-                VStack(alignment: .leading, spacing: 6) {
-                    starsRow(rating: reviewsData?.overallRating ?? 0, size: 22)
+                VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                    starsRow(rating: reviewsData?.overallRating ?? 0, size: 20)
                     Text("Basierend auf \(reviewsData?.totalJobs ?? 0) Jobs")
-                        .font(.system(size: 13)).foregroundColor(.secondary)
+                        .dsFont(.caption).foregroundStyle(DS.Color.muted)
                     if topWorkerCount > 0 {
                         TopWorkerBadge(text: "Top Worker ×\(topWorkerCount)")
                     }
                     VStack(spacing: 3) {
                         ForEach([5, 4, 3, 2, 1], id: \.self) { star in
-                            HStack(spacing: 6) {
+                            HStack(spacing: DS.Spacing.xs) {
                                 Text("\(star)")
-                                    .font(.system(size: 10)).foregroundColor(.secondary).frame(width: 8)
+                                    .font(DS.Font.make(10, .medium, relativeTo: .caption2)).foregroundStyle(DS.Color.muted).frame(width: 8)
                                 let fraction = ratingFraction(star: star)
                                 GeometryReader { geo in
                                     ZStack(alignment: .leading) {
-                                        RoundedRectangle(cornerRadius: 2).fill(Color.gray.opacity(0.15))
-                                        RoundedRectangle(cornerRadius: 2).fill(.yellow)
+                                        Capsule().fill(DS.Color.surface2)
+                                        Capsule().fill(DS.Color.warning)
                                             .frame(width: geo.size.width * fraction)
                                     }
                                 }
@@ -90,68 +94,48 @@ struct ReviewsView: View {
                             }
                         }
                     }
-                    .frame(width: 120)
+                    .accessibilityHidden(true)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(16)
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .padding(.horizontal, 16)
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
     }
 
     // MARK: - Skills Breakdown
 
     private var skillsSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("Skills Performance")
-                .font(.system(size: 11, weight: .semibold)).foregroundColor(.secondary)
-                .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 6)
-            SkillBar(label: "Communication",          rating: avgCommunication)
-            Divider().padding(.leading, 14)
+        DSSection("Skills Performance") {
+            SkillBar(label: "Communication",          rating: avgCommunication, showsDivider: false)
             SkillBar(label: "Teamwork",               rating: avgTeamwork)
-            Divider().padding(.leading, 14)
             SkillBar(label: "Reliability",            rating: avgReliability)
-            Divider().padding(.leading, 14)
             SkillBar(label: "Working under Pressure", rating: avgUnderPressure)
             if let quality = avgWorkQuality {
-                Divider().padding(.leading, 14)
                 SkillBar(label: "Work Quality", rating: quality)
             }
         }
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .padding(.horizontal, 16)
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
     }
 
     // MARK: - Reviews List
 
     private var reviewsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Reviews")
-                .font(.system(size: 15, weight: .bold)).foregroundColor(.white)
-                .padding(.horizontal, 16)
-
-            let displayed = showAllReviews ? reviews : Array(reviews.prefix(3))
-            ForEach(displayed) { review in
-                ReviewCard(review: review)
-            }
-            .padding(.horizontal, 16)
-
-            if reviews.count > 3 {
-                Button { withAnimation { showAllReviews.toggle() } } label: {
-                    Text(showAllReviews ? "Show less" : "All \(reviews.count) Reviews")
-                        .font(.system(size: 14, weight: .semibold)).foregroundColor(SS.primary)
-                        .frame(maxWidth: .infinity).padding(.vertical, 12)
-                        .background(Color(uiColor: .systemBackground))
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+        DSSection("Reviews", ruled: false) {
+            VStack(spacing: DS.Spacing.sm) {
+                let displayed = showAllReviews ? reviews : Array(reviews.prefix(3))
+                ForEach(displayed) { review in
+                    ReviewCard(review: review)
                 }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 16)
-                .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
+
+                if reviews.count > 3 {
+                    Button {
+                        showAllReviews.toggle()
+                    } label: {
+                        Text(showAllReviews ? "Show less" : "All \(reviews.count) Reviews")
+                    }
+                    .buttonStyle(.ds(.soft, size: .medium))
+                }
             }
+            .padding(.top, DS.Spacing.xxs)
+            .dsAnimation(.standard, value: showAllReviews)
         }
     }
 
@@ -179,9 +163,11 @@ struct ReviewsView: View {
             ForEach(1...5, id: \.self) { i in
                 Image(systemName: Double(i) <= rating ? "star.fill" :
                       (Double(i) - 0.5 <= rating ? "star.leadinghalf.filled" : "star"))
-                    .font(.system(size: size)).foregroundColor(.yellow)
+                    .font(.system(size: size)).foregroundStyle(DS.Color.warning)
             }
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Rating \(String(format: "%.1f", rating)) of 5")
     }
 }
 
@@ -190,23 +176,29 @@ struct ReviewsView: View {
 private struct SkillBar: View {
     let label: String
     let rating: Double
+    var showsDivider: Bool = true
     var body: some View {
-        HStack {
-            Text(label).font(.system(size: 14)).foregroundColor(.primary)
-                .frame(width: 150, alignment: .leading).padding(.leading, 14)
+        HStack(spacing: DS.Spacing.sm) {
+            Text(label).dsFont(.body).foregroundStyle(DS.Color.text)
+                .frame(width: 150, alignment: .leading)
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 4).fill(Color.gray.opacity(0.12))
-                    RoundedRectangle(cornerRadius: 4).fill(SS.primary)
+                    Capsule().fill(DS.Color.surface2)
+                    Capsule().fill(DS.Color.primary)
                         .frame(width: geo.size.width * (rating / 5.0))
                 }
             }
             .frame(height: 8)
             Text(String(format: "%.1f", rating))
-                .font(.system(size: 13, weight: .semibold)).foregroundColor(.secondary)
-                .frame(width: 30).padding(.trailing, 14)
+                .font(DS.Font.make(13, .semibold, relativeTo: .footnote)).foregroundStyle(DS.Color.text2)
+                .frame(width: 30, alignment: .trailing)
         }
-        .padding(.vertical, 12)
+        .padding(.vertical, 14)
+        .frame(minHeight: 44)
+        .overlay(alignment: .top) { if showsDivider { DSDivider() } }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
+        .accessibilityValue(String(format: "%.1f of 5", rating))
     }
 }
 
@@ -215,39 +207,39 @@ private struct SkillBar: View {
 private struct ReviewCard: View {
     let review: WorkerReviewItem
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(review.companyName)
-                        .font(.system(size: 14, weight: .semibold)).foregroundColor(.primary)
-                    if review.isTopWorker { TopWorkerBadge(text: "Top Worker") }
-                    Text("\(review.jobType) · \(review.date.formatted(date: .abbreviated, time: .omitted))")
-                        .font(.system(size: 12)).foregroundColor(.secondary)
-                }
-                Spacer()
-                HStack(spacing: 2) {
-                    ForEach(1...5, id: \.self) { i in
-                        Image(systemName: Double(i) <= review.avgRating ? "star.fill" : "star")
-                            .font(.system(size: 12)).foregroundColor(.yellow)
+        DSCard {
+            VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
+                        Text(review.companyName)
+                            .dsFont(.callout).foregroundStyle(DS.Color.text)
+                        if review.isTopWorker { TopWorkerBadge(text: "Top Worker") }
+                        Text("\(review.jobType) · \(review.date.formatted(date: .abbreviated, time: .omitted))")
+                            .dsFont(.caption).foregroundStyle(DS.Color.muted)
                     }
+                    Spacer()
+                    HStack(spacing: 2) {
+                        ForEach(1...5, id: \.self) { i in
+                            Image(systemName: Double(i) <= review.avgRating ? "star.fill" : "star")
+                                .font(.system(size: 12)).foregroundStyle(DS.Color.warning)
+                        }
+                    }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("\(String(format: "%.1f", review.avgRating)) of 5 stars")
                 }
-            }
-            if !review.feedback.isEmpty {
-                Text("\"\(review.feedback)\"")
-                    .font(.system(size: 13)).foregroundColor(.secondary).italic()
-            }
-            HStack(spacing: 12) {
-                MiniSkill(label: "Comm.",  value: review.communication)
-                MiniSkill(label: "Team",   value: review.teamwork)
-                MiniSkill(label: "Rely.",  value: review.reliability)
-                MiniSkill(label: "Press.", value: review.underPressure)
-                if let quality = review.workQuality { MiniSkill(label: "Quality", value: quality) }
+                if !review.feedback.isEmpty {
+                    Text("\"\(review.feedback)\"")
+                        .dsFont(.body).foregroundStyle(DS.Color.text2).italic()
+                }
+                HStack(spacing: DS.Spacing.md) {
+                    MiniSkill(label: "Comm.",  value: review.communication)
+                    MiniSkill(label: "Team",   value: review.teamwork)
+                    MiniSkill(label: "Rely.",  value: review.reliability)
+                    MiniSkill(label: "Press.", value: review.underPressure)
+                    if let quality = review.workQuality { MiniSkill(label: "Quality", value: quality) }
+                }
             }
         }
-        .padding(14)
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
     }
 }
 
@@ -255,8 +247,8 @@ private struct MiniSkill: View {
     let label: String; let value: Int
     var body: some View {
         VStack(spacing: 2) {
-            Text("\(value)").font(.system(size: 13, weight: .bold)).foregroundColor(SS.primary)
-            Text(label).font(.system(size: 10)).foregroundColor(.secondary)
+            Text("\(value)").font(DS.Font.make(13, .bold, relativeTo: .footnote)).foregroundStyle(DS.Color.primaryText)
+            Text(label).font(DS.Font.make(10, .medium, relativeTo: .caption2)).foregroundStyle(DS.Color.muted)
         }
     }
 }
@@ -265,14 +257,13 @@ private struct MiniSkill: View {
 struct TopWorkerBadge: View {
     let text: String
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: DS.Spacing.xxs) {
             Image(systemName: "star.circle.fill").font(.system(size: 11))
-            Text(text).font(.system(size: 11, weight: .bold))
+            Text(text).font(DS.Font.make(11, .bold, relativeTo: .caption2))
         }
-        .foregroundColor(Color(red: 0.62, green: 0.40, blue: 0.0))
-        .padding(.horizontal, 8).padding(.vertical, 3)
-        .background(Color.yellow.opacity(0.25))
-        .clipShape(Capsule())
+        .foregroundStyle(DS.Tone.warning.foreground)
+        .padding(.horizontal, DS.Spacing.xs).padding(.vertical, 3)
+        .background(DS.Tone.warning.soft, in: Capsule())
         .accessibilityLabel(text)
     }
 }

@@ -43,22 +43,28 @@ struct WorkerCalendarView: View {
 
     var body: some View {
         SubScreenShell(title: "Calendar") {
-            VStack(spacing: 20) {
-                modeToggle.padding(.horizontal, 16)
+            VStack(spacing: DS.Spacing.xl) {
+                modeToggle.padding(.horizontal, DS.Spacing.screenEdge)
 
                 if isLoading && entries.isEmpty {
-                    ProgressView().tint(.white).padding(.top, 40)
+                    VStack(spacing: DS.Spacing.sm) {
+                        DSSkeletonBlock(height: 300, radius: DS.Radius.card)
+                        DSSkeletonBlock(height: 80, radius: DS.Radius.card)
+                    }
+                    .padding(.horizontal, DS.Spacing.screenEdge)
+                    .accessibilityLabel("Loading calendar")
                 } else if loadFailed && entries.isEmpty {
                     errorState
                 } else if entries.isEmpty {
                     emptyState
                 } else {
-                    if conflictCount > 0 { conflictBanner.padding(.horizontal, 16) }
+                    if conflictCount > 0 { conflictBanner.padding(.horizontal, DS.Spacing.screenEdge) }
                     if mode == .month { monthView } else { weekView }
                     entryLists
                 }
             }
         }
+        .refreshable { await loadEntries() }
         // Bei jedem Erscheinen neu laden → Annahme/Stornierung/Abschluss sind sofort sichtbar
         .task { await loadEntries() }
         .sheet(item: $selectedEntry) { entry in
@@ -99,78 +105,82 @@ struct WorkerCalendarView: View {
     // MARK: - Mode Toggle
 
     private var modeToggle: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: DS.Spacing.xxs) {
             ForEach([(CalendarMode.month, "Month"), (CalendarMode.week, "Week")], id: \.0) { item, label in
-                Button { mode = item } label: {
+                Button {
+                    DS.Haptics.selection()
+                    mode = item
+                } label: {
                     Text(label)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(mode == item ? .white : .secondary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .background(mode == item ? SS.primary : Color.clear)
-                        .clipShape(Capsule())
+                        .font(DS.Font.make(14, .semibold, relativeTo: .callout))
+                        .foregroundStyle(mode == item ? DS.Color.onPrimary : DS.Color.text2)
+                        .frame(maxWidth: .infinity, minHeight: 36)
+                        .background(mode == item ? DS.Color.primary : Color.clear, in: Capsule())
+                        .frame(minHeight: 44)
+                        .contentShape(Capsule())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.dsPressable)
+                .accessibilityAddTraits(mode == item ? .isSelected : [])
             }
         }
-        .padding(4)
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(Capsule())
-        .shadow(color: .black.opacity(0.06), radius: 4, x: 0, y: 2)
+        .padding(DS.Spacing.xxs)
+        .background(DS.Color.surface2, in: Capsule())
+        .dsAnimation(.snappy, value: mode)
     }
 
     // MARK: - Month View
 
     private var monthView: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: DS.Spacing.md) {
             navigationHeader(
                 title: displayedMonth.formatted(.dateTime.month(.wide).year()),
                 onPrevious: { displayedMonth = calendar.date(byAdding: .month, value: -1, to: displayedMonth) ?? displayedMonth },
                 onNext: { displayedMonth = calendar.date(byAdding: .month, value: 1, to: displayedMonth) ?? displayedMonth }
             )
 
-            VStack(spacing: 0) {
-                HStack {
-                    ForEach(["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"], id: \.self) { label in
-                        Text(label)
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(.secondary)
-                            .frame(maxWidth: .infinity)
-                    }
-                }
-                .padding(.bottom, 8)
-
-                let days = daysInMonth(for: displayedMonth)
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 7), spacing: 4) {
-                    ForEach(days.indices, id: \.self) { idx in
-                        if let day = days[idx].0, let date = days[idx].1 {
-                            CalendarDayCell(day: day, date: date, entries: entriesOn(date))
-                                .onTapGesture {
-                                    // Tag mit genau einem Job → direkt Details; sonst Liste unten nutzen
-                                    let dayEntries = entriesOn(date)
-                                    if dayEntries.count == 1 { selectedEntry = dayEntries[0] }
-                                }
-                        } else {
-                            Color.clear.frame(height: 36)
+            DSCard {
+                VStack(spacing: 0) {
+                    HStack {
+                        ForEach(["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"], id: \.self) { label in
+                            Text(label)
+                                .font(DS.Font.make(11, .semibold, relativeTo: .caption2))
+                                .foregroundStyle(DS.Color.muted)
+                                .frame(maxWidth: .infinity)
                         }
                     }
+                    .padding(.bottom, DS.Spacing.xs)
+
+                    let days = daysInMonth(for: displayedMonth)
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 7), spacing: 4) {
+                        ForEach(days.indices, id: \.self) { idx in
+                            if let day = days[idx].0, let date = days[idx].1 {
+                                CalendarDayCell(day: day, date: date, entries: entriesOn(date))
+                                    .onTapGesture {
+                                        // Tag mit genau einem Job → direkt Details; sonst Liste unten nutzen
+                                        let dayEntries = entriesOn(date)
+                                        if dayEntries.count == 1 {
+                                            DS.Haptics.light()
+                                            selectedEntry = dayEntries[0]
+                                        }
+                                    }
+                            } else {
+                                Color.clear.frame(height: 36)
+                            }
+                        }
+                    }
+                    legend.padding(.top, DS.Spacing.sm)
                 }
-                legend.padding(.top, 12)
             }
-            .padding(14)
-            .background(Color(uiColor: .systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-            .padding(.horizontal, 16)
-            .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
+            .padding(.horizontal, DS.Spacing.screenEdge)
         }
     }
 
     private var legend: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: DS.Spacing.sm) {
             ForEach([ApplicationStatus.confirmed, .applied, .completed, .cancelled], id: \.self) { status in
-                HStack(spacing: 4) {
+                HStack(spacing: DS.Spacing.xxs) {
                     Circle().fill(status.calendarColor).frame(width: 7, height: 7)
-                    Text(status.calendarLabel).font(.system(size: 10)).foregroundColor(.secondary)
+                    Text(status.calendarLabel).font(DS.Font.make(10, .medium, relativeTo: .caption2)).foregroundStyle(DS.Color.muted)
                 }
             }
         }
@@ -181,7 +191,7 @@ struct WorkerCalendarView: View {
 
     private var weekView: some View {
         let weekDays = weekDays(offset: weekOffset)
-        return VStack(spacing: 16) {
+        return VStack(spacing: DS.Spacing.md) {
             navigationHeader(
                 title: weekRangeLabel(weekDays),
                 onPrevious: { weekOffset -= 1 },
@@ -189,12 +199,12 @@ struct WorkerCalendarView: View {
             )
 
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .top, spacing: 12) {
+                HStack(alignment: .top, spacing: DS.Spacing.sm) {
                     ForEach(weekDays, id: \.self) { date in
                         CalendarWeekDayColumn(date: date, entries: entriesOn(date)) { selectedEntry = $0 }
                     }
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, DS.Spacing.screenEdge)
             }
         }
     }
@@ -202,7 +212,7 @@ struct WorkerCalendarView: View {
     // MARK: - Lists (kommend + vergangen getrennt)
 
     private var entryLists: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: DS.Spacing.xl) {
             entrySection(title: "Upcoming Jobs", entries: upcomingEntries,
                          emptyText: "No upcoming jobs. Apply for shifts to fill your calendar.")
             if !pastEntries.isEmpty {
@@ -212,21 +222,22 @@ struct WorkerCalendarView: View {
     }
 
     private func entrySection(title: String, entries: [CalendarEntry], emptyText: String?) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(title)
-                .font(.system(size: 15, weight: .bold))
-                .foregroundColor(.white)
-            if entries.isEmpty, let emptyText {
-                Text(emptyText)
-                    .font(.system(size: 13))
-                    .foregroundColor(.white.opacity(0.6))
+        DSSection(title, ruled: false) {
+            VStack(spacing: DS.Spacing.sm) {
+                if entries.isEmpty, let emptyText {
+                    Text(emptyText)
+                        .dsFont(.callout)
+                        .foregroundStyle(DS.Color.muted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                ForEach(entries) { entry in
+                    Button { selectedEntry = entry } label: { CalendarEntryRow(entry: entry) }
+                        .buttonStyle(.dsPressable)
+                }
             }
-            ForEach(entries) { entry in
-                Button { selectedEntry = entry } label: { CalendarEntryRow(entry: entry) }
-                    .buttonStyle(.plain)
-            }
+            .padding(.top, DS.Spacing.xxs)
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, DS.Spacing.screenEdge)
     }
 
 }
@@ -243,70 +254,48 @@ extension WorkerCalendarView {
                 : "\(conflictCount) upcoming shifts overlap with other jobs.",
             systemImage: "exclamationmark.triangle.fill"
         )
-        .font(.system(size: 13, weight: .semibold))
-        .foregroundColor(.orange)
-        .padding(12)
+        .font(DS.Font.make(13, .semibold, relativeTo: .footnote))
+        .foregroundStyle(DS.Color.warning)
+        .padding(DS.Spacing.sm)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .background(DS.Color.warningSoft, in: RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
     }
 
     // MARK: - Empty / Error
 
     private var emptyState: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "calendar.badge.plus")
-                .font(.system(size: 44)).foregroundColor(.white.opacity(0.35))
-            Text("No jobs scheduled yet")
-                .font(.system(size: 16, weight: .semibold)).foregroundColor(.white.opacity(0.8))
-            Text("Apply for shifts and they will show up here.")
-                .font(.system(size: 13)).foregroundColor(.white.opacity(0.55))
+        VStack(spacing: DS.Spacing.xs) {
+            DSEmptyState(systemIcon: "calendar.badge.plus", title: "No jobs scheduled yet",
+                         message: "Apply for shifts and they will show up here.")
             NavigationLink {
                 JobListView()
             } label: {
                 Label("Find jobs nearby", systemImage: "location.magnifyingglass")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(SS.primary)
-                    .padding(.horizontal, 20).padding(.vertical, 12)
-                    .background(Color.white)
-                    .clipShape(Capsule())
             }
+            .buttonStyle(.ds(.primary, size: .medium, fullWidth: false))
         }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 40)
+        .padding(.horizontal, DS.Spacing.screenEdge)
     }
 
     private var errorState: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: DS.Spacing.sm) {
             Text("Your calendar could not be loaded.")
-                .font(.system(size: 13)).foregroundColor(.white.opacity(0.6))
+                .dsFont(.callout).foregroundStyle(DS.Color.muted)
             Button("Retry") { Task { await loadEntries() } }
-                .font(.system(size: 14, weight: .semibold)).foregroundColor(.white)
+                .buttonStyle(.ds(.soft, size: .medium, fullWidth: false))
         }
-        .padding(.top, 40)
+        .padding(.top, DS.Spacing.xl)
     }
 
     private func navigationHeader(title: String, onPrevious: @escaping () -> Void, onNext: @escaping () -> Void) -> some View {
         HStack {
-            chevronButton("chevron.left", label: "Previous", action: onPrevious)
+            DSIconButton(systemName: "chevron.left", label: "Previous", action: onPrevious)
             Spacer()
-            Text(title).font(.system(size: 17, weight: .bold)).foregroundColor(.white)
+            Text(title).dsFont(.headline).foregroundStyle(DS.Color.text)
             Spacer()
-            chevronButton("chevron.right", label: "Next", action: onNext)
+            DSIconButton(systemName: "chevron.right", label: "Next", action: onNext)
         }
-        .padding(.horizontal, 16)
-    }
-
-    private func chevronButton(_ icon: String, label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: icon)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(.white)
-                .padding(8)
-                .background(Color.white.opacity(0.15))
-                .clipShape(Circle())
-        }
-        .accessibilityLabel(label)
+        .padding(.horizontal, DS.Spacing.screenEdge)
     }
 
     private func entriesOn(_ date: Date) -> [CalendarEntry] {

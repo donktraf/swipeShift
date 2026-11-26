@@ -25,26 +25,36 @@ struct SavedView: View {
     @State private var undoDismissTask: Task<Void, Never>? = nil
 
     var body: some View {
-        SubScreenShell(title: "Saved") {
-            VStack(spacing: 16) {
-                tabSelector.padding(.horizontal, 16)
+        SubScreenShell(title: "Saved", padded: true) {
+            VStack(alignment: .leading, spacing: DS.Spacing.md) {
+                tabSelector
 
-                if isLoading {
-                    ProgressView().frame(maxWidth: .infinity).padding(.top, 60)
+                if isLoading && savedJobs.isEmpty && savedCompanies.isEmpty {
+                    VStack(spacing: DS.Spacing.sm) {
+                        ForEach(0..<3, id: \.self) { _ in
+                            DSSkeletonBlock(height: 110, radius: DS.Radius.card)
+                        }
+                    }
+                    .accessibilityLabel("Loading saved items")
                 } else if let err = errorMessage {
-                    VStack(spacing: 12) {
-                        Text(err).font(.system(size: 13)).foregroundColor(.white.opacity(0.5))
-                            .multilineTextAlignment(.center).padding(.horizontal, 24)
+                    VStack(spacing: DS.Spacing.sm) {
+                        Text(err).dsFont(.callout).foregroundStyle(DS.Color.muted)
+                            .multilineTextAlignment(.center)
                         Button("Retry") { Task { await load() } }
-                            .font(.system(size: 14, weight: .semibold)).foregroundColor(SS.primary)
-                    }.padding(.top, 60)
+                            .buttonStyle(.ds(.soft, size: .medium, fullWidth: false))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, DS.Spacing.xxl)
                 } else if selectedTab == .jobs {
                     if savedJobs.isEmpty { emptyState } else { savedJobsList }
                 } else {
                     if savedCompanies.isEmpty { emptyState } else { savedCompaniesList }
                 }
             }
+            .dsAnimation(.standard, value: savedJobs.count)
+            .dsAnimation(.standard, value: savedCompanies.count)
         }
+        .refreshable { await load() }
         .overlay(alignment: .bottom) { undoBanner }
         .task { await load() }
         .onChange(of: selectedTab) { _, _ in Task { await load() } }
@@ -109,17 +119,17 @@ struct SavedView: View {
     @ViewBuilder
     private var undoBanner: some View {
         if let job = undoJob {
-            HStack(spacing: 12) {
+            HStack(spacing: DS.Spacing.sm) {
                 Text("Removed from saved")
-                    .font(.system(size: 14)).foregroundColor(.white)
+                    .dsFont(.body).foregroundStyle(DS.Color.bg)
                 Spacer()
                 Button("Undo") { undoNotInterested(job) }
-                    .font(.system(size: 14, weight: .bold)).foregroundColor(.white)
+                    .font(DS.Font.make(14, .bold, relativeTo: .callout)).foregroundStyle(DS.Color.bg)
+                    .frame(minHeight: 44)
             }
-            .padding(.horizontal, 16).padding(.vertical, 12)
-            .background(Color.black.opacity(0.85))
-            .clipShape(RoundedRectangle(cornerRadius: 14))
-            .padding(.horizontal, 16).padding(.bottom, 16)
+            .padding(.horizontal, DS.Spacing.md).padding(.vertical, DS.Spacing.xxs)
+            .background(DS.Color.text, in: RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
+            .padding(.horizontal, DS.Spacing.screenEdge).padding(.bottom, DS.Spacing.md)
             .transition(.move(edge: .bottom).combined(with: .opacity))
         }
     }
@@ -131,26 +141,30 @@ struct SavedView: View {
         }
     }
 
-    // MARK: - Tab Selector
+    // MARK: - Tab Selector (segmentierte Pills)
 
     private var tabSelector: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: DS.Spacing.xxs) {
             ForEach([(SavedTab.jobs, "Jobs"), (SavedTab.companies, "Companies")], id: \.0) { tab, label in
-                Button { selectedTab = tab } label: {
+                Button {
+                    DS.Haptics.selection()
+                    selectedTab = tab
+                } label: {
                     Text(label)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(selectedTab == tab ? .white : .secondary)
-                        .frame(maxWidth: .infinity).padding(.vertical, 8)
-                        .background(selectedTab == tab ? SS.primary : Color.clear)
-                        .clipShape(Capsule())
+                        .font(DS.Font.make(14, .semibold, relativeTo: .callout))
+                        .foregroundStyle(selectedTab == tab ? DS.Color.onPrimary : DS.Color.text2)
+                        .frame(maxWidth: .infinity, minHeight: 36)
+                        .background(selectedTab == tab ? DS.Color.primary : Color.clear, in: Capsule())
+                        .frame(minHeight: 44)
+                        .contentShape(Capsule())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.dsPressable)
+                .accessibilityAddTraits(selectedTab == tab ? .isSelected : [])
             }
         }
-        .padding(4)
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(Capsule())
-        .shadow(color: .black.opacity(0.06), radius: 4, x: 0, y: 2)
+        .padding(DS.Spacing.xxs)
+        .background(DS.Color.surface2, in: Capsule())
+        .dsAnimation(.snappy, value: selectedTab)
     }
 
     // MARK: - Saved Jobs List (nach Datum gruppiert)
@@ -162,21 +176,19 @@ struct SavedView: View {
             let dateB = savedJobs.first { dateLabel($0.savedAt) == b }?.savedAt ?? .distantPast
             return dateA > dateB
         }
-        return VStack(spacing: 10) {
+        return VStack(alignment: .leading, spacing: DS.Spacing.lg) {
             ForEach(keys, id: \.self) { key in
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: DS.Spacing.xs) {
                     Text(key)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.7))
-                        .padding(.horizontal, 16)
+                        .dsFont(.sectionLabel)
+                        .foregroundStyle(DS.Color.muted)
                     ForEach(grouped[key] ?? []) { job in
                         SavedJobCard(
                             job: job,
-                            onUnsave: { withAnimation { savedJobs.removeAll { $0.id == job.id } } },
+                            onUnsave: { savedJobs.removeAll { $0.id == job.id } },
                             onApply: { startApply(job) },
                             onNotInterested: { notInterested(job) }
                         )
-                        .padding(.horizontal, 16)
                     }
                 }
             }
@@ -186,27 +198,21 @@ struct SavedView: View {
     // MARK: - Empty State
 
     private var emptyState: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "bookmark")
-                .font(.system(size: 40)).foregroundColor(.white.opacity(0.3))
-            Text("You haven't saved anything yet.")
-                .font(.system(size: 14, weight: .semibold)).foregroundColor(.white.opacity(0.6))
-            Text("Start exploring jobs and companies and save the ones you like.")
-                .font(.system(size: 13)).foregroundColor(.white.opacity(0.4))
-                .multilineTextAlignment(.center).padding(.horizontal, 32)
-        }
-        .frame(maxWidth: .infinity).padding(.top, 40)
+        DSEmptyState(
+            systemIcon: "bookmark",
+            title: "You haven't saved anything yet.",
+            message: "Start exploring jobs and companies and save the ones you like."
+        )
     }
 
     // MARK: - Saved Companies List
 
     private var savedCompaniesList: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: DS.Spacing.sm) {
             ForEach(savedCompanies) { company in
                 SavedCompanyCard(company: company) {
-                    withAnimation { savedCompanies.removeAll { $0.id == company.id } }
+                    savedCompanies.removeAll { $0.id == company.id }
                 }
-                .padding(.horizontal, 16)
             }
         }
     }

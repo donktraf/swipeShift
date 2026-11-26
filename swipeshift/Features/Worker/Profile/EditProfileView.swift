@@ -69,8 +69,8 @@ struct EditProfileView: View {
                                   "Customer Service", "Warehouse", "Office", "Cleaning"]
 
     var body: some View {
-        SubScreenShell(title: "Edit Profile") {
-            VStack(spacing: 20) {
+        SubScreenShell(title: "Edit Profile", padded: true) {
+            VStack(alignment: .leading, spacing: DS.Spacing.xl) {
                 photoBanner
                 basicInfoSection
                 locationSection
@@ -89,29 +89,26 @@ struct EditProfileView: View {
     // MARK: - Photo Banner
 
     private var photoBanner: some View {
-        VStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(Color.white.opacity(0.2))
+        VStack(spacing: DS.Spacing.sm) {
+            if let img = selectedImage {
+                Image(uiImage: img)
+                    .resizable()
+                    .scaledToFill()
                     .frame(width: 80, height: 80)
-                if let img = selectedImage {
-                    Image(uiImage: img)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 80, height: 80)
-                        .clipShape(Circle())
-                } else {
-                    Image(systemName: "person.fill")
-                        .font(.system(size: 34))
-                        .foregroundColor(.white.opacity(0.6))
-                }
+                    .clipShape(Circle())
+                    .accessibilityHidden(true)
+            } else {
+                Image(systemName: "person.fill")
+                    .font(DS.Font.make(34, .semibold, relativeTo: nil))
+                    .foregroundStyle(DS.Color.primaryText)
+                    .frame(width: 80, height: 80)
+                    .background(DS.Color.primarySoft, in: Circle())
+                    .accessibilityHidden(true)
             }
             Button("Change Photo") { showImagePicker = true }
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(.white)
+                .buttonStyle(.ds(.soft, size: .medium, fullWidth: false))
         }
         .frame(maxWidth: .infinity)
-        .padding(.bottom, 4)
         .sheet(isPresented: $showImagePicker) {
             ImagePicker(image: $selectedImage)
         }
@@ -121,28 +118,21 @@ struct EditProfileView: View {
 
     private var basicInfoSection: some View {
         EditSection(title: "Personal Details") {
-            EditRow(label: "First Name") {
-                TextField("John", text: $firstName)
-                    .textContentType(.givenName)
-            }
-            EditRow(label: "Last Name") {
-                TextField("Smith", text: $lastName)
-                    .textContentType(.familyName)
-            }
-            EditRow(label: "Email") {
-                TextField("john@example.com", text: $email)
-                    .textContentType(.emailAddress)
-                    .keyboardType(.emailAddress)
-            }
-            EditRow(label: "Phone") {
-                TextField("+1 555 000 0000", text: $phone)
-                    .textContentType(.telephoneNumber)
-                    .keyboardType(.phonePad)
-            }
+            DSTextField("First Name", placeholder: "John", text: $firstName)
+                .textContentType(.givenName)
+            DSTextField("Last Name", placeholder: "Smith", text: $lastName)
+                .textContentType(.familyName)
+            DSTextField("Email", placeholder: "john@example.com", text: $email)
+                .textContentType(.emailAddress)
+                .keyboardType(.emailAddress)
+                .textInputAutocapitalization(.never)
+            DSTextField("Phone", placeholder: "+1 555 000 0000", text: $phone)
+                .textContentType(.telephoneNumber)
+                .keyboardType(.phonePad)
             EditRow(label: "Date of Birth") {
-                DatePicker("", selection: $dateOfBirth, in: ...latestAllowedBirthDate, displayedComponents: .date)
+                DatePicker("Date of Birth", selection: $dateOfBirth, in: ...latestAllowedBirthDate, displayedComponents: .date)
                     .labelsHidden()
-                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .tint(DS.Color.primary)
             }
         }
     }
@@ -159,36 +149,26 @@ struct EditProfileView: View {
 
     private var locationSection: some View {
         EditSection(title: "Location & Mobility") {
-            EditRow(label: "Location") {
-                TextField("New York, USA", text: $location)
-                    .textContentType(.addressCity)
-            }
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Willing to work in another city")
-                    .font(.system(size: 14))
-                    .foregroundColor(.primary)
-                Toggle("", isOn: $willingToRelocate)
-                    .labelsHidden()
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-            }
-            .padding(.vertical, 6)
+            DSTextField("Location", placeholder: "New York, USA", text: $location)
+                .textContentType(.addressCity)
+            DSToggleRow("Willing to work in another city", showsDivider: false, isOn: $willingToRelocate)
             EditRow(label: "Max. Travel Distance") {
-                Picker("", selection: $maxDistance) {
+                Picker("Max. Travel Distance", selection: $maxDistance) {
                     ForEach(distanceOptions, id: \.self) { d in
                         Text("\(d) mi").tag(d)
                     }
                 }
                 .pickerStyle(.menu)
-                .frame(maxWidth: .infinity, alignment: .trailing)
+                .tint(DS.Color.primaryText)
             }
             EditRow(label: "Transport") {
-                Picker("", selection: $transport) {
+                Picker("Transport", selection: $transport) {
                     ForEach(transportOptions, id: \.self) { t in
                         Text(t).tag(t)
                     }
                 }
                 .pickerStyle(.menu)
-                .frame(maxWidth: .infinity, alignment: .trailing)
+                .tint(DS.Color.primaryText)
             }
         }
     }
@@ -197,28 +177,30 @@ struct EditProfileView: View {
 
     private var availabilitySection: some View {
         EditSection(title: "Availability") {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: DS.Spacing.xs) {
                 Text("Available Days")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.secondary)
-                HStack(spacing: 8) {
+                    .font(DS.Font.make(13, .semibold, relativeTo: .footnote))
+                    .foregroundStyle(DS.Color.text2)
+                HStack(spacing: DS.Spacing.xs) {
                     ForEach(dayOrder, id: \.self) { day in
                         let isOn = availableDays[day] ?? false
                         Button {
+                            DS.Haptics.selection()
                             availableDays[day] = !isOn
                         } label: {
                             Text(day.prefix(1).uppercased() + day.dropFirst().lowercased())
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(isOn ? .white : .secondary)
-                                .frame(width: 36, height: 36)
-                                .background(isOn ? SS.primary : Color.gray.opacity(0.12))
-                                .clipShape(Circle())
+                                .font(DS.Font.make(12, .semibold, relativeTo: .caption))
+                                .foregroundStyle(isOn ? DS.Color.onPrimary : DS.Color.text2)
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                                .background(isOn ? DS.Color.primary : DS.Color.surface2,
+                                            in: RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.dsPressable)
+                        .accessibilityLabel(day)
+                        .accessibilityAddTraits(isOn ? .isSelected : [])
                     }
                 }
             }
-            .padding(.vertical, 4)
 
             ProfileChipPicker(
                 title: "Available Times",
@@ -227,15 +209,7 @@ struct EditProfileView: View {
                 selection: $availableTimes
             )
 
-            HStack {
-                Text("Available for same-day jobs")
-                    .font(.system(size: 14))
-                    .foregroundColor(.primary)
-                Spacer()
-                Toggle("", isOn: $sameDayAvailable)
-                    .labelsHidden()
-            }
-            .padding(.vertical, 6)
+            DSToggleRow("Available for same-day jobs", showsDivider: false, isOn: $sameDayAvailable)
         }
     }
 
@@ -243,56 +217,33 @@ struct EditProfileView: View {
 
     private var jobPreferencesSection: some View {
         EditSection(title: "Job Preferences") {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: DS.Spacing.xs) {
                 Text("Preferred Categories")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.secondary)
+                    .font(DS.Font.make(13, .semibold, relativeTo: .footnote))
+                    .foregroundStyle(DS.Color.text2)
                 LazyVGrid(
-                    columns: [GridItem(.flexible()), GridItem(.flexible())],
-                    spacing: 8
+                    columns: [GridItem(.flexible(), spacing: DS.Spacing.xs), GridItem(.flexible())],
+                    spacing: DS.Spacing.xs
                 ) {
                     ForEach(allCategories, id: \.self) { cat in
                         let isOn = selectedCategories.contains(cat)
-                        Button {
+                        DSChip(cat, isSelected: isOn) {
                             if isOn { selectedCategories.remove(cat) }
                             else { selectedCategories.insert(cat) }
-                        } label: {
-                            Text(cat)
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(isOn ? .white : .secondary)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 8)
-                                .background(isOn ? SS.primary : Color.gray.opacity(0.1))
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
                         }
-                        .buttonStyle(.plain)
                     }
                 }
             }
-            .padding(.vertical, 4)
 
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: DS.Spacing.xs) {
                 Text("Preferred Hourly Pay ($/hr)")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.secondary)
-                HStack(spacing: 16) {
-                    VStack(spacing: 2) {
-                        Text("Min").font(.system(size: 11)).foregroundColor(.secondary)
-                        Stepper(Money.format(payRangeMin), value: $payRangeMin, in: 1...payRangeMax, step: 1)
-                            .labelsHidden()
-                        Text(Money.format(payRangeMin)).font(.system(size: 14, weight: .semibold))
-                    }
-                    Divider().frame(height: 40)
-                    VStack(spacing: 2) {
-                        Text("Max").font(.system(size: 11)).foregroundColor(.secondary)
-                        Stepper(Money.format(payRangeMax), value: $payRangeMax, in: payRangeMin...200, step: 1)
-                            .labelsHidden()
-                        Text(Money.format(payRangeMax)).font(.system(size: 14, weight: .semibold))
-                    }
-                    Spacer()
+                    .font(DS.Font.make(13, .semibold, relativeTo: .footnote))
+                    .foregroundStyle(DS.Color.text2)
+                HStack(spacing: DS.Spacing.md) {
+                    payStepper(label: "Min", value: $payRangeMin, range: 1...payRangeMax)
+                    payStepper(label: "Max", value: $payRangeMax, range: payRangeMin...200)
                 }
             }
-            .padding(.vertical, 4)
 
             // "Same-day" bleibt der Schalter oben (Verfuegbarkeit) - hier nur die uebrigen Schicht-Typen
             ProfileChipPicker(
@@ -304,15 +255,27 @@ struct EditProfileView: View {
         }
     }
 
+    private func payStepper(label: String, value: Binding<Int>, range: ClosedRange<Int>) -> some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
+            Text(label).dsFont(.caption).foregroundStyle(DS.Color.muted)
+            HStack {
+                Text(Money.format(value.wrappedValue))
+                    .font(DS.Font.make(15, .bold))
+                    .foregroundStyle(DS.Color.text)
+                Spacer(minLength: DS.Spacing.xs)
+                DSStepper(value: value, range: range, accessibilityName: "\(label) hourly pay")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     // MARK: - Experience
 
     private var experienceSection: some View {
         EditSection(title: "Experience") {
             Text("How long have you worked in each category?")
-                .font(.system(size: 12))
-                .foregroundColor(.secondary)
-                .padding(.horizontal, 14)
-                .padding(.bottom, 4)
+                .dsFont(.caption)
+                .foregroundStyle(DS.Color.muted)
             ExperienceEditor(categories: allCategories, levels: $experienceLevels)
         }
     }
@@ -347,18 +310,7 @@ struct EditProfileView: View {
 
     private var bioSection: some View {
         EditSection(title: "Bio (optional)") {
-            VStack(alignment: .leading, spacing: 6) {
-                TextEditor(text: $bio)
-                    .frame(minHeight: 80)
-                    .font(.system(size: 14))
-                    .onChange(of: bio) { _, new in
-                        if new.count > 300 { bio = String(new.prefix(300)) }
-                    }
-                Text("\(bio.count)/300")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-            }
+            DSTextEditor("Bio", placeholder: "Tell employers a bit about you", text: $bio, minLines: 3, maxLines: 8, maxLength: 300)
         }
     }
 
@@ -370,14 +322,13 @@ struct EditProfileView: View {
         } label: {
             Group {
                 if isSaving {
-                    ProgressView().tint(.white)
+                    ProgressView().tint(DS.Color.onPrimary)
                 } else {
                     Text("Save")
                 }
             }
         }
-        .buttonStyle(SSPrimaryButtonStyle(isEnabled: !isSaving))
-        .padding(.horizontal, 16)
+        .buttonStyle(.ds(.primary))
         .disabled(isSaving)
         .alert("Could not save", isPresented: Binding(get: { saveError != nil }, set: { if !$0 { saveError = nil } })) {
             Button("OK", role: .cancel) {}
@@ -505,6 +456,7 @@ struct EditProfileView: View {
 
 // MARK: - Helper Views
 
+/// Flache Gruppe: Sektionslabel + Felder mit 16er Abstand, Trennlinie unten (keine Box).
 private struct EditSection<Content: View>: View {
     let title: String
     let content: Content
@@ -515,22 +467,14 @@ private struct EditSection<Content: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(title)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(.secondary)
-                .padding(.horizontal, 14)
-                .padding(.top, 10)
-                .padding(.bottom, 4)
-            content
+        DSSection(title) {
+            VStack(alignment: .leading, spacing: DS.Spacing.md) { content }
+                .padding(.vertical, DS.Spacing.sm)
         }
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .padding(.horizontal, 16)
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
     }
 }
 
+/// Zeile mit Label links und Bedienelement rechts (Datum, Menues).
 private struct EditRow<Content: View>: View {
     let label: String
     let content: Content
@@ -541,19 +485,15 @@ private struct EditRow<Content: View>: View {
     }
 
     var body: some View {
-        HStack {
+        HStack(spacing: DS.Spacing.sm) {
             Text(label)
-                .font(.system(size: 14))
-                .foregroundColor(.secondary)
-                .frame(width: 110, alignment: .leading)
-                .padding(.leading, 14)
+                .dsFont(.body)
+                .foregroundStyle(DS.Color.text)
+            Spacer(minLength: DS.Spacing.xs)
             content
-                .font(.system(size: 14))
-                .frame(maxWidth: .infinity, alignment: .trailing)
-                .padding(.trailing, 14)
+                .font(DS.Font.make(15, .medium))
         }
-        .padding(.vertical, 12)
-        if true { Divider().padding(.leading, 14) }
+        .frame(minHeight: 44)
     }
 }
 
@@ -564,60 +504,54 @@ private struct SkillRatingRow: View {
     var body: some View {
         HStack {
             Text(label)
-                .font(.system(size: 14))
-                .foregroundColor(.primary)
-                .padding(.leading, 14)
-            Spacer()
-            HStack(spacing: 4) {
+                .dsFont(.body)
+                .foregroundStyle(DS.Color.text)
+            Spacer(minLength: DS.Spacing.xs)
+            HStack(spacing: 0) {
                 ForEach(1...5, id: \.self) { i in
-                    Image(systemName: i <= rating ? "star.fill" : "star")
-                        .font(.system(size: 18))
-                        .foregroundColor(i <= rating ? .yellow : .gray.opacity(0.3))
-                        .onTapGesture { rating = i }
+                    Button {
+                        DS.Haptics.selection()
+                        rating = i
+                    } label: {
+                        Image(systemName: i <= rating ? "star.fill" : "star")
+                            .font(DS.Font.make(18, .regular, relativeTo: nil))
+                            .foregroundStyle(i <= rating ? DS.Color.warning : DS.Color.border)
+                            .frame(width: 36, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(i) of 5")
                 }
             }
-            .padding(.trailing, 14)
         }
-        .padding(.vertical, 10)
-        if true { Divider().padding(.leading, 14) }
+        .accessibilityElement(children: .contain)
+        .accessibilityValue("\(rating) of 5")
     }
 }
 
 /// Hinweis, wenn das gespeicherte Geburtsdatum unter 18 liegt
 private struct AgeWarningRow: View {
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 20))
-                .foregroundColor(.orange)
-                .padding(.leading, 14)
+        HStack(spacing: DS.Spacing.sm) {
+            DSIconTile(systemName: "exclamationmark.triangle.fill", tone: .warning)
             Text("Please check your date of birth – you must be at least 18.")
-                .font(.system(size: 13))
-                .foregroundColor(.primary)
-                .padding(.trailing, 14)
-            Spacer()
+                .dsFont(.callout)
+                .foregroundStyle(DS.Color.text)
+            Spacer(minLength: 0)
         }
-        .padding(.vertical, 10)
-        Divider().padding(.leading, 14)
     }
 }
 
 /// Schreibgeschuetzte Zeile: 18+ wird ueber das Geburtsdatum bestaetigt (serverseitig geprueft)
 private struct AgeConfirmedRow: View {
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "checkmark.seal.fill")
-                .font(.system(size: 20))
-                .foregroundColor(SS.primary)
-                .padding(.leading, 14)
+        HStack(spacing: DS.Spacing.sm) {
+            DSIconTile(systemName: "checkmark.seal.fill", tone: .primary)
             Text("Age 18+ confirmed via your date of birth")
-                .font(.system(size: 13))
-                .foregroundColor(.primary)
-                .padding(.trailing, 14)
-            Spacer()
+                .dsFont(.callout)
+                .foregroundStyle(DS.Color.text)
+            Spacer(minLength: 0)
         }
-        .padding(.vertical, 10)
-        Divider().padding(.leading, 14)
     }
 }
 
@@ -627,23 +561,26 @@ private struct LegalToggle: View {
     var locked: Bool = false
 
     var body: some View {
-        HStack(spacing: 12) {
-            Button { isOn.toggle() } label: {
+        Button {
+            DS.Haptics.selection()
+            isOn.toggle()
+        } label: {
+            HStack(spacing: DS.Spacing.sm) {
                 Image(systemName: isOn ? "checkmark.square.fill" : "square")
-                    .font(.system(size: 20))
-                    .foregroundColor(isOn ? SS.primary : .gray.opacity(0.4))
-                    .padding(.leading, 14)
+                    .font(DS.Font.make(22, .regular, relativeTo: nil))
+                    .foregroundStyle(isOn ? DS.Color.primary : DS.Color.muted)
+                Text(label)
+                    .dsFont(.callout)
+                    .foregroundStyle(DS.Color.text)
+                    .multilineTextAlignment(.leading)
+                Spacer(minLength: 0)
             }
-            .buttonStyle(.plain)
-            .disabled(locked)
-            Text(label)
-                .font(.system(size: 13))
-                .foregroundColor(.primary)
-                .padding(.trailing, 14)
-            Spacer()
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
         }
-        .padding(.vertical, 10)
+        .buttonStyle(.plain)
+        .disabled(locked)
         .opacity(locked ? 0.6 : 1)
-        if true { Divider().padding(.leading, 14) }
+        .accessibilityAddTraits(isOn ? .isSelected : [])
     }
 }

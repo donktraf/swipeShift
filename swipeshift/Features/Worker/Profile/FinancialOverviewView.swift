@@ -24,133 +24,143 @@ struct FinancialOverviewView: View {
     private var gap:               Double { max(incomeGoal - total, 0) }
 
     var body: some View {
-        SubScreenShell(title: "Financial Overview") {
-            VStack(spacing: 20) {
-                FinancialPeriodPicker(period: $period).padding(.horizontal, 16)
+        SubScreenShell(title: "Financial Overview", padded: true) {
+            VStack(alignment: .leading, spacing: DS.Spacing.xl) {
+                FinancialPeriodPicker(period: $period)
 
-                if isLoading {
-                    ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
+                if isLoading && financials == nil {
+                    skeleton
                 } else if let err = errorMessage {
-                    VStack(spacing: 12) {
-                        Text(err).font(.system(size: 13)).foregroundColor(.white.opacity(0.5))
-                            .multilineTextAlignment(.center).padding(.horizontal, 24)
+                    VStack(spacing: DS.Spacing.sm) {
+                        Text(err).dsFont(.callout).foregroundStyle(DS.Color.muted)
+                            .multilineTextAlignment(.center)
                         Button("Retry") { Task { await load() } }
-                            .font(.system(size: 14, weight: .semibold)).foregroundColor(SS.primary)
-                    }.padding(.top, 40)
+                            .buttonStyle(.ds(.soft, size: .medium, fullWidth: false))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, DS.Spacing.xl)
                 } else {
                     summaryCards
                     donutSection
                     stepToTargetSection
                     earningsList
-                    Spacer().frame(height: 20)
                 }
             }
         }
+        .refreshable { await load() }
         .sheet(isPresented: $showGoalEditor) { GoalEditorSheet(goal: $incomeGoal) }
         // task(id:) bricht laufende Requests bei Zeitraum-Wechsel ab → keine veralteten Antworten
         .task(id: period) { await load() }
         .onChange(of: incomeGoal) { _, new in UserDefaults.standard.set(new, forKey: "incomeGoal") }
     }
 
+    // MARK: - Skeleton
+
+    private var skeleton: some View {
+        VStack(spacing: DS.Spacing.sm) {
+            HStack(spacing: DS.Spacing.sm) {
+                ForEach(0..<3, id: \.self) { _ in
+                    DSSkeletonBlock(height: 84, radius: DS.Radius.tile)
+                }
+            }
+            DSSkeletonBlock(height: 220, radius: DS.Radius.card)
+        }
+        .accessibilityLabel("Loading financials")
+    }
+
+    // MARK: - Farben (Donut, Legende, Kacheln)
+
+    private let upcomingTone: DS.Tone = .success
+    private let completedTone: DS.Tone = .primary
+    private let paidOutTone: DS.Tone = .warning
+
     // MARK: - Summary Cards
 
     private var summaryCards: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: DS.Spacing.sm) {
             // Laufende Woche Mo–So, unabhaengig vom gewaehlten Zeitraum (nur wenn das Backend sie liefert)
             if let week = financials?.thisWeekEarnings {
-                HStack(spacing: 10) {
-                    Image(systemName: "calendar.badge.clock")
-                        .font(.system(size: 16)).foregroundColor(SS.primary)
-                    Text("This week").font(.system(size: 13)).foregroundColor(.secondary)
-                    Spacer()
-                    Text(Money.format(week)).font(.system(size: 20, weight: .bold)).foregroundColor(.primary)
+                DSRow("This week", systemIcon: "calendar.badge.clock", showsDivider: false) {
+                    Text(Money.format(week))
+                        .font(DS.Font.make(20, .bold, relativeTo: .title3)).foregroundStyle(DS.Color.text)
                 }
-                .padding(12)
-                .background(Color(uiColor: .systemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-                .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
             }
-            HStack(spacing: 10) {
-                FinancialStatCard(label: "Upcoming",  amount: upcomingEarnings,  color: .green,    icon: "arrow.up.circle.fill")
-                FinancialStatCard(label: "Completed", amount: completedEarnings, color: SS.primary, icon: "checkmark.circle.fill")
-                FinancialStatCard(label: "Paid Out",  amount: paidOut,           color: .orange,   icon: "dollarsign.circle.fill")
+            HStack(spacing: DS.Spacing.sm) {
+                DSTile(label: "Upcoming",  value: Money.format(upcomingEarnings),  tone: upcomingTone)
+                DSTile(label: "Completed", value: Money.format(completedEarnings), tone: completedTone)
+                DSTile(label: "Paid Out",  value: Money.format(paidOut),           tone: paidOutTone)
             }
         }
-        .padding(.horizontal, 16)
     }
 
     // MARK: - Donut Chart
 
     private var donutSection: some View {
-        VStack(spacing: 16) {
-            ZStack {
-                Canvas { ctx, size in
-                    guard total > 0 else { return }
-                    let center      = CGPoint(x: size.width / 2, y: size.height / 2)
-                    let radius      = min(size.width, size.height) / 2 - 10
-                    let lineWidth   = radius * 0.4
-                    let slices: [(Double, Color)] = [
-                        (upcomingEarnings  / total, .green),
-                        (completedEarnings / total, SS.primary),
-                        (paidOut           / total, .orange),
-                    ]
-                    var startAngle = Angle.degrees(-90)
-                    for (fraction, color) in slices {
-                        let endAngle = startAngle + .degrees(360 * fraction)
-                        var path = Path()
-                        path.addArc(center: center, radius: radius - lineWidth / 2,
-                                    startAngle: startAngle, endAngle: endAngle, clockwise: false)
-                        ctx.stroke(path, with: .color(color),
-                                   style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt))
-                        startAngle = endAngle
+        DSCard {
+            VStack(spacing: DS.Spacing.md) {
+                ZStack {
+                    Canvas { ctx, size in
+                        guard total > 0 else { return }
+                        let center      = CGPoint(x: size.width / 2, y: size.height / 2)
+                        let radius      = min(size.width, size.height) / 2 - 10
+                        let lineWidth   = radius * 0.4
+                        let slices: [(Double, Color)] = [
+                            (upcomingEarnings  / total, DS.Color.success),
+                            (completedEarnings / total, DS.Color.primary),
+                            (paidOut           / total, DS.Color.warning),
+                        ]
+                        var startAngle = Angle.degrees(-90)
+                        for (fraction, color) in slices {
+                            let endAngle = startAngle + .degrees(360 * fraction)
+                            var path = Path()
+                            path.addArc(center: center, radius: radius - lineWidth / 2,
+                                        startAngle: startAngle, endAngle: endAngle, clockwise: false)
+                            ctx.stroke(path, with: .color(color),
+                                       style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt))
+                            startAngle = endAngle
+                        }
+                    }
+                    .frame(width: 160, height: 160)
+
+                    VStack(spacing: 2) {
+                        Text(Money.format(total))
+                            .font(DS.Font.make(22, .bold, relativeTo: .title2)).foregroundStyle(DS.Color.text)
+                        Text("Total").dsFont(.caption).foregroundStyle(DS.Color.muted)
                     }
                 }
-                .frame(width: 160, height: 160)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Total \(Money.format(total)). Upcoming \(Money.format(upcomingEarnings)), completed \(Money.format(completedEarnings)), paid out \(Money.format(paidOut)).")
 
-                VStack(spacing: 2) {
-                    Text(Money.format(total))
-                        .font(.system(size: 22, weight: .bold)).foregroundColor(.primary)
-                    Text("Total").font(.system(size: 12)).foregroundColor(.secondary)
+                HStack(spacing: DS.Spacing.lg) {
+                    LegendItem(color: DS.Color.success, label: "Upcoming")
+                    LegendItem(color: DS.Color.primary, label: "Completed")
+                    LegendItem(color: DS.Color.warning, label: "Paid Out")
                 }
             }
-
-            HStack(spacing: 20) {
-                LegendItem(color: .green,    label: "Upcoming")
-                LegendItem(color: SS.primary, label: "Completed")
-                LegendItem(color: .orange,   label: "Paid Out")
-            }
+            .frame(maxWidth: .infinity)
         }
-        .padding(20)
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .padding(.horizontal, 16)
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
     }
 
     // MARK: - Earnings List
 
     private var earningsList: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Jobs")
-                .font(.system(size: 15, weight: .bold)).foregroundColor(.white)
-                .padding(.horizontal, 16)
-
+        DSSection("Jobs", ruled: false) {
             if let list = financials?.earningsList, !list.isEmpty {
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: DS.Spacing.md) {
                     ForEach(EarningMonthGroup.make(from: list)) { group in
                         EarningMonthSection(group: group)
                     }
                     if let total = financials?.earningsTotal, total > list.count {
                         Text("Showing latest \(list.count) of \(total) jobs")
-                            .font(.system(size: 12)).foregroundColor(.white.opacity(0.6))
+                            .dsFont(.caption).foregroundStyle(DS.Color.muted)
                             .frame(maxWidth: .infinity)
                     }
                 }
-                .padding(.horizontal, 16)
+                .padding(.top, DS.Spacing.xs)
             } else {
                 Text("No earnings in this period.")
-                    .font(.system(size: 13)).foregroundColor(.white.opacity(0.4))
-                    .padding(.horizontal, 16)
+                    .dsFont(.callout).foregroundStyle(DS.Color.muted)
+                    .padding(.vertical, DS.Spacing.sm)
             }
         }
     }
@@ -158,58 +168,48 @@ struct FinancialOverviewView: View {
     // MARK: - Step to Target
 
     private var stepToTargetSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Step to Target")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundColor(.white)
-                    Text("Goal: \(Money.format(incomeGoal))")
-                        .font(.system(size: 12))
-                        .foregroundColor(.white.opacity(0.6))
+        DSCard {
+            VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Step to Target")
+                            .dsFont(.headline).foregroundStyle(DS.Color.text)
+                        Text("Goal: \(Money.format(incomeGoal))")
+                            .dsFont(.caption).foregroundStyle(DS.Color.muted)
+                    }
+                    Spacer()
+                    DSIconButton(systemName: "pencil", label: "Edit goal") { showGoalEditor = true }
                 }
-                Spacer()
-                Button { showGoalEditor = true } label: {
-                    Image(systemName: "pencil.circle")
-                        .font(.system(size: 20))
-                        .foregroundColor(.white.opacity(0.7))
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, 16)
 
-            VStack(spacing: 8) {
                 // Progress bar
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
-                        Capsule().fill(Color.white.opacity(0.15))
+                        Capsule().fill(DS.Color.surface2)
                         Capsule()
-                            .fill(progressToGoal >= 1 ? Color.green : SS.primary)
+                            .fill(progressToGoal >= 1 ? DS.Color.success : DS.Color.primary)
                             .frame(width: geo.size.width * progressToGoal)
                     }
                 }
                 .frame(height: 10)
+                .dsAnimation(.standard, value: progressToGoal)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Goal progress")
+                .accessibilityValue("\(Int(progressToGoal * 100)) percent")
 
                 HStack {
                     Text("\(Money.format(total)) earned")
-                        .font(.system(size: 12)).foregroundColor(.white.opacity(0.7))
+                        .dsFont(.caption).foregroundStyle(DS.Color.text2)
                     Spacer()
                     if gap > 0 {
                         Text("\(Money.format(gap)) to go")
-                            .font(.system(size: 12, weight: .semibold)).foregroundColor(.orange)
+                            .font(DS.Font.make(12, .semibold, relativeTo: .caption)).foregroundStyle(DS.Color.warning)
                     } else {
                         Label("Goal reached!", systemImage: "trophy.fill")
-                            .font(.system(size: 12, weight: .semibold)).foregroundColor(.green)
+                            .font(DS.Font.make(12, .semibold, relativeTo: .caption)).foregroundStyle(DS.Color.success)
                     }
                 }
             }
-            .padding(.horizontal, 16)
         }
-        .padding(.vertical, 14)
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .padding(.horizontal, 16)
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
     }
 
     // MARK: - Load
@@ -238,12 +238,13 @@ private struct GoalEditorSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Monthly income goal ($)") {
-                    TextField("2000", text: $input)
-                        .keyboardType(.decimalPad)
-                }
+            VStack(alignment: .leading, spacing: DS.Spacing.md) {
+                DSTextField("Monthly income goal ($)", placeholder: "2000", text: $input)
+                    .keyboardType(.decimalPad)
+                Spacer(minLength: 0)
             }
+            .padding(DS.Spacing.screenEdge)
+            .dsBackground()
             .navigationTitle("Edit Goal")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -258,33 +259,19 @@ private struct GoalEditorSheet: View {
                 }
             }
         }
+        .presentationDetents([.medium])
         .onAppear { input = "\(Int(goal))" }
     }
 }
 
 // MARK: - Sub-Views
 
-private struct FinancialStatCard: View {
-    let label: String; let amount: Double; let color: Color; let icon: String
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Image(systemName: icon).font(.system(size: 14)).foregroundColor(color)
-            Text(Money.format(amount)).font(.system(size: 20, weight: .bold)).foregroundColor(.primary)
-            Text(label).font(.system(size: 11)).foregroundColor(.secondary)
-        }
-        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
-    }
-}
-
 private struct LegendItem: View {
     let color: Color; let label: String
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: DS.Spacing.xs) {
             Circle().fill(color).frame(width: 10, height: 10)
-            Text(label).font(.system(size: 12)).foregroundColor(.secondary)
+            Text(label).dsFont(.caption).foregroundStyle(DS.Color.text2)
         }
     }
 }

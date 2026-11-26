@@ -59,7 +59,7 @@ struct JobSwipeView: View {
                 categoryChips
                 cardArea(geo: geo)
                 actionBar
-                    .padding(.bottom, DS.Spacing.xl)
+                    .padding(.bottom, DS.tabBarInset) // Tab-Leiste schwebt über dem Container
             }
             .dsBackground()
         }

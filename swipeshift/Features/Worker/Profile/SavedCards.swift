@@ -23,92 +23,89 @@ struct SavedCompanyCard: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                ZStack(alignment: .bottomTrailing) {
-                    Text(company.logoEmoji)
-                        .font(.system(size: 26)).frame(width: 48, height: 48)
-                        .background(Color.gray.opacity(0.08))
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                    if company.isVerified {
-                        Image(systemName: "checkmark.seal.fill")
-                            .font(.system(size: 12)).foregroundColor(SS.primary)
-                            .background(Color.white.clipShape(Circle()))
-                            .offset(x: 3, y: 3)
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(company.companyName)
-                        .font(.system(size: 14, weight: .semibold)).foregroundColor(.primary)
-
-                    if let subtitle {
-                        Text(subtitle)
-                            .font(.system(size: 12)).foregroundColor(.secondary).lineLimit(1)
-                    }
-
-                    HStack(spacing: 8) {
-                        if let rating = company.rating {
-                            HStack(spacing: 3) {
-                                Image(systemName: "star.fill")
-                                    .font(.system(size: 10)).foregroundColor(.yellow)
-                                Text(String(format: "%.1f", rating))
-                                    .font(.system(size: 12)).foregroundColor(.secondary)
+        DSCard {
+            VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                HStack(alignment: .top, spacing: DS.Spacing.sm) {
+                    DSAvatar(text: company.logoEmoji, size: 48, shape: .roundedSquare)
+                        .overlay(alignment: .bottomTrailing) {
+                            if company.isVerified {
+                                Image(systemName: "checkmark.seal.fill")
+                                    .font(.system(size: 14)).foregroundStyle(DS.Color.primary)
+                                    .background(DS.Color.surface, in: Circle())
+                                    .offset(x: 4, y: 4)
+                                    .accessibilityLabel("Verified")
                             }
                         }
-                        Text("\(company.openJobs) open job\(company.openJobs == 1 ? "" : "s")")
-                            .font(.system(size: 12)).foregroundColor(.secondary)
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(company.companyName)
+                            .dsFont(.callout).foregroundStyle(DS.Color.text)
+
+                        if let subtitle {
+                            Text(subtitle)
+                                .dsFont(.caption).foregroundStyle(DS.Color.muted).lineLimit(1)
+                        }
+
+                        HStack(spacing: DS.Spacing.xs) {
+                            if let rating = company.rating {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "star.fill")
+                                        .font(.system(size: 10)).foregroundStyle(DS.Color.warning)
+                                    Text(String(format: "%.1f", rating))
+                                        .dsFont(.caption).foregroundStyle(DS.Color.text2)
+                                }
+                            }
+                            Text("\(company.openJobs) open job\(company.openJobs == 1 ? "" : "s")")
+                                .dsFont(.caption).foregroundStyle(DS.Color.muted)
+                        }
+
+                        if let activity = company.lastActivity {
+                            Label(activity.label, systemImage: activity.kind == "worked" ? "checkmark.circle" : "clock")
+                                .dsFont(.caption).foregroundStyle(DS.Color.muted)
+                        }
                     }
 
-                    if let activity = company.lastActivity {
-                        Label(activity.label, systemImage: activity.kind == "worked" ? "checkmark.circle" : "clock")
-                            .font(.system(size: 11)).foregroundColor(.secondary)
+                    Spacer(minLength: DS.Spacing.xs)
+
+                    Button {
+                        DS.Haptics.light()
+                        Task {
+                            try? await APIClient.shared.unsaveCompany(name: company.companyName)
+                            onUnsave()
+                        }
+                    } label: {
+                        Image(systemName: "bookmark.fill")
+                            .font(.system(size: 18)).foregroundStyle(DS.Color.primary)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(.dsPressable)
+                    .accessibilityLabel("Remove from saved")
                 }
 
-                Spacer()
+                if let about = company.about, !about.isEmpty {
+                    Text(about)
+                        .dsFont(.caption).foregroundStyle(DS.Color.text2)
+                        .lineLimit(3)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
 
-                Button {
-                    Task {
-                        try? await APIClient.shared.unsaveCompany(name: company.companyName)
-                        onUnsave()
+                HStack(spacing: DS.Spacing.xs) {
+                    NavigationLink {
+                        JobListView(companyFilter: company.companyName)
+                    } label: {
+                        Label("View open jobs", systemImage: "briefcase.fill")
                     }
-                } label: {
-                    Image(systemName: "bookmark.fill")
-                        .font(.system(size: 18)).foregroundColor(SS.primary)
+                    .buttonStyle(.ds(.secondary, size: .medium))
+                    NavigationLink {
+                        CompanyProfileView(companyName: company.companyName, logoEmoji: company.logoEmoji)
+                    } label: {
+                        Label("View profile", systemImage: "building.2")
+                    }
+                    .buttonStyle(.ds(.secondary, size: .medium))
                 }
-                .buttonStyle(.plain)
-            }
-            .padding(12)
-
-            if let about = company.about, !about.isEmpty {
-                Text(about)
-                    .font(.system(size: 12)).foregroundColor(.secondary)
-                    .lineLimit(3)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 12).padding(.bottom, 10)
-            }
-
-            Divider().padding(.horizontal, 12)
-            HStack(spacing: 0) {
-                NavigationLink {
-                    JobListView(companyFilter: company.companyName)
-                } label: {
-                    SavedCardActionLabel(title: "View open jobs", icon: "briefcase.fill")
-                }
-                .buttonStyle(.plain)
-                Divider().frame(height: 20)
-                NavigationLink {
-                    CompanyProfileView(companyName: company.companyName, logoEmoji: company.logoEmoji)
-                } label: {
-                    SavedCardActionLabel(title: "View profile", icon: "building.2")
-                }
-                .buttonStyle(.plain)
             }
         }
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
     }
 }
 
@@ -122,112 +119,92 @@ struct SavedJobCard: View {
     let onNotInterested: () -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Text(job.logoEmoji)
-                    .font(.system(size: 26)).frame(width: 48, height: 48)
-                    .background(Color.gray.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+        DSCard {
+            VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                HStack(alignment: .top, spacing: DS.Spacing.sm) {
+                    DSAvatar(text: job.logoEmoji, size: 48, shape: .roundedSquare)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
+                    VStack(alignment: .leading, spacing: 3) {
                         Text(job.title)
-                            .font(.system(size: 14, weight: .semibold)).foregroundColor(.primary)
+                            .dsFont(.callout).foregroundStyle(DS.Color.text)
                         if let status = job.appliedStatus {
-                            Text(status)
-                                .font(.system(size: 10, weight: .bold)).foregroundColor(.white)
-                                .padding(.horizontal, 6).padding(.vertical, 2)
-                                .background(status == "Confirmed" ? Color.green : SS.primary)
-                                .clipShape(Capsule())
+                            DSBadge(status, status == "Confirmed" ? .upcoming : .tone(.primary))
+                        }
+                        Text(job.company).dsFont(.caption).foregroundStyle(DS.Color.text2)
+                        HStack(spacing: DS.Spacing.xs) {
+                            Label(job.shiftText, systemImage: "calendar")
+                            Label(job.payText,   systemImage: "dollarsign.circle")
+                        }
+                        .dsFont(.caption).foregroundStyle(DS.Color.muted)
+                        if let miles = job.distanceMiles {
+                            Label(String(format: "%.1f mi away", miles), systemImage: "location")
+                                .dsFont(.caption).foregroundStyle(DS.Color.muted)
                         }
                     }
-                    Text(job.company).font(.system(size: 12)).foregroundColor(.secondary)
-                    HStack(spacing: 8) {
-                        Label(job.shiftText, systemImage: "calendar")
-                        Label(job.payText,   systemImage: "dollarsign.circle")
-                    }
-                    .font(.system(size: 11)).foregroundColor(.secondary)
-                    if let miles = job.distanceMiles {
-                        Label(String(format: "%.1f mi away", miles), systemImage: "location")
-                            .font(.system(size: 11)).foregroundColor(.secondary)
+
+                    Spacer(minLength: DS.Spacing.xs)
+
+                    VStack(spacing: 0) {
+                        Button {
+                            DS.Haptics.light()
+                            Task {
+                                try? await APIClient.shared.unsaveJob(jobId: job.jobId)
+                                onUnsave()
+                            }
+                        } label: {
+                            Image(systemName: "bookmark.fill")
+                                .font(.system(size: 18)).foregroundStyle(DS.Color.primary)
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.dsPressable)
+                        .accessibilityLabel("Remove from saved")
+
+                        Menu {
+                            Button(role: .destructive, action: onNotInterested) {
+                                Label("Not interested", systemImage: "hand.thumbsdown")
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis")
+                                .font(.system(size: 16, weight: .semibold)).foregroundStyle(DS.Color.muted)
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .accessibilityLabel("More options")
                     }
                 }
 
-                Spacer()
-
-                VStack(spacing: 14) {
-                    Button {
-                        Task {
-                            try? await APIClient.shared.unsaveJob(jobId: job.jobId)
-                            onUnsave()
+                // Max. 3 Tags
+                if let tags = job.tags, !tags.isEmpty {
+                    HStack(spacing: DS.Spacing.xs) {
+                        ForEach(tags.prefix(3), id: \.self) { tag in
+                            Text(tag)
+                                .font(DS.Font.make(11, .medium, relativeTo: .caption2))
+                                .foregroundStyle(DS.Color.primaryText)
+                                .padding(.horizontal, DS.Spacing.xs).padding(.vertical, 3)
+                                .background(DS.Color.primarySoft, in: Capsule())
+                                .lineLimit(1)
                         }
+                        Spacer(minLength: 0)
+                    }
+                }
+
+                HStack(spacing: DS.Spacing.xs) {
+                    NavigationLink {
+                        CompanyProfileView(companyName: job.company, logoEmoji: job.logoEmoji)
                     } label: {
-                        Image(systemName: "bookmark.fill")
-                            .font(.system(size: 18)).foregroundColor(SS.primary)
+                        Label("Company", systemImage: "building.2")
                     }
-                    .buttonStyle(.plain)
-
-                    Menu {
-                        Button(role: .destructive, action: onNotInterested) {
-                            Label("Not interested", systemImage: "hand.thumbsdown")
+                    .buttonStyle(.ds(.secondary, size: .medium))
+                    // Nur wenn noch nicht beworben und der Job offen ist (Backend: canApply)
+                    if job.canApply == true {
+                        Button(action: onApply) {
+                            Label("Apply", systemImage: "paperplane.fill")
                         }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                            .font(.system(size: 16, weight: .semibold)).foregroundColor(.secondary)
-                            .frame(width: 24, height: 20)
+                        .buttonStyle(.ds(.primary, size: .medium))
                     }
-                }
-            }
-            .padding(12)
-
-            // Max. 3 Tags
-            if let tags = job.tags, !tags.isEmpty {
-                HStack(spacing: 6) {
-                    ForEach(tags.prefix(3), id: \.self) { tag in
-                        Text(tag)
-                            .font(.system(size: 11, weight: .medium)).foregroundColor(SS.primary)
-                            .padding(.horizontal, 8).padding(.vertical, 3)
-                            .background(SS.primary.opacity(0.1))
-                            .clipShape(Capsule())
-                            .lineLimit(1)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, 12).padding(.bottom, 10)
-            }
-
-            Divider().padding(.horizontal, 12)
-            HStack(spacing: 0) {
-                NavigationLink {
-                    CompanyProfileView(companyName: job.company, logoEmoji: job.logoEmoji)
-                } label: {
-                    SavedCardActionLabel(title: "Company", icon: "building.2")
-                }
-                .buttonStyle(.plain)
-                // Nur wenn noch nicht beworben und der Job offen ist (Backend: canApply)
-                if job.canApply == true {
-                    Divider().frame(height: 20)
-                    Button(action: onApply) {
-                        SavedCardActionLabel(title: "Apply", icon: "paperplane.fill")
-                    }
-                    .buttonStyle(.plain)
                 }
             }
         }
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
-    }
-}
-
-private struct SavedCardActionLabel: View {
-    let title: String
-    let icon: String
-
-    var body: some View {
-        Label(title, systemImage: icon)
-            .font(.system(size: 13, weight: .semibold)).foregroundColor(SS.primary)
-            .frame(maxWidth: .infinity).padding(.vertical, 10)
-            .contentShape(Rectangle())
     }
 }

@@ -23,23 +23,22 @@ struct BlockedUsersView: View {
     @State private var actionError: String?
 
     var body: some View {
-        SubScreenShell(title: "Blocked users") {
-            VStack(spacing: 16) {
+        SubScreenShell(title: "Blocked users", padded: true) {
+            VStack(alignment: .leading, spacing: DS.Spacing.md) {
                 content
                 if !isLoading, loadError == nil {
                     Text("Blocking hides your jobs and profile activity from each other: you won't see each other's jobs, can't apply to each other's jobs, and can't send messages in existing chats (you can still read them). Unblocking restores all of this.")
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 4)
+                        .dsFont(.caption)
+                        .foregroundStyle(DS.Color.muted)
                 }
                 if let actionError {
                     Text(actionError)
-                        .font(.system(size: 12))
-                        .foregroundColor(.red)
+                        .dsFont(.caption)
+                        .foregroundStyle(DS.Color.danger)
                 }
             }
-            .padding(.horizontal, 16)
         }
+        .refreshable { await load() }
         .task { await load() }
         .confirmationDialog(
             pendingUnblock.map { "Unblock \($0.name)?" } ?? "Unblock?",
@@ -56,61 +55,56 @@ struct BlockedUsersView: View {
 
     @ViewBuilder
     private var content: some View {
-        if isLoading {
-            ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
-        } else if let loadError {
-            VStack(spacing: 10) {
-                Text(loadError).font(.system(size: 13)).foregroundColor(.red).multilineTextAlignment(.center)
-                Button("Try again") { Task { await load() } }
-                    .buttonStyle(SSPrimaryButtonStyle())
+        if isLoading && blocked.isEmpty {
+            VStack(spacing: DS.Spacing.xs) {
+                DSSkeletonBlock(height: 56, radius: DS.Radius.control)
+                DSSkeletonBlock(height: 56, radius: DS.Radius.control)
             }
-            .padding(.vertical, 24)
-        } else if blocked.isEmpty {
-            VStack(spacing: 8) {
-                Image(systemName: "hand.raised.slash")
-                    .font(.system(size: 28))
-                    .foregroundColor(.secondary)
-                Text("You haven't blocked anyone.")
-                    .font(.system(size: 14))
-                    .foregroundColor(.secondary)
+            .accessibilityLabel("Loading blocked users")
+        } else if let loadError {
+            VStack(spacing: DS.Spacing.sm) {
+                Text(loadError).dsFont(.callout).foregroundStyle(DS.Color.danger).multilineTextAlignment(.center)
+                Button("Try again") { Task { await load() } }
+                    .buttonStyle(.ds(.soft, size: .medium, fullWidth: false))
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 40)
+            .padding(.vertical, DS.Spacing.xl)
+        } else if blocked.isEmpty {
+            DSEmptyState(systemIcon: "hand.raised.slash", title: "You haven't blocked anyone.",
+                         message: "People you block will show up here.")
         } else {
-            VStack(spacing: 0) {
-                ForEach(Array(blocked.enumerated()), id: \.element.id) { index, user in
-                    if index > 0 { Divider().padding(.leading, 64) }
+            DSSection("Blocked") {
+                ForEach(blocked) { user in
                     row(user)
                 }
             }
-            .background(Color(uiColor: .systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 14))
-            .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
         }
     }
 
     private func row(_ user: BlockedUser) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: DS.Spacing.sm) {
             ChatAvatar(photoUrl: user.photoUrl, emoji: user.initial, size: 40)
             VStack(alignment: .leading, spacing: 2) {
-                Text(user.name).font(.system(size: 15, weight: .semibold)).lineLimit(1)
+                Text(user.name).dsFont(.body).foregroundStyle(DS.Color.text).lineLimit(1)
                 Text("\(user.roleLabel) · Blocked on \(user.createdAt.formatted(date: .abbreviated, time: .omitted))")
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
+                    .dsFont(.caption)
+                    .foregroundStyle(DS.Color.muted)
                     .lineLimit(1)
             }
-            Spacer(minLength: 8)
+            Spacer(minLength: DS.Spacing.xs)
             if unblockingId == user.id {
                 ProgressView()
             } else {
                 Button("Unblock") { pendingUnblock = user }
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(SS.primary)
+                    .font(DS.Font.make(13, .semibold, relativeTo: .footnote))
+                    .foregroundStyle(DS.Color.primaryText)
+                    .frame(minHeight: 44)
                     .disabled(unblockingId != nil)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(.vertical, DS.Spacing.sm)
+        .frame(minHeight: 44)
+        .overlay(alignment: .top) { DSDivider() }
     }
 
     @MainActor
