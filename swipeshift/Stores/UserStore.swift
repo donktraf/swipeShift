@@ -110,11 +110,26 @@ final class UserStore: ObservableObject {
             currentUser = user
             // Nur neuer Social-User bekommt den Success Screen
             if isNewUser { showSocialSuccess = true }
+            // Login-Antwort enthaelt nur Basisfelder (kein companyName, Logo, Worker-Profil …)
+            // → volles Profil sofort nachladen, sonst zeigen Views bis zum naechsten
+            // App-Start Platzhalter wie "My Company"
+            Task { await self.loadFullProfileAfterLogin(userId: user.id) }
         case .twoFactorRequired(let challenge):
             pendingTwoFactor = challenge
             // Erst nach bestandener 2FA gilt der Login als erfolgreich
             pendingLoginMethod = method
         }
+    }
+
+    /// Laedt nach dem Login das vollstaendige Profil (GET /auth/me).
+    /// Fehler bewusst still: kein Logout, keine Fehlermeldung — die Basisdaten aus dem
+    /// Login bleiben stehen, beim naechsten Vordergrund-Wechsel wird erneut geladen.
+    @MainActor
+    private func loadFullProfileAfterLogin(userId: String) async {
+        guard let me = try? await APIClient.shared.fetchMe() else { return }
+        // Nur uebernehmen, wenn inzwischen nicht ausgeloggt / Account gewechselt wurde
+        guard currentUser?.id == userId else { return }
+        currentUser = me
     }
 
     // MARK: - Two-Factor (Login)
