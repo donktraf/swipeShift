@@ -21,8 +21,10 @@ struct ResendVerificationButton: View {
                 Task { await userStore.resendVerification() }
             } label: {
                 Text(label)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(remaining > 0 || userStore.isResendingVerification ? .secondary : SS.primary)
+                    .font(DS.Font.make(15, .semibold, relativeTo: .callout))
+                    .foregroundStyle(remaining > 0 || userStore.isResendingVerification ? DS.Color.muted : DS.Color.primaryText)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .disabled(remaining > 0 || userStore.isResendingVerification)

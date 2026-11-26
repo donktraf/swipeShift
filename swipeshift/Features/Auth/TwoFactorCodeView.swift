@@ -38,37 +38,49 @@ struct TwoFactorCodeView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                SS.background().ignoresSafeArea()
-
-                VStack(spacing: 20) {
+            ScrollView {
+                VStack(spacing: DS.Spacing.lg) {
                     Image(systemName: method == .totp ? "lock.shield.fill" : "envelope.badge.shield.half.filled")
-                        .font(.system(size: 44))
-                        .foregroundColor(SS.primary)
-                        .padding(.top, 24)
+                        .font(.system(size: 32, weight: .semibold))
+                        .foregroundStyle(DS.Color.primaryText)
+                        .frame(width: 72, height: 72)
+                        .background(DS.Color.primarySoft, in: RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous))
+                        .padding(.top, DS.Spacing.lg)
+                        .accessibilityHidden(true)
 
-                    VStack(spacing: 8) {
-                        Text(title)
-                            .font(.system(size: 22, weight: .bold))
+                    VStack(spacing: DS.Spacing.xs) {
+                        Text(title).dsFont(.title).foregroundStyle(DS.Color.text)
+                            .multilineTextAlignment(.center)
                         Text(useBackupCode ? "Enter one of the backup codes you saved when you set up two-factor. Each code works once." : message)
-                            .font(.system(size: 14))
-                            .foregroundColor(.secondary)
+                            .dsFont(.body)
+                            .foregroundStyle(DS.Color.text2)
                             .multilineTextAlignment(.center)
                     }
-                    .padding(.horizontal, 24)
 
-                    TextField(useBackupCode ? "XXXXX-XXXXX" : "000000", text: $code)
+                    VStack(spacing: DS.Spacing.xs) {
+                        TextField(
+                            useBackupCode ? "XXXXX-XXXXX" : "000000",
+                            text: $code,
+                            prompt: Text(useBackupCode ? "XXXXX-XXXXX" : "000000").foregroundStyle(DS.Color.muted)
+                        )
                         .keyboardType(useBackupCode ? .asciiCapable : .numberPad)
                         .textInputAutocapitalization(.characters)
                         .autocorrectionDisabled()
                         .textContentType(useBackupCode ? nil : .oneTimeCode)
                         .font(.system(size: useBackupCode ? 22 : 28, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(DS.Color.text)
+                        .tint(DS.Color.primary)
                         .multilineTextAlignment(.center)
-                        .padding(.vertical, 14)
-                        .background(Color(uiColor: .systemBackground))
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
-                        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
-                        .padding(.horizontal, 48)
+                        .padding(.vertical, DS.Spacing.sm)
+                        .frame(minHeight: 56)
+                        .background(DS.Color.surface, in: RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
+                                .strokeBorder(
+                                    errorMessage != nil ? DS.Color.danger : (fieldFocused ? DS.Color.primary : DS.Color.border),
+                                    lineWidth: fieldFocused || errorMessage != nil ? 1.5 : 1
+                                )
+                        )
                         .focused($fieldFocused)
                         .onChange(of: code) { _, newValue in
                             let cleaned = useBackupCode
@@ -79,57 +91,50 @@ struct TwoFactorCodeView: View {
                         }
                         .accessibilityLabel(useBackupCode ? "Backup code" : "6-digit code")
 
-                    if let errorMessage {
-                        Text(errorMessage)
-                            .font(.system(size: 13))
-                            .foregroundColor(.red)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 24)
-                    } else if let infoMessage {
-                        Text(infoMessage)
-                            .font(.system(size: 13))
-                            .foregroundColor(.secondary)
+                        if let errorMessage {
+                            Text(errorMessage)
+                                .dsFont(.caption)
+                                .foregroundStyle(DS.Color.danger)
+                                .multilineTextAlignment(.center)
+                        } else if let infoMessage {
+                            Text(infoMessage)
+                                .dsFont(.caption)
+                                .foregroundStyle(DS.Color.text2)
+                        }
                     }
 
                     Button(action: submit) {
                         if isSubmitting {
-                            ProgressView().tint(.white)
+                            ProgressView().tint(DS.Color.onPrimary)
                         } else {
                             Text(confirmLabel)
                         }
                     }
-                    .buttonStyle(SSPrimaryButtonStyle(isEnabled: canSubmit))
+                    .buttonStyle(.ds(.primary))
                     .disabled(!canSubmit)
-                    .padding(.horizontal, 24)
 
                     if method == .totp {
-                        Button {
+                        Button(useBackupCode ? "Use the authenticator code instead" : "Use a backup code") {
                             useBackupCode.toggle()
                             code = ""
                             errorMessage = nil
-                        } label: {
-                            Text(useBackupCode ? "Use the authenticator code instead" : "Use a backup code")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(SS.primary)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.ds(.soft, size: .medium, fullWidth: false))
                     } else {
-                        Button(action: resend) {
-                            Text(isResending ? "Sending…" : "Send a new code")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(SS.primary)
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(isResending)
+                        Button(isResending ? "Sending…" : "Send a new code", action: resend)
+                            .buttonStyle(.ds(.soft, size: .medium, fullWidth: false))
+                            .disabled(isResending)
                     }
-
-                    Spacer()
                 }
+                .padding(.horizontal, DS.Spacing.screenEdge)
+                .padding(.bottom, DS.Spacing.lg)
             }
+            .dsBackground()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel", action: onCancel)
+                        .foregroundStyle(DS.Color.primaryText)
                 }
             }
             .onAppear { fieldFocused = true }

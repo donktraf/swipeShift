@@ -15,8 +15,8 @@ struct LastLoginHint: View {
     var body: some View {
         if stored == method.rawValue {
             Label(method.hintText, systemImage: "clock.arrow.circlepath")
-                .font(.caption)
-                .foregroundColor(.secondary)
+                .dsFont(.caption)
+                .foregroundStyle(DS.Color.muted)
                 .frame(maxWidth: .infinity)
                 .accessibilityLabel(method.hintText)
         }

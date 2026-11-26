@@ -66,12 +66,11 @@ struct TotpSetupView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                SS.background().ignoresSafeArea()
                 ScrollView {
-                    VStack(spacing: 20) {
+                    VStack(spacing: DS.Spacing.lg) {
                         switch step {
                         case .loading:
-                            ProgressView().padding(.top, 80)
+                            ProgressView().tint(DS.Color.primary).padding(.top, 80)
                         case .failed(let message):
                             failedView(message)
                         case .verifyEmail(let challenge):
@@ -82,17 +81,19 @@ struct TotpSetupView: View {
                             BackupCodesView(codes: codes, title: "Two-factor is on", onDone: onFinished)
                         }
                     }
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 24)
+                    .padding(.horizontal, DS.Spacing.screenEdge)
+                    .padding(.vertical, DS.Spacing.xl)
                 }
                 .scrollDismissesKeyboard(.interactively)
             }
+            .dsBackground()
             .navigationTitle("Authenticator App")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 if !showsBackupCodes {
                     ToolbarItem(placement: .cancellationAction) {
                         Button("Cancel", action: onCancel)
+                            .foregroundStyle(DS.Color.primaryText)
                     }
                 }
             }
@@ -105,10 +106,10 @@ struct TotpSetupView: View {
     // MARK: Schritt 1: Scannen + Code bestaetigen
 
     private func scanView(_ setup: TotpSetupDTO) -> some View {
-        VStack(spacing: 18) {
+        VStack(spacing: DS.Spacing.md) {
             Text("Scan this QR code with your authenticator app (for example Google Authenticator, 1Password or Authy).")
-                .font(.system(size: 14))
-                .foregroundColor(.secondary)
+                .dsFont(.body)
+                .foregroundStyle(DS.Color.text2)
                 .multilineTextAlignment(.center)
 
             if let image = QRCodeImage.make(from: setup.otpauthUri) {
@@ -117,10 +118,10 @@ struct TotpSetupView: View {
                     .resizable()
                     .scaledToFit()
                     .frame(width: 200, height: 200)
-                    .padding(12)
-                    .background(Color.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-                    .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
+                    .padding(DS.Spacing.sm)
+                    // QR-Codes brauchen auch im Dark Mode festen hellen Grund (Scanbarkeit)
+                    .background(Color(red: 1, green: 1, blue: 1), in: RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous).strokeBorder(DS.Color.border, lineWidth: 1))
                     .accessibilityLabel("QR code for your authenticator app")
             }
 
@@ -134,40 +135,39 @@ struct TotpSetupView: View {
                 }
             } label: {
                 Label("Open in authenticator app", systemImage: "arrow.up.forward.app")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(SS.primary)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.ds(.soft, size: .medium, fullWidth: false))
 
-            VStack(spacing: 6) {
+            VStack(spacing: DS.Spacing.xs) {
                 Text("Can't scan? Enter this key manually:")
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
-                HStack(spacing: 10) {
+                    .dsFont(.caption)
+                    .foregroundStyle(DS.Color.muted)
+                HStack(spacing: DS.Spacing.sm) {
                     Text(groupedSecret(setup.secret))
                         .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(DS.Color.text)
                         .textSelection(.enabled)
                     Button {
                         copySecret(setup.secret)
                         copiedSecret = true
                     } label: {
                         Image(systemName: copiedSecret ? "checkmark" : "doc.on.doc")
-                            .foregroundColor(SS.primary)
+                            .foregroundStyle(DS.Color.primaryText)
+                            .frame(width: 44, height: 44)
                     }
                     .accessibilityLabel("Copy key")
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(Color(uiColor: .systemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-                .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
+                .padding(.leading, DS.Spacing.inset)
+                .padding(.trailing, DS.Spacing.xxs)
+                .background(DS.Color.surface, in: RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous).strokeBorder(DS.Color.border, lineWidth: 1))
             }
 
-            Divider().padding(.vertical, 4)
+            DSDivider().padding(.vertical, DS.Spacing.xxs)
 
             Text("Then enter the 6-digit code from the app to turn it on.")
-                .font(.system(size: 14))
-                .foregroundColor(.secondary)
+                .dsFont(.body)
+                .foregroundStyle(DS.Color.text2)
                 .multilineTextAlignment(.center)
 
             OneTimeCodeField(code: $code, errorMessage: $errorMessage, focused: $fieldFocused)
@@ -177,9 +177,9 @@ struct TotpSetupView: View {
             Button {
                 confirm()
             } label: {
-                if isSubmitting { ProgressView().tint(.white) } else { Text("Turn On") }
+                if isSubmitting { ProgressView().tint(DS.Color.onPrimary) } else { Text("Turn On") }
             }
-            .buttonStyle(SSPrimaryButtonStyle(isEnabled: canSubmit))
+            .buttonStyle(.ds(.primary))
             .disabled(!canSubmit)
         }
     }
@@ -187,17 +187,19 @@ struct TotpSetupView: View {
     // MARK: Schritt 0: Mail-Code (Re-Auth, bevor es ein Secret gibt)
 
     private func verifyEmailView(_ challenge: TwoFactorChallenge) -> some View {
-        VStack(spacing: 18) {
+        VStack(spacing: DS.Spacing.md) {
             Image(systemName: "envelope.badge.shield.half.filled")
-                .font(.system(size: 44))
-                .foregroundColor(SS.primary)
+                .font(.system(size: 32, weight: .semibold))
+                .foregroundStyle(DS.Color.primaryText)
+                .frame(width: 72, height: 72)
+                .background(DS.Color.primarySoft, in: RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous))
+                .accessibilityHidden(true)
 
-            Text("Confirm it's you")
-                .font(.system(size: 22, weight: .bold))
+            Text("Confirm it's you").dsFont(.title).foregroundStyle(DS.Color.text)
 
             Text("We sent a 6-digit code to \(challenge.emailHint). Enter it to continue setting up your authenticator app.")
-                .font(.system(size: 14))
-                .foregroundColor(.secondary)
+                .dsFont(.body)
+                .foregroundStyle(DS.Color.text2)
                 .multilineTextAlignment(.center)
 
             OneTimeCodeField(code: $code, errorMessage: $errorMessage, focused: $fieldFocused)
@@ -207,19 +209,15 @@ struct TotpSetupView: View {
             Button {
                 submitEmailCode(challenge)
             } label: {
-                if isSubmitting { ProgressView().tint(.white) } else { Text("Continue") }
+                if isSubmitting { ProgressView().tint(DS.Color.onPrimary) } else { Text("Continue") }
             }
-            .buttonStyle(SSPrimaryButtonStyle(isEnabled: canSubmit))
+            .buttonStyle(.ds(.primary))
             .disabled(!canSubmit)
 
-            Button {
+            Button(isResending ? "Sending…" : "Send a new code") {
                 resend()
-            } label: {
-                Text(isResending ? "Sending…" : "Send a new code")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(SS.primary)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.ds(.soft, size: .medium, fullWidth: false))
             .disabled(isResending)
         }
         .onAppear { fieldFocused = true }
@@ -229,13 +227,13 @@ struct TotpSetupView: View {
     private var statusText: some View {
         if let errorMessage {
             Text(errorMessage)
-                .font(.system(size: 13))
-                .foregroundColor(.red)
+                .dsFont(.caption)
+                .foregroundStyle(DS.Color.danger)
                 .multilineTextAlignment(.center)
         } else if let infoMessage {
             Text(infoMessage)
-                .font(.system(size: 13))
-                .foregroundColor(.secondary)
+                .dsFont(.caption)
+                .foregroundStyle(DS.Color.text2)
                 .multilineTextAlignment(.center)
         }
     }
@@ -243,14 +241,14 @@ struct TotpSetupView: View {
     private func failedView(_ message: String) -> some View {
         VStack(spacing: 16) {
             Text(message)
-                .font(.system(size: 14))
-                .foregroundColor(.red)
+                .dsFont(.body)
+                .foregroundStyle(DS.Color.danger)
                 .multilineTextAlignment(.center)
             Button("Try again") {
                 step = .loading
                 Task { await requestEmailCode() }
             }
-            .buttonStyle(SSPrimaryButtonStyle(isEnabled: true))
+            .buttonStyle(.ds(.primary))
         }
         .padding(.top, 40)
     }
@@ -337,12 +335,17 @@ struct OneTimeCodeField: View {
             .keyboardType(.numberPad)
             .textContentType(.oneTimeCode)
             .font(.system(size: 28, weight: .semibold, design: .monospaced))
+            .foregroundStyle(DS.Color.text)
+            .tint(DS.Color.primary)
             .multilineTextAlignment(.center)
-            .padding(.vertical, 14)
-            .background(Color(uiColor: .systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 14))
-            .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
-            .padding(.horizontal, 24)
+            .padding(.vertical, DS.Spacing.sm)
+            .frame(minHeight: 56)
+            .background(DS.Color.surface, in: RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
+                    .strokeBorder(errorMessage != nil ? DS.Color.danger : (focused.wrappedValue ? DS.Color.primary : DS.Color.border),
+                                  lineWidth: focused.wrappedValue || errorMessage != nil ? 1.5 : 1)
+            )
             .focused(focused)
             .onChange(of: code) { _, newValue in
                 let cleaned = String(newValue.filter(\.isNumber).prefix(6))
@@ -361,27 +364,30 @@ struct BackupCodesView: View {
     @State private var copied = false
 
     var body: some View {
-        VStack(spacing: 18) {
+        VStack(spacing: DS.Spacing.md) {
             Image(systemName: "checkmark.shield.fill")
-                .font(.system(size: 44))
-                .foregroundColor(.green)
+                .font(.system(size: 32, weight: .semibold))
+                .foregroundStyle(DS.Color.success)
+                .frame(width: 72, height: 72)
+                .background(DS.Color.successSoft, in: RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous))
+                .accessibilityHidden(true)
 
-            Text(title)
-                .font(.system(size: 22, weight: .bold))
+            Text(title).dsFont(.title).foregroundStyle(DS.Color.text)
 
             Text("Save these codes. If you lose access to your authenticator app, each code lets you sign in once. They are shown only now.")
-                .font(.system(size: 14))
-                .foregroundColor(.secondary)
+                .dsFont(.body)
+                .foregroundStyle(DS.Color.text2)
                 .multilineTextAlignment(.center)
 
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: DS.Spacing.xs) {
                 ForEach(codes, id: \.self) { backup in
                     Text(backup)
                         .font(.system(size: 15, weight: .semibold, design: .monospaced))
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                        .background(Color(uiColor: .systemBackground))
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .foregroundStyle(DS.Color.text)
+                        .padding(.vertical, DS.Spacing.sm)
+                        .background(DS.Color.surface, in: RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous).strokeBorder(DS.Color.border, lineWidth: 1))
                         .textSelection(.enabled)
                 }
             }
@@ -391,13 +397,11 @@ struct BackupCodesView: View {
                 copied = true
             } label: {
                 Label(copied ? "Copied" : "Copy all codes", systemImage: copied ? "checkmark" : "doc.on.doc")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(SS.primary)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.ds(.soft, size: .medium, fullWidth: false))
 
             Button("Done", action: onDone)
-                .buttonStyle(SSPrimaryButtonStyle(isEnabled: true))
+                .buttonStyle(.ds(.primary))
         }
     }
 }
@@ -419,43 +423,43 @@ struct RegenerateBackupCodesView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                SS.background().ignoresSafeArea()
                 ScrollView {
-                    VStack(spacing: 20) {
+                    VStack(spacing: DS.Spacing.lg) {
                         if let newCodes {
                             BackupCodesView(codes: newCodes, title: "New backup codes", onDone: onFinished)
                         } else {
                             Text("Enter the current code from your authenticator app. Your old backup codes will stop working.")
-                                .font(.system(size: 14))
-                                .foregroundColor(.secondary)
+                                .dsFont(.body)
+                                .foregroundStyle(DS.Color.text2)
                                 .multilineTextAlignment(.center)
 
                             OneTimeCodeField(code: $code, errorMessage: $errorMessage, focused: $fieldFocused)
 
                             if let errorMessage {
                                 Text(errorMessage)
-                                    .font(.system(size: 13))
-                                    .foregroundColor(.red)
+                                    .dsFont(.caption)
+                                    .foregroundStyle(DS.Color.danger)
                                     .multilineTextAlignment(.center)
                             }
 
                             Button {
                                 submit()
                             } label: {
-                                if isSubmitting { ProgressView().tint(.white) } else { Text("Generate New Codes") }
+                                if isSubmitting { ProgressView().tint(DS.Color.onPrimary) } else { Text("Generate New Codes") }
                             }
-                            .buttonStyle(SSPrimaryButtonStyle(isEnabled: canSubmit))
+                            .buttonStyle(.ds(.primary))
                             .disabled(!canSubmit)
                         }
                     }
-                    .padding(24)
+                    .padding(DS.Spacing.screenEdge)
                 }
             }
+            .dsBackground()
             .navigationTitle("Backup Codes")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 if newCodes == nil {
-                    ToolbarItem(placement: .cancellationAction) { Button("Cancel", action: onCancel) }
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel", action: onCancel).foregroundStyle(DS.Color.primaryText) }
                 }
             }
             .onAppear { fieldFocused = true }

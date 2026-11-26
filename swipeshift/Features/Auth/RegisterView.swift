@@ -152,308 +152,289 @@ struct RegisterView: View {
 
     // MARK: - Body
     var body: some View {
-        ZStack {
-            SS.background().ignoresSafeArea()
+        ScrollView {
+            VStack(alignment: .leading, spacing: DS.Spacing.xl) {
 
-            ScrollView {
-                VStack {
-                    SSCard {
-                        VStack(spacing: 24) {
-
-                            // MARK: - Header
-                            VStack(spacing: 8) {
-                                HStack {
-                                    Button {
-                                        dismiss()
-                                    } label: {
-                                        Image(systemName: "xmark")
-                                            .font(.system(size: 16, weight: .semibold))
-                                            .foregroundColor(.secondary)
-                                            .padding(10)
-                                            .background(Color.gray.opacity(0.1))
-                                            .clipShape(Circle())
-                                    }
-                                    Spacer()
-                                }
-                                .padding(.horizontal, 24)
-
-                                Text("Create Account")
-                                    .font(.largeTitle)
-                                    .fontWeight(.bold)
-
-                                Text("Choose how you want to use the app.")
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                            }
-                            .padding(.top, 16)
-
-                            // MARK: - Role Selection Cards
-                            roleSelectionSection
-
-                            // MARK: - Formular je nach Rolle
-                            switch selectedRole {
-                            case .worker:
-                                workerFormSection
-                            case .employer:
-                                employerFormSection
-                            }
-
-                            // Fehlermeldung vom Backend
-                            if let errorMessage {
-                                Text(errorMessage)
-                                    .font(.caption)
-                                    .foregroundColor(.red)
-                                    .padding(.horizontal, 24)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-
-                            // MARK: - Registrieren Button
-                            Button(action: handleRegister) {
-                                Text(selectedRole == .worker ? "Create Worker Account" : "Create Employer Account")
-                                    .frame(maxWidth: .infinity)
-                                    .padding()
-                                    .background(Color.blue)
-                                    .foregroundColor(.white)
-                                    .fontWeight(.semibold)
-                                    .cornerRadius(14)
-                            }
-                            .buttonStyle(SSPrimaryButtonStyle())
-                            .padding(.horizontal, 24)
-
-                            if let current = userStore.currentUser {
-                                Text("Registered & logged in as \(current.email)")
-                                    .font(.footnote)
-                                    .foregroundColor(.green)
-                                    .padding(.top, 8)
-                            }
-
-                            Spacer(minLength: 40)
-                        }
-                        .padding(.vertical, 14)
-                    }
+                // MARK: - Header
+                VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                    Text("Create Account").dsFont(.display).foregroundStyle(DS.Color.text)
+                    Text("Choose how you want to use the app.")
+                        .dsFont(.body)
+                        .foregroundStyle(DS.Color.text2)
                 }
-                .navigationBarTitleDisplayMode(.inline)
+
+                // MARK: - Role Selection Cards
+                roleSelectionSection
+
+                // MARK: - Formular je nach Rolle
+                switch selectedRole {
+                case .worker:
+                    workerFormSection
+                case .employer:
+                    employerFormSection
+                }
+
+                // Fehlermeldung vom Backend
+                if let errorMessage {
+                    Text(errorMessage)
+                        .dsFont(.caption)
+                        .foregroundStyle(DS.Color.danger)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                // MARK: - Registrieren Button
+                Button(action: handleRegister) {
+                    Text(selectedRole == .worker ? "Create Worker Account" : "Create Employer Account")
+                }
+                .buttonStyle(.ds(.primary))
+
+                if let current = userStore.currentUser {
+                    Text("Registered & logged in as \(current.email)")
+                        .dsFont(.caption)
+                        .foregroundStyle(DS.Color.success)
+                }
             }
+            .padding(.horizontal, DS.Spacing.screenEdge)
+            .padding(.top, DS.Spacing.xs)
+            .padding(.bottom, DS.Spacing.xxl)
         }
+        .scrollDismissesKeyboard(.interactively)
+        .dsBackground()
+        .safeAreaInset(edge: .top, spacing: 0) {
+            // Schliessen-Button oben links
+            HStack {
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(DS.Color.text2)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel("Close")
+                Spacer()
+            }
+            .padding(.horizontal, DS.Spacing.xs)
+            .background(DS.Color.bg)
+        }
+        .navigationBarTitleDisplayMode(.inline)
     }
 
 
     // MARK: - Subviews
 
     private var roleSelectionSection: some View {
-        HStack(spacing: 16) {
-            // Worker Card
-            VStack(alignment: .leading, spacing: 8) {
-                Text("I'm looking for work")
-                    .font(.headline)
-                Text("Create a worker profile to find jobs that match you.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+        HStack(spacing: DS.Spacing.sm) {
+            roleCard(
+                icon: "person", title: "I'm looking for work",
+                subtitle: "Create a worker profile to find jobs that match you.",
+                tone: .primary, isSelected: selectedRole == .worker
+            ) { selectedRole = .worker }
+
+            roleCard(
+                icon: "doc.text", title: "I'm hiring for jobs",
+                subtitle: "Post jobs and find talent.",
+                tone: .warning, isSelected: selectedRole == .employer
+            ) { selectedRole = .employer }
+        }
+    }
+
+    private func roleCard(icon: String, title: String, subtitle: String, tone: DS.Tone, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button {
+            DS.Haptics.selection()
+            action()
+        } label: {
+            VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                DSIconTile(systemName: icon, tone: tone)
+                Text(title).dsFont(.headline).foregroundStyle(DS.Color.text)
+                Text(subtitle).dsFont(.caption).foregroundStyle(DS.Color.text2)
+                    .multilineTextAlignment(.leading)
             }
-            .padding()
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(selectedRole == .worker ? Color.blue.opacity(0.15) : Color.gray.opacity(0.08))
+            .padding(DS.Spacing.inset)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(DS.Color.surface, in: RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(selectedRole == .worker ? Color.blue : Color.clear, lineWidth: 2)
+                RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
+                    .strokeBorder(isSelected ? DS.Color.primary : DS.Color.border, lineWidth: isSelected ? 2 : 1)
             )
-            .cornerRadius(16)
-            .onTapGesture {
-                selectedRole = .worker
+            .contentShape(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
+        }
+        .buttonStyle(.dsPressable)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+    }
+
+    /// Foto-/Logo-Auswahl als flache Zeile
+    private func photoRow(image: UIImage?, placeholderIcon: String, emptyText: String, filledText: String,
+                          chooseTitle: String, changeTitle: String, pick: @escaping () -> Void, remove: @escaping () -> Void) -> some View {
+        HStack(spacing: DS.Spacing.sm) {
+            Group {
+                if let image {
+                    Image(uiImage: image).resizable().scaledToFill()
+                } else {
+                    Image(systemName: placeholderIcon)
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(DS.Color.muted)
+                }
+            }
+            .frame(width: 56, height: 56)
+            .background(DS.Color.surface2)
+            .clipShape(Circle())
+            .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(image == nil ? emptyText : filledText)
+                    .dsFont(.callout)
+                    .foregroundStyle(DS.Color.text2)
+                Button(image == nil ? chooseTitle : changeTitle, action: pick)
+                    .font(DS.Font.make(15, .semibold))
+                    .foregroundStyle(DS.Color.primaryText)
+                    .frame(minHeight: 44, alignment: .leading)
             }
 
-            // Employer Card
-            VStack(alignment: .leading, spacing: 8) {
-                Text("I'm hiring for jobs")
-                    .font(.headline)
-                Text("Post jobs and find talent. (Coming soon)")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            .padding()
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(selectedRole == .employer ? Color.blue.opacity(0.15) : Color.gray.opacity(0.08))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(selectedRole == .employer ? Color.blue : Color.clear, lineWidth: 2)
-            )
-            .cornerRadius(16)
-            .onTapGesture {
-                selectedRole = .employer
+            Spacer()
+
+            if image != nil {
+                Button(role: .destructive, action: remove) {
+                    Image(systemName: "trash")
+                        .foregroundStyle(DS.Color.danger)
+                        .frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("Remove")
             }
         }
-        .padding(.horizontal, 24)
+    }
+
+    /// Ort-Suche mit Vorschlagsliste
+    private func locationField(text: Binding<String>, error: String?, suggestionsVisible: Bool,
+                               onChange: @escaping (String) -> Void, onPick: @escaping (LocationSuggestion) -> Void) -> some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+            DSTextField("City / ZIP code", placeholder: "Start typing a city or ZIP", text: text, error: error)
+                .textInputAutocapitalization(.words)
+                .autocorrectionDisabled()
+                .textContentType(.addressCity)
+                .onChange(of: text.wrappedValue) { _, newValue in onChange(newValue) }
+
+            Text("Pick a suggestion so we can save coordinates.")
+                .dsFont(.caption)
+                .foregroundStyle(DS.Color.muted)
+
+            if suggestionsVisible && !locationGeocoder.suggestions.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(locationGeocoder.suggestions) { s in
+                        Button {
+                            onPick(s)
+                            hideKeyboard()
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(s.title).dsFont(.body).foregroundStyle(DS.Color.text)
+                                if !s.subtitle.isEmpty {
+                                    Text(s.subtitle).dsFont(.caption).foregroundStyle(DS.Color.muted)
+                                }
+                            }
+                            .padding(.vertical, DS.Spacing.xs)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .overlay(alignment: .top) { DSDivider() }
+                    }
+                }
+                .overlay(alignment: .bottom) { DSDivider() }
+            }
+        }
+    }
+
+    private func termsToggle(isOn: Binding<Bool>, error: String?) -> some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+            Toggle(isOn: isOn) {
+                Text("I accept the Terms & Conditions and Privacy Policy.")
+                    .dsFont(.callout)
+                    .foregroundStyle(DS.Color.text)
+            }
+            .tint(DS.Color.primary)
+            .frame(minHeight: 44)
+            if let error {
+                Text(error).dsFont(.caption).foregroundStyle(DS.Color.danger)
+            }
+        }
+    }
+
+    private func fieldError(_ message: String?) -> some View {
+        Group {
+            if let message {
+                Text(message).dsFont(.caption).foregroundStyle(DS.Color.danger)
+            }
+        }
     }
 
 
     // MARK: - Worker Form Section
     private var workerFormSection: some View {
-        VStack(spacing: 24) {
+        VStack(alignment: .leading, spacing: DS.Spacing.xl) {
 
             // MARK: - Basic Info
-            VStack(alignment: .leading, spacing: 16) {
-
-                Text("Profile photo (optional)")
-                    .font(.headline)
-
-                HStack(spacing: 12) {
-                    Group {
-                        if let image = profileUIImage {
-                            Image(uiImage: image)
-                                .resizable()
-                                .scaledToFill()
-                        } else {
-                            Image(systemName: "person.crop.circle.fill")
-                                .resizable()
-                                .scaledToFit()
-                                .foregroundColor(.secondary)
-                                .padding(10)
-                        }
-                    }
-                    .frame(width: 56, height: 56)
-                    .background(Color.gray.opacity(0.08))
-                    .clipShape(Circle())
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(profileUIImage == nil ? "No photo selected" : "Photo selected")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-
-                        Button {
-                            showImagePicker = true
-                        } label: {
-                            Text(profileUIImage == nil ? "Choose photo" : "Change photo")
-                                .font(.subheadline)
-                                .fontWeight(.semibold)
-                        }
-                    }
-
-                    Spacer()
-
-                    if profileUIImage != nil {
-                        Button(role: .destructive) {
-                            profileUIImage = nil
-                        } label: {
-                            Image(systemName: "trash")
-                        }
-                    }
-                }
-                .padding()
-                .background(Color.gray.opacity(0.1))
-                .cornerRadius(12)
+            DSSection("Profile photo (optional)", ruled: false) {
+                photoRow(
+                    image: profileUIImage, placeholderIcon: "person.fill",
+                    emptyText: "No photo selected", filledText: "Photo selected",
+                    chooseTitle: "Choose photo", changeTitle: "Change photo",
+                    pick: { showImagePicker = true }, remove: { profileUIImage = nil }
+                )
                 .sheet(isPresented: $showImagePicker) {
                     ImagePicker(image: $profileUIImage)
                 }
+            }
 
-                Text("Basic information")
-                    .font(.headline)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 12) {
-                        TextField("First name", text: $firstName)
+            DSSection("Basic information", ruled: false) {
+                VStack(alignment: .leading, spacing: DS.Spacing.md) {
+                    HStack(alignment: .top, spacing: DS.Spacing.sm) {
+                        DSTextField("First name", text: $firstName, error: fieldErrors[.firstName])
                             .textInputAutocapitalization(.words)
-                            .padding()
-                            .background(Color.gray.opacity(0.1))
-                            .cornerRadius(12)
-
-                        TextField("Last name", text: $lastName)
+                        DSTextField("Last name", text: $lastName, error: fieldErrors[.lastName])
                             .textInputAutocapitalization(.words)
-                            .padding()
-                            .background(Color.gray.opacity(0.1))
-                            .cornerRadius(12)
                     }
 
-                    if let error = fieldErrors[.firstName] {
-                        Text("First name: \(error)").font(.caption).foregroundColor(.red)
-                    }
-                    if let error = fieldErrors[.lastName] {
-                        Text("Last name: \(error)").font(.caption).foregroundColor(.red)
-                    }
-                }
+                    DSTextField("Email", placeholder: "you@example.com", text: $email, error: fieldErrors[.email])
+                        .keyboardType(.emailAddress)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
 
-                TextField("Email", text: $email)
-                    .keyboardType(.emailAddress)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .padding()
-                    .background(Color.gray.opacity(0.1))
-                    .cornerRadius(12)
+                    DSTextField("Password", text: $password, error: fieldErrors[.password], isSecure: true)
+                        .textContentType(.oneTimeCode)
 
-                if let error = fieldErrors[.email] {
-                    Text(error)
-                        .font(.caption)
-                        .foregroundColor(.red)
-                }
-
-                SecureField("Password", text: $password)
-                    .padding()
-                    .background(Color.gray.opacity(0.1))
-                    .cornerRadius(12)
-                    .textContentType(.oneTimeCode)
-
-                if let msg = fieldErrors[.password] {
-                    Text(msg)
-                        .font(.caption)
-                        .foregroundColor(.red)
-                }
-
-                SecureField("Confirm password", text: $confirmPassword)
-                    .padding()
-                    .background(Color.gray.opacity(0.1))
-                    .cornerRadius(12)
-                    .textContentType(.oneTimeCode)
-
-                if let msg = fieldErrors[.confirmPassword] {
-                    Text(msg)
-                        .font(.caption)
-                        .foregroundColor(.red)
+                    DSTextField("Confirm password", text: $confirmPassword, error: fieldErrors[.confirmPassword], isSecure: true)
+                        .textContentType(.oneTimeCode)
                 }
             }
-            .padding(.horizontal, 24)
 
             // MARK: - Date of birth
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Date of birth")
-                    .font(.headline)
-
-                DatePicker(
-                    "",
-                    selection: $dateOfBirth,
-                    in: ...(Calendar.current.date(byAdding: .year, value: -18, to: Date()) ?? Date()), // 18+
-                    displayedComponents: .date
-                )
-                .datePickerStyle(.wheel)
-                .labelsHidden()
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding()
-                .background(Color.gray.opacity(0.1))
-                .cornerRadius(12)
-
-                if let msg = fieldErrors[.dateOfBirth] {
-                    Text(msg)
-                        .font(.caption)
-                        .foregroundColor(.red)
+            DSSection("Date of birth", ruled: false) {
+                VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                    DatePicker(
+                        "Date of birth",
+                        selection: $dateOfBirth,
+                        in: ...(Calendar.current.date(byAdding: .year, value: -18, to: Date()) ?? Date()), // 18+
+                        displayedComponents: .date
+                    )
+                    .datePickerStyle(.wheel)
+                    .labelsHidden()
+                    .tint(DS.Color.primary)
+                    .frame(maxWidth: .infinity)
+                    .background(DS.Color.surface, in: RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
+                            .strokeBorder(fieldErrors[.dateOfBirth] == nil ? DS.Color.border : DS.Color.danger, lineWidth: 1)
+                    )
+                    fieldError(fieldErrors[.dateOfBirth])
                 }
             }
-            .padding(.horizontal, 24)
 
             // MARK: - Location
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Location")
-                    .font(.headline)
-
-                Text("Start typing a city or ZIP. Pick a suggestion so we can save coordinates.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-
-                TextField("City / ZIP code", text: $locationText)
-                    .textInputAutocapitalization(.words)
-                    .autocorrectionDisabled()
-                    .textContentType(.addressCity)
-                    .padding()
-                    .background(Color.gray.opacity(0.1))
-                    .cornerRadius(12)
-                    .onChange(of: locationText) { _, newValue in
+            DSSection("Location", ruled: false) {
+                locationField(
+                    text: $locationText, error: fieldErrors[.locationText],
+                    suggestionsVisible: showWorkerLocationSuggestions,
+                    onChange: { newValue in
                         workerLat = nil
                         workerLng = nil
                         showWorkerLocationSuggestions = true
@@ -466,280 +447,98 @@ struct RegisterView: View {
                                 locationGeocoder.updateQuery(newValue)
                             }
                         }
+                    },
+                    onPick: { s in
+                        locationText = s.fullText
+                        workerLat = s.lat
+                        workerLng = s.lng
+                        showWorkerLocationSuggestions = false
                     }
-
-                if showWorkerLocationSuggestions && !locationGeocoder.suggestions.isEmpty {
-                    VStack(spacing: 0) {
-                        ForEach(locationGeocoder.suggestions) { s in
-                            Button {
-                                locationText = s.fullText
-                                workerLat = s.lat
-                                workerLng = s.lng
-                                showWorkerLocationSuggestions = false
-                                hideKeyboard()
-                            } label: {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(s.title)
-                                        .foregroundColor(.primary)
-                                    if !s.subtitle.isEmpty {
-                                        Text(s.subtitle)
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                    }
-                                }
-                                .padding(.vertical, 10)
-                                .padding(.horizontal, 12)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            .buttonStyle(.plain)
-
-                            Divider()
-                        }
-                    }
-                    .background(Color.gray.opacity(0.06))
-                    .cornerRadius(12)
-                }
-
-                if let msg = fieldErrors[.locationText] {
-                    Text(msg)
-                        .font(.caption)
-                        .foregroundColor(.red)
-                }
+                )
             }
-            .padding(.horizontal, 24)
 
             // MARK: - Job Interests
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Job interests")
-                    .font(.headline)
-
-                Text("Select one or more categories.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-
-                VStack(spacing: 10) {
-                    ForEach(jobInterestOptions, id: \.self) { option in
-                        Toggle(isOn: Binding(
-                            get: { selectedJobInterests.contains(option) },
-                            set: { isOn in
-                                if isOn {
-                                    selectedJobInterests.insert(option)
-                                } else {
+            DSSection("Job interests", trailing: "Select one or more", ruled: false) {
+                VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                    ChipFlowLayout(spacing: DS.Spacing.xs) {
+                        ForEach(jobInterestOptions, id: \.self) { option in
+                            DSChip(option, isSelected: selectedJobInterests.contains(option)) {
+                                if selectedJobInterests.contains(option) {
                                     selectedJobInterests.remove(option)
+                                } else {
+                                    selectedJobInterests.insert(option)
                                 }
                             }
-                        )) {
-                            Text(option)
-                                .font(.subheadline)
                         }
-                        .toggleStyle(SwitchToggleStyle(tint: .blue))
-                        .padding()
-                        .background(Color.gray.opacity(0.08))
-                        .cornerRadius(12)
                     }
-                }
-
-                if let error = fieldErrors[.jobInterests] {
-                    Text(error)
-                        .font(.caption)
-                        .foregroundColor(.red)
+                    fieldError(fieldErrors[.jobInterests])
                 }
             }
-            .padding(.horizontal, 24)
 
             // MARK: - Availability
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Availability")
-                    .font(.headline)
-
-                Text("Select the days when you are usually available.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-
-                VStack(spacing: 12) {
+            DSSection("Availability", trailing: "Days you are usually available", ruled: true) {
+                VStack(alignment: .leading, spacing: 0) {
                     ForEach(availability.indices, id: \.self) { index in
-                        HStack {
-                            Text(availability[index].name)
-                                .frame(width: 36, alignment: .leading)
-
-                            Spacer()
-
-                            Toggle("", isOn: $availability[index].available)
-                                .labelsHidden()
-                        }
-                        .font(.caption)
+                        DSToggleRow(availability[index].name, isOn: $availability[index].available)
+                    }
+                    if let msg = fieldErrors[.availability] {
+                        Text(msg).dsFont(.caption).foregroundStyle(DS.Color.danger)
+                            .padding(.vertical, DS.Spacing.xs)
                     }
                 }
-
-                if let msg = fieldErrors[.availability] {
-                    Text(msg)
-                        .font(.caption)
-                        .foregroundColor(.red)
-                }
             }
-            .padding(.horizontal, 24)
 
             // MARK: - Short Bio
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Short bio (optional)")
-                    .font(.headline)
-
-                Text("Tell employers a bit about yourself.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-
-                TextEditor(text: $shortBio)
-                    .frame(minHeight: 100)
-                    .padding(8)
-                    .background(Color.gray.opacity(0.1))
-                    .cornerRadius(12)
-                    .onChange(of: shortBio) { _, newValue in
-                        if newValue.count > bioLimit {
-                            shortBio = String(newValue.prefix(bioLimit))
-                        }
-                    }
-
-                HStack {
-                    Spacer()
-                    Text("\(shortBio.count)/\(bioLimit)")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                }
-            }
-            .padding(.horizontal, 24)
+            DSTextEditor(
+                "Short bio (optional)", placeholder: "Tell employers a bit about yourself.",
+                text: $shortBio, minLines: 4, maxLength: bioLimit
+            )
 
             // MARK: - Terms & Privacy
-            Toggle(isOn: $acceptedTerms) {
-                Text("I accept the Terms & Conditions and Privacy Policy.")
-                    .font(.footnote)
-            }
-            .toggleStyle(SwitchToggleStyle(tint: .blue))
-            .padding(.horizontal, 24)
-
-            if let msg = fieldErrors[.terms] {
-                Text(msg)
-                    .font(.caption)
-                    .foregroundColor(.red)
-                    .padding(.horizontal, 24)
-            }
+            termsToggle(isOn: $acceptedTerms, error: fieldErrors[.terms])
         }
     }
 
 
     // MARK: - Employer Form Section
     private var employerFormSection: some View {
-        VStack(spacing: 24) {
+        VStack(alignment: .leading, spacing: DS.Spacing.xl) {
 
             // MARK: - Company Info
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Company information")
-                    .font(.headline)
+            DSSection("Company information", ruled: false) {
+                VStack(alignment: .leading, spacing: DS.Spacing.md) {
+                    DSTextField("Company name", text: $companyName, error: fieldErrors[.companyName])
+                        .textInputAutocapitalization(.words)
 
-                TextField("Company name", text: $companyName)
-                    .textInputAutocapitalization(.words)
-                    .padding()
-                    .background(Color.gray.opacity(0.1))
-                    .cornerRadius(12)
-
-                if let msg = fieldErrors[.companyName] {
-                    Text(msg)
-                        .font(.caption)
-                        .foregroundColor(.red)
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Contact person")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-
-                    HStack(spacing: 12) {
-                        TextField("First name", text: $firstName)
+                    HStack(alignment: .top, spacing: DS.Spacing.sm) {
+                        DSTextField("Contact first name", text: $firstName, error: fieldErrors[.firstName])
                             .textInputAutocapitalization(.words)
-                            .padding()
-                            .background(Color.gray.opacity(0.1))
-                            .cornerRadius(12)
-
-                        TextField("Last name", text: $lastName)
+                        DSTextField("Contact last name", text: $lastName, error: fieldErrors[.lastName])
                             .textInputAutocapitalization(.words)
-                            .padding()
-                            .background(Color.gray.opacity(0.1))
-                            .cornerRadius(12)
-                    }
-
-                    if let msg = fieldErrors[.firstName] {
-                        Text(msg)
-                            .font(.caption)
-                            .foregroundColor(.red)
-                    }
-                    if let msg = fieldErrors[.lastName] {
-                        Text(msg)
-                            .font(.caption)
-                            .foregroundColor(.red)
                     }
                 }
             }
-            .padding(.horizontal, 24)
 
             // MARK: - Account Details
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Account details")
-                    .font(.headline)
+            DSSection("Account details", ruled: false) {
+                VStack(alignment: .leading, spacing: DS.Spacing.md) {
+                    DSTextField("Work email", placeholder: "you@company.com", text: $employerEmail, error: fieldErrors[.employerEmail])
+                        .keyboardType(.emailAddress)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
 
-                TextField("Work email", text: $employerEmail)
-                    .keyboardType(.emailAddress)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .padding()
-                    .background(Color.gray.opacity(0.1))
-                    .cornerRadius(12)
+                    DSTextField("Password", text: $employerPassword, error: fieldErrors[.employerPassword], isSecure: true)
 
-                if let msg = fieldErrors[.employerEmail] {
-                    Text(msg)
-                        .font(.caption)
-                        .foregroundColor(.red)
-                }
-
-                SecureField("Password", text: $employerPassword)
-                    .padding()
-                    .background(Color.gray.opacity(0.1))
-                    .cornerRadius(12)
-
-                if let msg = fieldErrors[.employerPassword] {
-                    Text(msg)
-                        .font(.caption)
-                        .foregroundColor(.red)
-                }
-
-                SecureField("Confirm password", text: $employerConfirmPassword)
-                    .padding()
-                    .background(Color.gray.opacity(0.1))
-                    .cornerRadius(12)
-
-                if let msg = fieldErrors[.employerConfirmPassword] {
-                    Text(msg)
-                        .font(.caption)
-                        .foregroundColor(.red)
+                    DSTextField("Confirm password", text: $employerConfirmPassword, error: fieldErrors[.employerConfirmPassword], isSecure: true)
                 }
             }
-            .padding(.horizontal, 24)
 
             // MARK: - Location
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Location")
-                    .font(.headline)
-
-                Text("Start typing a city or ZIP. Pick a suggestion so we can save coordinates.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-
-                TextField("City / ZIP code", text: $employerLocationText)
-                    .textInputAutocapitalization(.words)
-                    .autocorrectionDisabled()
-                    .textContentType(.addressCity)
-                    .padding()
-                    .background(Color.gray.opacity(0.1))
-                    .cornerRadius(12)
-                    .onChange(of: employerLocationText) { _, newValue in
+            DSSection("Location", ruled: false) {
+                locationField(
+                    text: $employerLocationText, error: fieldErrors[.employerLocation],
+                    suggestionsVisible: showEmployerLocationSuggestions,
+                    onChange: { newValue in
                         employerLat = nil
                         employerLng = nil
                         showEmployerLocationSuggestions = true
@@ -752,207 +551,79 @@ struct RegisterView: View {
                                 locationGeocoder.updateQuery(newValue)
                             }
                         }
+                    },
+                    onPick: { s in
+                        employerLocationText = s.fullText
+                        employerLat = s.lat
+                        employerLng = s.lng
+                        showEmployerLocationSuggestions = false
                     }
-
-                if showEmployerLocationSuggestions && !locationGeocoder.suggestions.isEmpty {
-                    VStack(spacing: 0) {
-                        ForEach(locationGeocoder.suggestions) { s in
-                            Button {
-                                employerLocationText = s.fullText
-                                employerLat = s.lat
-                                employerLng = s.lng
-                                showEmployerLocationSuggestions = false
-                                hideKeyboard()
-                            } label: {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(s.title)
-                                        .foregroundColor(.primary)
-                                    if !s.subtitle.isEmpty {
-                                        Text(s.subtitle)
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                    }
-                                }
-                                .padding(.vertical, 10)
-                                .padding(.horizontal, 12)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            .buttonStyle(.plain)
-
-                            Divider()
-                        }
-                    }
-                    .background(Color.gray.opacity(0.06))
-                    .cornerRadius(12)
-                }
-
-                if let msg = fieldErrors[.employerLocation] {
-                    Text(msg)
-                        .font(.caption)
-                        .foregroundColor(.red)
-                }
+                )
             }
-            .padding(.horizontal, 24)
 
             // MARK: - Industry / Category
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Industry / Category")
-                    .font(.headline)
-
-                HStack {
-                    Picker("Industry", selection: $employerIndustry) {
-                        ForEach(jobInterestOptions, id: \.self) { option in
-                            Text(option).tag(option)
+            DSSection("Industry / Category", ruled: false) {
+                VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                    HStack {
+                        Picker("Industry", selection: $employerIndustry) {
+                            ForEach(jobInterestOptions, id: \.self) { option in
+                                Text(option).tag(option)
+                            }
                         }
+                        .pickerStyle(.menu)
+                        .tint(DS.Color.primaryText)
+                        Spacer()
                     }
-                    .pickerStyle(.menu)
-
-                    Spacer()
-                }
-                .padding()
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.gray.opacity(0.1))
-                .cornerRadius(12)
-
-                if let msg = fieldErrors[.employerIndustry] {
-                    Text(msg)
-                        .font(.caption)
-                        .foregroundColor(.red)
+                    .padding(.horizontal, DS.Spacing.xs)
+                    .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
+                    .background(DS.Color.surface, in: RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
+                            .strokeBorder(DS.Color.border, lineWidth: 1)
+                    )
+                    fieldError(fieldErrors[.employerIndustry])
                 }
             }
-            .padding(.horizontal, 24)
 
             // MARK: - Company Size
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Company size")
-                    .font(.headline)
-
-                Picker("Company size", selection: $companySize) {
-                    ForEach(CompanySize.allCases) { size in
-                        Text(size.label).tag(size)
+            DSSection("Company size", ruled: false) {
+                VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                    HStack(spacing: DS.Spacing.xs) {
+                        ForEach(CompanySize.allCases) { size in
+                            DSChip(size.label, isSelected: companySize == size) { companySize = size }
+                        }
                     }
-                }
-                .pickerStyle(.segmented)
-
-                if let msg = fieldErrors[.companySize] {
-                    Text(msg)
-                        .font(.caption)
-                        .foregroundColor(.red)
+                    fieldError(fieldErrors[.companySize])
                 }
             }
-            .padding(.horizontal, 24)
 
             // MARK: - Company Logo (optional)
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Company logo (optional)")
-                    .font(.headline)
-
-                HStack(spacing: 12) {
-                    Group {
-                        if let image = companyLogoImage {
-                            Image(uiImage: image)
-                                .resizable()
-                                .scaledToFill()
-                        } else {
-                            Image(systemName: "building.2.crop.circle")
-                                .resizable()
-                                .scaledToFit()
-                                .foregroundColor(.secondary)
-                                .padding(10)
-                        }
-                    }
-                    .frame(width: 56, height: 56)
-                    .background(Color.gray.opacity(0.08))
-                    .clipShape(Circle())
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(companyLogoImage == nil ? "No logo selected" : "Logo selected")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-
-                        Button {
-                            showCompanyLogoPicker = true
-                        } label: {
-                            Text(companyLogoImage == nil ? "Choose logo" : "Change logo")
-                                .font(.subheadline)
-                                .fontWeight(.semibold)
-                        }
-                    }
-
-                    Spacer()
-
-                    if companyLogoImage != nil {
-                        Button(role: .destructive) {
-                            companyLogoImage = nil
-                        } label: {
-                            Image(systemName: "trash")
-                        }
-                    }
-                }
-                .padding()
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.gray.opacity(0.1))
-                .cornerRadius(12)
+            DSSection("Company logo (optional)", ruled: false) {
+                photoRow(
+                    image: companyLogoImage, placeholderIcon: "building.2",
+                    emptyText: "No logo selected", filledText: "Logo selected",
+                    chooseTitle: "Choose logo", changeTitle: "Change logo",
+                    pick: { showCompanyLogoPicker = true }, remove: { companyLogoImage = nil }
+                )
             }
-            .padding(.horizontal, 24)
             .sheet(isPresented: $showCompanyLogoPicker) {
                 ImagePicker(image: $companyLogoImage)
             }
 
             // MARK: - Website / Instagram (optional)
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Website or Instagram (optional)")
-                    .font(.headline)
-
-                TextField("https:// or @instagram", text: $websiteOrInstagram)
-                    .keyboardType(.URL)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .padding()
-                    .background(Color.gray.opacity(0.1))
-                    .cornerRadius(12)
-            }
-            .padding(.horizontal, 24)
+            DSTextField("Website or Instagram (optional)", placeholder: "https:// or @instagram", text: $websiteOrInstagram)
+                .keyboardType(.URL)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
 
             // MARK: - Short Company Description (optional)
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Short company description (optional)")
-                    .font(.headline)
-
-                TextEditor(text: $companyDescription)
-                    .frame(minHeight: 100)
-                    .padding(8)
-                    .background(Color.gray.opacity(0.1))
-                    .cornerRadius(12)
-                    .onChange(of: companyDescription) { _, newValue in
-                        if newValue.count > companyDescriptionLimit {
-                            companyDescription = String(newValue.prefix(companyDescriptionLimit))
-                        }
-                    }
-
-                HStack {
-                    Spacer()
-                    Text("\(companyDescription.count)/\(companyDescriptionLimit)")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                }
-            }
-            .padding(.horizontal, 24)
+            DSTextEditor(
+                "Short company description (optional)", placeholder: "What does your company do?",
+                text: $companyDescription, minLines: 4, maxLength: companyDescriptionLimit
+            )
 
             // MARK: - Terms & Privacy (Employer)
-            Toggle(isOn: $employerAcceptedTerms) {
-                Text("I accept the Terms & Conditions and Privacy Policy.")
-                    .font(.footnote)
-            }
-            .toggleStyle(SwitchToggleStyle(tint: .blue))
-            .padding(.horizontal, 24)
-
-            if let msg = fieldErrors[.employerTerms] {
-                Text(msg)
-                    .font(.caption)
-                    .foregroundColor(.red)
-                    .padding(.horizontal, 24)
-            }
+            termsToggle(isOn: $employerAcceptedTerms, error: fieldErrors[.employerTerms])
         }
     }
 
@@ -1086,6 +757,41 @@ struct RegisterView: View {
     }
 }
 
+
+// MARK: - ChipFlowLayout
+/// Umbrechende Chip-Reihe (Layout-Protokoll, hat echte intrinsische Hoehe)
+struct ChipFlowLayout: Layout {
+    var spacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        arrange(width: proposal.width ?? .infinity, subviews: subviews).size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let result = arrange(width: bounds.width, subviews: subviews)
+        for (index, origin) in result.origins.enumerated() {
+            subviews[index].place(at: CGPoint(x: bounds.minX + origin.x, y: bounds.minY + origin.y), proposal: .unspecified)
+        }
+    }
+
+    private func arrange(width: CGFloat, subviews: Subviews) -> (size: CGSize, origins: [CGPoint]) {
+        var origins: [CGPoint] = []
+        var x: CGFloat = 0, y: CGFloat = 0, rowHeight: CGFloat = 0, maxX: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > 0 && x + size.width > width {
+                x = 0
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            origins.append(CGPoint(x: x, y: y))
+            x += size.width + spacing
+            maxX = max(maxX, x - spacing)
+            rowHeight = max(rowHeight, size.height)
+        }
+        return (CGSize(width: maxX, height: y + rowHeight), origins)
+    }
+}
 
 // MARK: - WrapLayout
 struct WrapLayout<Data: RandomAccessCollection, Content: View>: View where Data.Element: Hashable {

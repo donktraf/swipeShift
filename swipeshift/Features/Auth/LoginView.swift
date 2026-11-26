@@ -15,98 +15,60 @@ struct LoginView: View {
     }
 
     var body: some View {
-        ZStack {
-            SS.background().ignoresSafeArea()
-
-            VStack {
-                Spacer()
-
-                SSCard {
-                    VStack(spacing: 18) {
-
-                        // ✅ Schließen-Button oben links
-                        HStack {
-                            Button {
-                                dismiss()
-                            } label: {
-                                Image(systemName: "xmark")
-                                    .font(.system(size: 16, weight: .semibold))
-                                    .foregroundColor(.secondary)
-                                    .padding(10)
-                                    .background(Color.gray.opacity(0.1))
-                                    .clipShape(Circle())
-                            }
-                            Spacer()
-                        }
-                        .padding(.horizontal, 24)
-                        .padding(.top, 8)
-
-                        Text("Welcome Back")
-                            .font(.system(size: 34, weight: .bold))
-
-                        Text("Login to your account")
-                            .font(.system(size: 16))
-                            .foregroundColor(.secondary)
-                        LastLoginHint(method: .email)
-
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("Email")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.secondary)
-
-                            HStack(spacing: 10) {
-                                Image(systemName: "envelope")
-                                    .foregroundColor(.secondary)
-                                TextField("you@example.com", text: $email)
-                                    .keyboardType(.emailAddress)
-                                    .textInputAutocapitalization(.never)
-                                    .autocorrectionDisabled()
-                            }
-                            .ssTextField()
-
-                            Text("Password")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.secondary)
-                                .padding(.top, 6)
-
-                            HStack(spacing: 10) {
-                                Image(systemName: "lock")
-                                    .foregroundColor(.secondary)
-                                SecureField("••••••••", text: $password)
-                                    .textContentType(.oneTimeCode)
-                            }
-                            .ssTextField()
-                        }
-
-                        if let errorMessage {
-                            Text(errorMessage)
-                                .font(.caption)
-                                .foregroundColor(.red)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-
-                        NavigationLink {
-                            ForgotPasswordView(prefilledEmail: email)
-                        } label: {
-                            HStack {
-                                Spacer()
-                                Text("Forgot password?")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundColor(SS.primary)
-                            }
-                        }
-
-                        Button(action: handleLogin) {
-                            Text(isSubmitting ? "Logging in..." : "Login")
-                        }
-                        .buttonStyle(SSPrimaryButtonStyle(isEnabled: !(email.isEmpty || password.isEmpty) && !isSubmitting))
-                        .disabled(email.isEmpty || password.isEmpty || isSubmitting)
-                    }
+        ScrollView {
+            VStack(alignment: .leading, spacing: DS.Spacing.lg) {
+                VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                    Text("Welcome Back").dsFont(.display).foregroundStyle(DS.Color.text)
+                    Text("Login to your account").dsFont(.body).foregroundStyle(DS.Color.text2)
+                    LastLoginHint(method: .email)
                 }
 
-                Spacer()
+                VStack(alignment: .leading, spacing: DS.Spacing.md) {
+                    DSTextField("Email", placeholder: "you@example.com", text: $email)
+                        .keyboardType(.emailAddress)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+
+                    DSTextField("Password", placeholder: "••••••••", text: $password, error: errorMessage, isSecure: true)
+                        .textContentType(.oneTimeCode)
+                }
+
+                NavigationLink {
+                    ForgotPasswordView(prefilledEmail: email)
+                } label: {
+                    Text("Forgot password?")
+                        .dsFont(.callout)
+                        .foregroundStyle(DS.Color.primaryText)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+
+                Button(action: handleLogin) {
+                    Text(isSubmitting ? "Logging in..." : "Login")
+                }
+                .buttonStyle(.ds(.primary))
+                .disabled(email.isEmpty || password.isEmpty || isSubmitting)
+            }
+            .padding(.horizontal, DS.Spacing.screenEdge)
+            .padding(.top, DS.Spacing.xs)
+            .padding(.bottom, DS.Spacing.lg)
+        }
+        .dsBackground()
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                // Schliessen-Button oben links
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(DS.Color.text2)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel("Close")
             }
         }
+        .navigationBarTitleDisplayMode(.inline)
         .twoFactorLoginSheet()
         // Login per 2FA-Code abgeschlossen → Login-Screen schliessen
         .onChange(of: userStore.currentUser?.id) { _, newValue in

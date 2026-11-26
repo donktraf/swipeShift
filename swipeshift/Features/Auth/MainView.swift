@@ -14,127 +14,102 @@ struct MainView: View {
 
 struct LandingView: View {
     @EnvironmentObject var userStore: UserStore
+    @Environment(\.colorScheme) private var colorScheme
 
     @State private var showLogin = false
     @State private var showRegister = false
     @State private var socialLoginError: String? = nil
 
     var body: some View {
-        ZStack {
-            SS.background().ignoresSafeArea()
+        ScrollView {
+            VStack(spacing: DS.Spacing.xl) {
+                Spacer(minLength: DS.Spacing.xl)
 
-            VStack {
-                Spacer()
+                // Marke + Value-Proposition
+                VStack(spacing: DS.Spacing.sm) {
+                    Image(systemName: "briefcase.fill")
+                        .font(.system(size: 30, weight: .semibold))
+                        .foregroundStyle(DS.Color.primaryText)
+                        .frame(width: 72, height: 72)
+                        .background(DS.Color.primarySoft, in: RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous))
+                        .accessibilityHidden(true)
 
-                SSCard {
-                    VStack(spacing: 18) {
+                    Text("SwipeShift")
+                        .dsFont(.display)
+                        .foregroundStyle(DS.Color.text)
 
-                        RoundedRectangle(cornerRadius: 22, style: .continuous)
-                            .fill(SS.primary.opacity(0.18))
-                            .frame(width: 86, height: 86)
-                            .overlay(
-                                Image(systemName: "briefcase")
-                                    .font(.system(size: 34, weight: .semibold))
-                                    .foregroundColor(SS.primary)
-                            )
-                            .padding(.top, 4)
+                    Text("Find short-term shifts that match you, or hire the right people fast.")
+                        .dsFont(.body)
+                        .foregroundStyle(DS.Color.text2)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, DS.Spacing.md)
+                }
+                .padding(.top, DS.Spacing.xl)
 
-                        Text("SwipeShift")
-                            .font(.system(size: 36, weight: .bold))
+                VStack(spacing: DS.Spacing.sm) {
+                    // Register per fullScreenCover statt NavigationLink
+                    Button("Create account") { showRegister = true }
+                        .buttonStyle(.ds(.primary))
 
-                        Text("Find jobs that match you")
-                            .font(.system(size: 16))
-                            .foregroundColor(.secondary)
+                    // Login per fullScreenCover statt NavigationLink
+                    Button("Log in") { showLogin = true }
+                        .buttonStyle(.ds(.secondary))
+                    LastLoginHint(method: .email)
 
-                        VStack(spacing: 12) {
+                    orDivider
 
-                            // Google
-                            Button {
-                                socialLoginError = nil
-                                Task {
-                                    do {
-                                        try await userStore.loginWithGoogle()
-                                    } catch {
-                                        socialLoginError = error.localizedDescription
-                                    }
-                                }
-                            } label: {
-                                SSOAuthPillButton(
-                                    title: "Continue with Google",
-                                    icon: Image("googleIcon"),
-                                    background: .black,
-                                    foreground: .white,
-                                    //border: Color.gray.opacity(0.20)
-                                    border: Color.clear
-                                )
+                    // Apple (Apple-Richtlinie: schwarzer bzw. weisser Standard-Button)
+                    SignInWithAppleButton(.continue) { request in
+                        userStore.prepareAppleRequest(request)
+                    } onCompletion: { result in
+                        Task { await userStore.handleAppleCompletion(result) }
+                    }
+                    .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
+                    .frame(height: 52)
+                    .clipShape(RoundedRectangle(cornerRadius: DS.Radius.button, style: .continuous))
+                    LastLoginHint(method: .apple)
+
+                    // Google
+                    Button {
+                        socialLoginError = nil
+                        Task {
+                            do {
+                                try await userStore.loginWithGoogle()
+                            } catch {
+                                socialLoginError = error.localizedDescription
                             }
-                            .buttonStyle(.plain)
-                            LastLoginHint(method: .google)
-
-                            // Apple
-                            SignInWithAppleButton(.continue) { request in
-                                userStore.prepareAppleRequest(request)
-                            } onCompletion: { result in
-                                Task { await userStore.handleAppleCompletion(result) }
-                            }
-                            .signInWithAppleButtonStyle(.black)
-                            .frame(height: 54)
-                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                            LastLoginHint(method: .apple)
-
-                            // Divider
-                            HStack(spacing: 12) {
-                                Rectangle()
-                                    .frame(height: 1)
-                                    .foregroundColor(.gray.opacity(0.20))
-                                Text("or")
-                                    .font(.footnote)
-                                    .foregroundColor(.secondary)
-                                Rectangle()
-                                    .frame(height: 1)
-                                    .foregroundColor(.gray.opacity(0.20))
-                            }
-                            .padding(.vertical, 2)
-
-                            // ✅ Login per fullScreenCover statt NavigationLink
-                            Button {
-                                showLogin = true
-                            } label: {
-                                Text("Log in")
-                            }
-                            .buttonStyle(SSPrimaryButtonStyle())
-                            LastLoginHint(method: .email)
-
-                            // ✅ Register per fullScreenCover statt NavigationLink
-                            Button {
-                                showRegister = true
-                            } label: {
-                                Text("Create account")
-                                    .font(.system(size: 16, weight: .semibold))
-                                    .foregroundColor(SS.primary)
-                            }
-                            .buttonStyle(.plain)
-
-                            if let socialLoginError {
-                                Text(socialLoginError)
-                                    .font(.caption)
-                                    .foregroundColor(.red)
-                                    .multilineTextAlignment(.center)
-                            }
-
-                            Text("By continuing, you agree to our Terms & Privacy Policy")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .multilineTextAlignment(.center)
-                                .padding(.top, 4)
+                        }
+                    } label: {
+                        HStack(spacing: DS.Spacing.xs) {
+                            Image("googleIcon")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 18, height: 18)
+                            Text("Continue with Google")
                         }
                     }
+                    .buttonStyle(.ds(.secondary))
+                    LastLoginHint(method: .google)
 
-                    Spacer()
+                    if let socialLoginError {
+                        Text(socialLoginError)
+                            .dsFont(.caption)
+                            .foregroundStyle(DS.Color.danger)
+                            .multilineTextAlignment(.center)
+                    }
+
+                    Text("By continuing, you agree to our Terms & Privacy Policy")
+                        .dsFont(.caption)
+                        .foregroundStyle(DS.Color.muted)
+                        .multilineTextAlignment(.center)
+                        .padding(.top, DS.Spacing.xs)
                 }
-                .padding(.vertical, 14)
             }
+            .padding(.horizontal, DS.Spacing.screenEdge)
+            .padding(.bottom, DS.Spacing.lg)
         }
+        .scrollBounceBehavior(.basedOnSize)
+        .dsBackground()
         #if DEBUG
         .onAppear {
             // SS_DEBUG_SCREEN=auth.login|auth.register → vorhandene fullScreenCover oeffnen
@@ -169,8 +144,16 @@ struct LandingView: View {
             Text(userStore.signedOutNotice ?? "")
         }
     }
-}
 
+    private var orDivider: some View {
+        HStack(spacing: DS.Spacing.sm) {
+            DSDivider()
+            Text("or").dsFont(.caption).foregroundStyle(DS.Color.muted)
+            DSDivider()
+        }
+        .padding(.vertical, DS.Spacing.xxs)
+    }
+}
 #Preview {
     LandingView()
         .environmentObject(UserStore())

@@ -33,14 +33,15 @@ struct OnboardingRootView: View {
                     }
 
                 case .complete:
-                    ProgressView() // sollte hier eigentlich nie auftauchen
+                    ProgressView().tint(DS.Color.primary) // sollte hier eigentlich nie auftauchen
                 }
 
                 } // <- nur wenn du den VerifyEmail Block aktivierst
 
             } else {
-                ProgressView()
+                ProgressView().tint(DS.Color.primary)
             }
         }
+        .dsBackground()
     }
 }

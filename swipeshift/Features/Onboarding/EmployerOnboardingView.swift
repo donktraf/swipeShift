@@ -43,7 +43,7 @@ struct EmployerOnboardingView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 18) {
+            VStack(alignment: .leading, spacing: DS.Spacing.xl) {
                 headerSection
                 contactSection
                 logoSection
@@ -52,9 +52,13 @@ struct EmployerOnboardingView: View {
                 descriptionAndTermsSection
                 errorSection
                 submitButtonSection
-                Spacer(minLength: 20)
             }
+            .padding(.horizontal, DS.Spacing.screenEdge)
+            .padding(.top, DS.Spacing.xs)
+            .padding(.bottom, DS.Spacing.xxl)
         }
+        .scrollDismissesKeyboard(.interactively)
+        .dsBackground()
         .onAppear { prefillFromUserIfNeeded() }
         .navigationBarBackButtonHidden(true)
         .toolbar { backToolbar }
@@ -69,111 +73,95 @@ struct EmployerOnboardingView: View {
     // MARK: - Sections
 
     private var headerSection: some View {
-        VStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            DSProgressSteps(steps: ["Role", "Profile"], current: 1)
             Text("Complete your employer profile")
-                .font(.title2).bold()
+                .dsFont(.display)
+                .foregroundStyle(DS.Color.text)
             Text("We need company info before you can use employer features.")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
+                .dsFont(.body)
+                .foregroundStyle(DS.Color.text2)
         }
-        .padding(.top, 16)
-        .padding(.horizontal, 24)
     }
 
     private var contactSection: some View {
-        VStack(spacing: 12) {
-            TextField("Contact first name", text: $firstName)
-                .padding()
-                .background(Color.gray.opacity(0.1))
-                .cornerRadius(12)
-
-            TextField("Contact last name", text: $lastName)
-                .padding()
-                .background(Color.gray.opacity(0.1))
-                .cornerRadius(12)
-
-            // ✅ Location mit Suggestions + lat/lng
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Location")
-                    .font(.headline)
-
-                Text("Start typing a city or ZIP. Pick a suggestion so we can save coordinates.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-
-                TextField("City / ZIP code", text: $location)
-                    .textInputAutocapitalization(.words)
-                    .autocorrectionDisabled()
-                    .textContentType(.addressCity)
-                    .padding()
-                    .background(Color.gray.opacity(0.1))
-                    .cornerRadius(12)
-                    .onChange(of: location) { _, newValue in
-                        // sobald user tippt -> coords invalid
-                        lat = nil
-                        lng = nil
-                        showLocationSuggestions = true
-
-                        locationSearchTask?.cancel()
-                        locationSearchTask = Task {
-                            try? await Task.sleep(nanoseconds: 350_000_000)
-                            if Task.isCancelled { return }
-                            await MainActor.run {
-                                locationGeocoder.updateQuery(newValue)
-                            }
-                        }
-                    }
-
-                if showLocationSuggestions && !locationGeocoder.suggestions.isEmpty {
-                    VStack(spacing: 0) {
-                        ForEach(locationGeocoder.suggestions) { s in
-                            Button {
-                                location = s.fullText
-                                lat = s.lat
-                                lng = s.lng
-                                showLocationSuggestions = false
-                                hideKeyboard()
-                            } label: {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(s.title)
-                                        .foregroundColor(.primary)
-                                    if !s.subtitle.isEmpty {
-                                        Text(s.subtitle)
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                    }
-                                }
-                                .padding(.vertical, 10)
-                                .padding(.horizontal, 12)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            .buttonStyle(.plain)
-
-                            Divider()
-                        }
-                    }
-                    .background(Color.gray.opacity(0.06))
-                    .cornerRadius(12)
+        VStack(alignment: .leading, spacing: DS.Spacing.xl) {
+            DSSection("Contact person", ruled: false) {
+                VStack(alignment: .leading, spacing: DS.Spacing.md) {
+                    DSTextField("Contact first name", text: $firstName)
+                        .textInputAutocapitalization(.words)
+                    DSTextField("Contact last name", text: $lastName)
+                        .textInputAutocapitalization(.words)
                 }
+            }
 
-                if let lat, let lng {
-                    Text("Saved coordinates: \(lat), \(lng)")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
+            // Location mit Suggestions + lat/lng
+            DSSection("Location", ruled: false) {
+                VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                    DSTextField("City / ZIP code", placeholder: "Start typing a city or ZIP", text: $location)
+                        .textInputAutocapitalization(.words)
+                        .autocorrectionDisabled()
+                        .textContentType(.addressCity)
+                        .onChange(of: location) { _, newValue in
+                            // sobald user tippt -> coords invalid
+                            lat = nil
+                            lng = nil
+                            showLocationSuggestions = true
+
+                            locationSearchTask?.cancel()
+                            locationSearchTask = Task {
+                                try? await Task.sleep(nanoseconds: 350_000_000)
+                                if Task.isCancelled { return }
+                                await MainActor.run {
+                                    locationGeocoder.updateQuery(newValue)
+                                }
+                            }
+                        }
+
+                    Text("Pick a suggestion so we can save coordinates.")
+                        .dsFont(.caption)
+                        .foregroundStyle(DS.Color.muted)
+
+                    if showLocationSuggestions && !locationGeocoder.suggestions.isEmpty {
+                        VStack(spacing: 0) {
+                            ForEach(locationGeocoder.suggestions) { s in
+                                Button {
+                                    location = s.fullText
+                                    lat = s.lat
+                                    lng = s.lng
+                                    showLocationSuggestions = false
+                                    hideKeyboard()
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(s.title).dsFont(.body).foregroundStyle(DS.Color.text)
+                                        if !s.subtitle.isEmpty {
+                                            Text(s.subtitle).dsFont(.caption).foregroundStyle(DS.Color.muted)
+                                        }
+                                    }
+                                    .padding(.vertical, DS.Spacing.xs)
+                                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .overlay(alignment: .top) { DSDivider() }
+                            }
+                        }
+                        .overlay(alignment: .bottom) { DSDivider() }
+                    }
+
+                    if let lat, let lng {
+                        Text("Saved coordinates: \(lat), \(lng)")
+                            .dsFont(.caption)
+                            .foregroundStyle(DS.Color.muted)
+                    }
                 }
             }
         }
-        .padding(.horizontal, 24)
     }
 
     private var logoSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Company logo (optional)")
-                .font(.headline)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            HStack(spacing: 12) {
+        DSSection("Company logo (optional)", ruled: false) {
+            HStack(spacing: DS.Spacing.sm) {
                 Group {
                     if let image = companyLogoUIImage {
                         Image(uiImage: image).resizable().scaledToFill()
@@ -183,35 +171,29 @@ struct EmployerOnboardingView: View {
                             case .success(let img):
                                 img.resizable().scaledToFill()
                             default:
-                                Image(systemName: "building.2.crop.circle.fill")
-                                    .resizable()
-                                    .scaledToFit()
-                                    .foregroundColor(.secondary)
-                                    .padding(10)
+                                logoPlaceholder
                             }
                         }
                     } else {
-                        Image(systemName: "building.2.crop.circle.fill")
-                            .resizable()
-                            .scaledToFit()
-                            .foregroundColor(.secondary)
-                            .padding(10)
+                        logoPlaceholder
                     }
                 }
                 .frame(width: 56, height: 56)
-                .background(Color.gray.opacity(0.08))
+                .background(DS.Color.surface2)
                 .clipShape(Circle())
+                .accessibilityHidden(true)
 
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text(companyLogoUIImage == nil ? "No logo selected" : "Logo selected")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
+                        .dsFont(.callout)
+                        .foregroundStyle(DS.Color.text2)
 
-                    Button { showCompanyLogoPicker = true } label: {
-                        Text(companyLogoUIImage == nil ? "Choose logo" : "Change logo")
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
+                    Button(companyLogoUIImage == nil ? "Choose logo" : "Change logo") {
+                        showCompanyLogoPicker = true
                     }
+                    .font(DS.Font.make(15, .semibold))
+                    .foregroundStyle(DS.Color.primaryText)
+                    .frame(minHeight: 44, alignment: .leading)
                 }
 
                 Spacer()
@@ -221,119 +203,109 @@ struct EmployerOnboardingView: View {
                         companyLogoUIImage = nil
                     } label: {
                         Image(systemName: "trash")
+                            .foregroundStyle(DS.Color.danger)
+                            .frame(width: 44, height: 44)
                     }
+                    .accessibilityLabel("Remove logo")
                 }
             }
-            .padding()
-            .frame(maxWidth: .infinity)
-            .background(Color.gray.opacity(0.1))
-            .cornerRadius(12)
             .sheet(isPresented: $showCompanyLogoPicker) {
                 ImagePicker(image: $companyLogoUIImage)
             }
         }
-        .padding(.horizontal, 24)
+    }
+
+    private var logoPlaceholder: some View {
+        Image(systemName: "building.2.fill")
+            .font(.system(size: 22, weight: .semibold))
+            .foregroundStyle(DS.Color.muted)
     }
 
     private var companySection: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Company").font(.headline)
+        DSSection("Company", ruled: false) {
+            VStack(alignment: .leading, spacing: DS.Spacing.md) {
+                DSTextField("Company name", text: $companyName)
+                    .textInputAutocapitalization(.words)
 
-            Text("Company name").font(.subheadline)
-            TextField("Company name", text: $companyName)
-                .padding()
-                .background(Color.gray.opacity(0.1))
-                .cornerRadius(12)
-
-            Text("Company size").font(.subheadline)
-            Picker("", selection: $companySize) {
-                ForEach(sizes, id: \.self) { Text($0).tag($0) }
-            }
-            .pickerStyle(.segmented)
-
-            Text("Industry").font(.subheadline)
-            Picker("", selection: $industry) {
-                ForEach(industries, id: \.self) { Text($0).tag($0) }
-            }
-            .pickerStyle(.menu)
-            .padding()
-            .background(Color.gray.opacity(0.1))
-            .cornerRadius(12)
-        }
-        .padding(.horizontal, 24)
-    }
-
-    private var websiteSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Website / Instagram (optional)").font(.headline)
-            TextField("https:// or @instagram", text: $websiteOrInstagram)
-                .padding()
-                .background(Color.gray.opacity(0.1))
-                .cornerRadius(12)
-        }
-        .padding(.horizontal, 24)
-    }
-
-    private var descriptionAndTermsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Description (optional)").font(.headline)
-
-            TextEditor(text: $companyDescription)
-                .frame(minHeight: 100)
-                .padding(8)
-                .background(Color.gray.opacity(0.1))
-                .cornerRadius(12)
-                .onChange(of: companyDescription) { _, newValue in
-                    if newValue.count > descLimit {
-                        companyDescription = String(newValue.prefix(descLimit))
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Company size")
+                        .font(DS.Font.make(13, .semibold, relativeTo: .footnote))
+                        .foregroundStyle(DS.Color.text2)
+                    HStack(spacing: DS.Spacing.xs) {
+                        ForEach(sizes, id: \.self) { size in
+                            DSChip(size, isSelected: companySize == size) { companySize = size }
+                        }
                     }
                 }
 
-            HStack {
-                Spacer()
-                Text("\(companyDescription.count)/\(descLimit)")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Industry")
+                        .font(DS.Font.make(13, .semibold, relativeTo: .footnote))
+                        .foregroundStyle(DS.Color.text2)
+                    HStack {
+                        Picker("Industry", selection: $industry) {
+                            ForEach(industries, id: \.self) { Text($0).tag($0) }
+                        }
+                        .pickerStyle(.menu)
+                        .tint(DS.Color.primaryText)
+                        Spacer()
+                    }
+                    .padding(.horizontal, DS.Spacing.xs)
+                    .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
+                    .background(DS.Color.surface, in: RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
+                            .strokeBorder(DS.Color.border, lineWidth: 1)
+                    )
+                }
             }
+        }
+    }
+
+    private var websiteSection: some View {
+        DSTextField("Website / Instagram (optional)", placeholder: "https:// or @instagram", text: $websiteOrInstagram)
+            .keyboardType(.URL)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+    }
+
+    private var descriptionAndTermsSection: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.md) {
+            DSTextEditor("Description (optional)", placeholder: "What does your company do?", text: $companyDescription, minLines: 4, maxLength: descLimit)
 
             Toggle(isOn: $acceptedTerms) {
                 Text("I accept the Terms & Conditions and Privacy Policy.")
-                    .font(.footnote)
+                    .dsFont(.callout)
+                    .foregroundStyle(DS.Color.text)
             }
-            .toggleStyle(SwitchToggleStyle(tint: .blue))
+            .tint(DS.Color.primary)
+            .frame(minHeight: 44)
         }
-        .padding(.horizontal, 24)
     }
 
+    @ViewBuilder
     private var errorSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
             if let localError {
                 Text(localError)
-                    .font(.caption)
-                    .foregroundColor(.red)
+                    .dsFont(.caption)
+                    .foregroundStyle(DS.Color.danger)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             if let err = userStore.errorMessage {
                 Text(err)
-                    .font(.caption)
-                    .foregroundColor(.red)
+                    .dsFont(.caption)
+                    .foregroundStyle(DS.Color.danger)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(.horizontal, 24)
     }
 
     private var submitButtonSection: some View {
         Button { submit() } label: {
             Text(isSubmitting ? "Saving..." : "Finish setup")
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(Color.blue)
-                .foregroundColor(.white)
-                .fontWeight(.semibold)
-                .cornerRadius(14)
         }
-        .padding(.horizontal, 24)
+        .buttonStyle(.ds(.primary))
         .disabled(isSubmitting)
     }
 
@@ -348,7 +320,11 @@ struct EmployerOnboardingView: View {
             } label: {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(DS.Color.primaryText)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
+            .accessibilityLabel("Back")
         }
     }
 
@@ -411,6 +387,7 @@ struct EmployerOnboardingView: View {
                 acceptedTerms: acceptedTerms
             )
             isSubmitting = false
+            if userStore.errorMessage == nil { DS.Haptics.success() }
         } catch {
             isSubmitting = false
             localError = error.localizedDescription

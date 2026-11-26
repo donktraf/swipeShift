@@ -25,99 +25,73 @@ struct ResetPasswordView: View {
     }
 
     var body: some View {
-        VStack(spacing: 16) {
-            Text("Set new password")
-                .font(.title2)
-                .fontWeight(.bold)
+        ScrollView {
+            VStack(alignment: .leading, spacing: DS.Spacing.md) {
+                Text("Set new password").dsFont(.title).foregroundStyle(DS.Color.text)
 
-            TextField("Email", text: $email)
-                .keyboardType(.emailAddress)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .padding()
-                .background(Color.gray.opacity(0.1))
-                .cornerRadius(12)
+                DSTextField("Email", placeholder: "you@example.com", text: $email)
+                    .keyboardType(.emailAddress)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
 
-            SecureField("New password", text: $newPassword)
-                .padding()
-                .background(Color.gray.opacity(0.1))
-                .cornerRadius(12)
+                DSTextField("New password", text: $newPassword, isSecure: true)
 
-            SecureField("Confirm new password", text: $confirmPassword)
-                .padding()
-                .background(Color.gray.opacity(0.1))
-                .cornerRadius(12)
+                DSTextField("Confirm new password", text: $confirmPassword, error: localError ?? userStore.errorMessage, isSecure: true)
 
-            if let localError {
-                Text(localError)
-                    .font(.caption)
-                    .foregroundColor(.red)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            if let backendError = userStore.errorMessage {
-                Text(backendError)
-                    .font(.caption)
-                    .foregroundColor(.red)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            if let successText {
-                Text(successText)
-                    .font(.footnote)
-                    .foregroundColor(.green)
-                    .multilineTextAlignment(.center)
-            }
-
-            Button {
-                localError = nil
-                successText = nil
-
-                guard newPassword.count >= 6 else {
-                    localError = "Password must be at least 6 characters."
-                    return
-                }
-                guard newPassword == confirmPassword else {
-                    localError = "Passwords do not match."
-                    return
+                if let successText {
+                    Text(successText)
+                        .dsFont(.callout)
+                        .foregroundStyle(DS.Color.success)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .multilineTextAlignment(.center)
                 }
 
-                Task {
-                    isSubmitting = true
-                    await userStore.resetPasswordRemote(email: email, token: token, newPassword: newPassword)
-                    isSubmitting = false
+                Button {
+                    localError = nil
+                    successText = nil
 
-                    if userStore.errorMessage == nil {
-                        successText = "Password updated. You can now log in."
+                    guard newPassword.count >= 6 else {
+                        localError = "Password must be at least 6 characters."
+                        return
                     }
-                    
-                    // ✅ Login danach öffnen + Email vorfüllen
-                    userStore.loginPrefillEmail = email
-                    userStore.showLogin = true
+                    guard newPassword == confirmPassword else {
+                        localError = "Passwords do not match."
+                        return
+                    }
 
-                    // ✅ Reset-Sheet schließen (triggert auch dein Binding-set -> resetToken/resetEmail werden nil)
-                    dismiss()
+                    Task {
+                        isSubmitting = true
+                        await userStore.resetPasswordRemote(email: email, token: token, newPassword: newPassword)
+                        isSubmitting = false
+
+                        if userStore.errorMessage == nil {
+                            successText = "Password updated. You can now log in."
+                        }
+                        
+                        // ✅ Login danach öffnen + Email vorfüllen
+                        userStore.loginPrefillEmail = email
+                        userStore.showLogin = true
+
+                        // ✅ Reset-Sheet schließen (triggert auch dein Binding-set -> resetToken/resetEmail werden nil)
+                        dismiss()
+                    }
+                } label: {
+                    Text(isSubmitting ? "Saving..." : "Update password")
                 }
-            } label: {
-                Text(isSubmitting ? "Saving..." : "Update password")
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(canSubmit ? Color.blue : Color.gray.opacity(0.5))
-                    .foregroundColor(.white)
-                    .fontWeight(.semibold)
-                    .cornerRadius(14)
+                .buttonStyle(.ds(.primary))
+                .disabled(!canSubmit || isSubmitting)
+                .padding(.top, DS.Spacing.xs)
             }
-            .disabled(!canSubmit || isSubmitting)
-
-            Spacer()
+            .padding(.horizontal, DS.Spacing.screenEdge)
+            .padding(.vertical, DS.Spacing.lg)
         }
-        .padding(24)
+        .dsBackground()
         .navigationTitle("Reset Password")
         .navigationBarTitleDisplayMode(.inline)
     }
 
     private var canSubmit: Bool {
-        // ✅ token muss intern vorhanden sein, aber user muss ihn nicht sehen
+        // token muss intern vorhanden sein, aber user muss ihn nicht sehen
         !email.isEmpty && !token.isEmpty && !newPassword.isEmpty && !confirmPassword.isEmpty
     }
 }
