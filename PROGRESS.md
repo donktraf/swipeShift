@@ -924,3 +924,10 @@ Gefunden beim Profile-Screen-Abgleich: Legal-Schalter (Worker + Arbeitgeber) und
 - Schicht-Erinnerungen 24 h und < 2 h vor jeder gebuchten Schicht (`ShiftReminder`), Restzeit im Text, Retry bei Versandfehler
 - Migrationen `20261125132002_notifications_seen_at`, `20261125132546_apply_accepted_paid_at`, `20261125135003_deleted_account_tombstone`, `20261125135445_deleted_account_hardening`, `20261125142132_deleted_account_unbanned_at`, `20261125142637_shift_cancellation`, `20261125160000_shift_reminder` (lokal angewendet)
 - Offen: Abschnitt 7 (Zahlung) im Simulator testen; Konto löschen trotz Sperre (Datenschutz); Datenschutzerklärung (aufbewahrter E-Mail-Hash); `EMAIL_BAN_PEPPER` auf dem Server setzen
+
+### Redesign der App (2026-11-25/26)
+- Per Grilling festgelegt: klar/freundlich modern, interaktiver (Mikro-Animationen, Haptik, Ladeplatzhalter, Pull-to-refresh), Schrift Plus Jakarta Sans (OFL, mit Dynamic Type), Markenblau an einer Stelle austauschbar, voller Dunkelmodus, Aufbau wie Wireframes; Formulare/Einstellungen flach, Antippbares als Karte, Kennzahlen als Kacheln; Vorschau als Design-Canvas freigegeben
+- Etappen: 1 Design-System (swipeshift/UI/Design, DS.*), 2 Worker-Kern, 3 Arbeitgeber, 4 Profile/Einstellungen, 5 Chat/Benachrichtigungen, 6 Anmeldung/Onboarding, 7 Admin + altes SS-Theme entfernt
+- Tab-Leiste als Milchglas mit zarter Markierung (Nutzerwunsch); Review-Punkte #5, #10, #12, #17, #18 gelöst
+- Prüfwerkzeug: scripts/ui-snapshot.sh (eigener Simulator, Hell/Dunkel-Screenshots, nur DEBUG-Hooks); Emojis erscheinen dort als "?" (Simulator-Einschränkung)
+- Builds mit eigenem -derivedDataPath, damit das offene Xcode nicht gestört wird
