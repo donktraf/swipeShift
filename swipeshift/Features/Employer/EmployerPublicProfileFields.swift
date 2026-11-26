@@ -69,16 +69,14 @@ struct EmployerPublicProfileSection: View {
     @Binding var form: EmployerPublicProfileForm
 
     var body: some View {
-        VStack(spacing: 20) {
-            card(title: "Public Profile") {
-                row("Tagline") {
-                    TextField("Short slogan (max. 80)", text: $form.tagline)
+        VStack(alignment: .leading, spacing: DS.Spacing.lg) {
+            DSSection("Public Profile", ruled: false) {
+                fields {
+                    DSTextField("Tagline", placeholder: "Short slogan (max. 80)", text: $form.tagline)
                         .onChange(of: form.tagline) { _, new in
                             if new.count > 80 { form.tagline = String(new.prefix(80)) }
                         }
-                }
-                row("Founded") {
-                    TextField("Year, e.g. 2015", text: $form.yearFounded)
+                    DSTextField("Founded", placeholder: "Year, e.g. 2015", text: $form.yearFounded)
                         .keyboardType(.numberPad)
                         .onChange(of: form.yearFounded) { _, new in
                             let digits = new.filter(\.isNumber)
@@ -88,101 +86,67 @@ struct EmployerPublicProfileSection: View {
                 }
             }
 
-            card(title: "Social Links") {
-                row("Instagram") { socialField("@handle or link", text: $form.instagram) }
-                row("LinkedIn")  { socialField("Link or @handle", text: $form.linkedin) }
-                row("Facebook")  { socialField("Link or @handle", text: $form.facebook) }
-                row("TikTok")    { socialField("@handle or link", text: $form.tiktok) }
+            DSSection("Social Links", ruled: false) {
+                fields {
+                    DSTextField("Instagram", placeholder: "@handle or link", text: $form.instagram)
+                        .modifier(SocialFieldStyle())
+                    DSTextField("LinkedIn", placeholder: "Link or @handle", text: $form.linkedin)
+                        .modifier(SocialFieldStyle())
+                    DSTextField("Facebook", placeholder: "Link or @handle", text: $form.facebook)
+                        .modifier(SocialFieldStyle())
+                    DSTextField("TikTok", placeholder: "@handle or link", text: $form.tiktok)
+                        .modifier(SocialFieldStyle())
+                }
             }
 
-            card(title: "Address") {
-                AddressSearchField(
-                    street: $form.streetAddress,
-                    lat: $form.addressLat,
-                    lng: $form.addressLng,
-                    onSuggestionZip: { zip in if form.zipCode.isEmpty { form.zipCode = zip } }
-                )
-                Text("Your address is shown on your public company profile.")
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                row("ZIP Code") {
-                    TextField("12345 or 12345-6789", text: $form.zipCode)
+            DSSection("Address", ruled: false) {
+                fields {
+                    AddressSearchField(
+                        street: $form.streetAddress,
+                        lat: $form.addressLat,
+                        lng: $form.addressLng,
+                        onSuggestionZip: { zip in if form.zipCode.isEmpty { form.zipCode = zip } }
+                    )
+                    Text("Your address is shown on your public company profile.")
+                        .dsFont(.caption)
+                        .foregroundStyle(DS.Color.muted)
+                    DSTextField("ZIP Code", placeholder: "12345 or 12345-6789", text: $form.zipCode)
                         .keyboardType(.numbersAndPunctuation)
-                }
-                if form.addressLat != nil {
-                    Label("Location pinned on map", systemImage: "mappin.and.ellipse")
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
+                    if form.addressLat != nil {
+                        Label("Location pinned on map", systemImage: "mappin.and.ellipse")
+                            .dsFont(.caption)
+                            .foregroundStyle(DS.Color.muted)
+                    }
                 }
             }
 
-            card(title: "Public Contact Person") {
-                row("Name") { TextField("Jane Doe", text: $form.contactName) }
-                row("Role") { TextField("Hiring Manager", text: $form.contactRole) }
+            DSSection("Public Contact Person", ruled: false) {
+                fields {
+                    DSTextField("Name", placeholder: "Jane Doe", text: $form.contactName)
+                    DSTextField("Role", placeholder: "Hiring Manager", text: $form.contactRole)
+                }
             }
 
-            card(title: "Hiring") {
-                toggleRow("Posts jobs in multiple states", isOn: $form.postsInMultipleStates)
-                toggleRow("Remote-friendly roles", isOn: $form.remoteFriendly)
+            DSSection("Hiring") {
+                DSToggleRow("Posts jobs in multiple states", showsDivider: false, isOn: $form.postsInMultipleStates)
+                DSToggleRow("Remote-friendly roles", isOn: $form.remoteFriendly)
             }
         }
+        .padding(.horizontal, DS.Spacing.screenEdge)
     }
 
-    // MARK: - Helpers
+    private func fields<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) { content() }
+            .padding(.top, DS.Spacing.xxs)
+    }
+}
 
-    private func socialField(_ placeholder: String, text: Binding<String>) -> some View {
-        TextField(placeholder, text: text)
+private struct SocialFieldStyle: ViewModifier {
+    func body(content: Content) -> some View {
+        content
             .keyboardType(.URL)
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
-    }
-
-    private func card<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(title)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(.secondary)
-                .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 4)
-            content()
-        }
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .padding(.horizontal, 16)
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
-    }
-
-    private func row<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text(label)
-                    .font(.system(size: 14)).foregroundColor(.secondary)
-                    .frame(width: 100, alignment: .leading)
-                    .padding(.leading, 14)
-                content()
-                    .font(.system(size: 14))
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    .multilineTextAlignment(.trailing)
-                    .padding(.trailing, 14)
-            }
-            .padding(.vertical, 12)
-            Divider().padding(.leading, 14)
-        }
-    }
-
-    private func toggleRow(_ label: String, isOn: Binding<Bool>) -> some View {
-        VStack(spacing: 0) {
-            Toggle(label, isOn: isOn)
-                .font(.system(size: 14))
-                .tint(SS.primary)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-            Divider().padding(.leading, 14)
-        }
     }
 }
 
@@ -201,47 +165,33 @@ private struct AddressSearchField: View {
     @State private var selectedHint: String? = nil
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(alignment: .top) {
-                Text("Street")
-                    .font(.system(size: 14)).foregroundColor(.secondary)
-                    .frame(width: 100, alignment: .leading)
-                    .padding(.leading, 14)
-                    .padding(.top, 2)
-                VStack(alignment: .leading, spacing: 0) {
-                    TextField("Search or type address", text: userEditedStreet)
-                        .font(.system(size: 14))
-                        .textContentType(.fullStreetAddress)
-                    if let hint = selectedHint, !showSuggestions {
-                        Text(hint)
-                            .font(.system(size: 12))
-                            .foregroundColor(.secondary)
-                            .padding(.top, 2)
-                    }
-                    if showSuggestions && !geocoder.suggestions.isEmpty {
-                        VStack(spacing: 0) {
-                            ForEach(geocoder.suggestions) { s in
-                                Button { select(s) } label: {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(s.title).font(.system(size: 14)).foregroundColor(.primary)
-                                        if !s.subtitle.isEmpty {
-                                            Text(s.subtitle).font(.system(size: 12)).foregroundColor(.secondary)
-                                        }
-                                    }
-                                    .padding(.vertical, 8)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+            DSTextField("Street", placeholder: "Search or type address", text: userEditedStreet)
+                .textContentType(.fullStreetAddress)
+            if let hint = selectedHint, !showSuggestions {
+                Text(hint)
+                    .dsFont(.caption)
+                    .foregroundStyle(DS.Color.muted)
+            }
+            if showSuggestions && !geocoder.suggestions.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(geocoder.suggestions) { s in
+                        Button { select(s) } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(s.title).dsFont(.body).foregroundStyle(DS.Color.text)
+                                if !s.subtitle.isEmpty {
+                                    Text(s.subtitle).dsFont(.caption).foregroundStyle(DS.Color.muted)
                                 }
-                                .buttonStyle(.plain)
-                                Divider()
                             }
+                            .padding(.vertical, DS.Spacing.xs)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            .contentShape(Rectangle())
                         }
-                        .padding(.top, 4)
+                        .buttonStyle(.plain)
+                        DSDivider()
                     }
                 }
-                .padding(.trailing, 14)
             }
-            .padding(.vertical, 12)
-            Divider().padding(.leading, 14)
         }
     }
 

@@ -86,105 +86,84 @@ struct AssignWorkersView: View {
     }
 
     var body: some View {
-        SubScreenShell(title: "Assign Workers") {
-            VStack(spacing: 0) {
+        SubScreenShell(title: "Assign Workers", padded: true) {
+            VStack(spacing: DS.Spacing.md) {
                 // Filter chips
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
+                    HStack(spacing: DS.Spacing.xs) {
                         ForEach(StaffingFilter.allCases, id: \.self) { filter in
-                            filterChip(filter)
+                            DSChip(filter.rawValue, isSelected: selectedFilter == filter) {
+                                selectedFilter = filter
+                            }
                         }
                     }
-                    .padding(.horizontal, 16)
                 }
-                .padding(.bottom, 12)
 
-                if isLoading {
-                    ProgressView()
-                        .padding(.top, 60)
+                if isLoading && jobs.isEmpty {
+                    skeleton
                 } else if let err = errorMessage {
                     errorView(err)
                 } else if filteredJobs.isEmpty {
                     emptyView
                 } else {
-                    ScrollView(showsIndicators: false) {
-                        VStack(spacing: 12) {
-                            ForEach(filteredJobs) { job in
-                                JobAssignCard(
-                                    job: job,
-                                    isExpanded: expandedJobIds.contains(job.id),
-                                    onToggleJob: { toggleJob(job.id) },
-                                    onUnassign: { applyId in unassign(jobId: job.id, applyId: applyId) },
-                                    onAssign:   { worker   in assign(jobId: job.id, worker: worker) }
-                                )
-                            }
+                    VStack(spacing: DS.Spacing.sm) {
+                        ForEach(filteredJobs) { job in
+                            JobAssignCard(
+                                job: job,
+                                isExpanded: expandedJobIds.contains(job.id),
+                                onToggleJob: { toggleJob(job.id) },
+                                onUnassign: { applyId in unassign(jobId: job.id, applyId: applyId) },
+                                onAssign:   { worker   in assign(jobId: job.id, worker: worker) }
+                            )
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 24)
                     }
                 }
             }
         }
         .task { await load() }
+        .refreshable { await load() }
     }
 
-    // MARK: - Filter Chip
-
-    private func filterChip(_ filter: StaffingFilter) -> some View {
-        Button { withAnimation(.easeInOut(duration: 0.15)) { selectedFilter = filter } } label: {
-            Text(filter.rawValue)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(selectedFilter == filter ? .white : .secondary)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(selectedFilter == filter ? SS.primary : Color(uiColor: .systemBackground))
-                .clipShape(Capsule())
-                .shadow(color: .black.opacity(0.05), radius: 3, x: 0, y: 1)
+    private var skeleton: some View {
+        VStack(spacing: DS.Spacing.sm) {
+            ForEach(0..<3, id: \.self) { _ in
+                DSSkeletonBlock(height: 76, radius: DS.Radius.card)
+            }
         }
-        .buttonStyle(.plain)
+        .accessibilityLabel("Loading jobs")
     }
 
     // MARK: - Empty / Error
 
     private var emptyView: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "person.2.slash")
-                .font(.system(size: 44))
-                .foregroundColor(.white.opacity(0.3))
-            Text("No Jobs")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(.white.opacity(0.6))
-            Text("All your jobs are fully staffed.")
-                .font(.system(size: 13))
-                .foregroundColor(.white.opacity(0.4))
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 60)
+        DSEmptyState(
+            systemIcon: "person.2.slash",
+            title: "No Jobs",
+            message: "All your jobs are fully staffed."
+        )
+        .padding(.top, DS.Spacing.xl)
     }
 
     private func errorView(_ msg: String) -> some View {
-        VStack(spacing: 12) {
+        VStack(spacing: DS.Spacing.sm) {
             Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 36))
-                .foregroundColor(.orange.opacity(0.7))
+                .font(.system(size: 32))
+                .foregroundStyle(DS.Color.warning)
             Text(msg)
-                .font(.system(size: 14))
-                .foregroundColor(.white.opacity(0.6))
+                .dsFont(.callout)
+                .foregroundStyle(DS.Color.text2)
                 .multilineTextAlignment(.center)
             Button("Try Again") { Task { await load() } }
-                .buttonStyle(SSPrimaryButtonStyle())
-                .padding(.horizontal, 60)
+                .buttonStyle(.ds(.soft, size: .medium, fullWidth: false))
         }
-        .padding(.top, 40)
-        .padding(.horizontal, 24)
+        .padding(.top, DS.Spacing.xl)
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Helpers
 
     private func toggleJob(_ id: String) {
-        withAnimation(.easeInOut(duration: 0.2)) {
+        withAnimation(DS.Motion.standard.animation) {
             if expandedJobIds.contains(id) { expandedJobIds.remove(id) }
             else { expandedJobIds.insert(id) }
         }
@@ -238,182 +217,156 @@ private struct JobAssignCard: View {
     @State private var showAddWorker = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Job Header
-            Button(action: onToggleJob) {
-                HStack(spacing: 12) {
-                    Text(job.logoEmoji)
-                        .font(.system(size: 22))
-                        .frame(width: 44, height: 44)
-                        .background(Color.gray.opacity(0.07))
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
+        DSCard {
+            VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                // Job Header
+                Button {
+                    DS.Haptics.selection()
+                    onToggleJob()
+                } label: {
+                    HStack(spacing: DS.Spacing.sm) {
+                        DSAvatar(text: job.logoEmoji, size: 44)
 
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(job.title)
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundColor(.primary)
-                        Text(job.location)
-                            .font(.system(size: 12))
-                            .foregroundColor(.secondary)
-                    }
-
-                    Spacer()
-
-                    VStack(alignment: .trailing, spacing: 2) {
-                        HStack(spacing: 4) {
-                            Circle()
-                                .fill(job.openCount > 0 ? Color.orange : Color.green)
-                                .frame(width: 7, height: 7)
-                            Text(job.openCount > 0 ? "\(job.openCount) open" : "Staffed")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(job.openCount > 0 ? .orange : .green)
+                        VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
+                            Text(job.title)
+                                .dsFont(.headline)
+                                .foregroundStyle(DS.Color.text)
+                            Text(job.location)
+                                .dsFont(.caption)
+                                .foregroundStyle(DS.Color.muted)
                         }
-                        Text("\(job.assignedWorkers.count)/\(job.openSpots) workers")
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary)
-                    }
 
-                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.secondary)
-                }
-                .padding(14)
-            }
-            .buttonStyle(.plain)
+                        Spacer(minLength: DS.Spacing.xs)
 
-            // Expandiert
-            if isExpanded {
-                Divider().padding(.horizontal, 14)
-
-                VStack(spacing: 0) {
-                    // Schichten (read-only)
-                    if !job.shifts.isEmpty {
-                        VStack(alignment: .leading, spacing: 0) {
-                            Text("Shifts")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(.secondary)
-                                .padding(.horizontal, 14)
-                                .padding(.top, 10)
-                                .padding(.bottom, 4)
-
-                            ForEach(Array(job.shifts.enumerated()), id: \.offset) { _, s in
-                                HStack {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(s.date)
-                                            .font(.system(size: 13, weight: .semibold))
-                                            .foregroundColor(.primary)
-                                        Text("\(s.timeRange) · \(s.duration)")
-                                            .font(.system(size: 12))
-                                            .foregroundColor(.secondary)
-                                    }
-                                    Spacer()
-                                    Text(s.totalPay)
-                                        .font(.system(size: 12, weight: .semibold))
-                                        .foregroundColor(SS.primary)
-                                }
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 8)
-                                Divider().padding(.leading, 14)
-                            }
+                        VStack(alignment: .trailing, spacing: DS.Spacing.xxs) {
+                            DSBadge(job.openCount > 0 ? "\(job.openCount) open" : "Staffed",
+                                    .tone(job.openCount > 0 ? .warning : .success))
+                            Text("\(job.assignedWorkers.count)/\(job.openSpots) workers")
+                                .dsFont(.caption)
+                                .foregroundStyle(DS.Color.muted)
                         }
-                    }
 
-                    // Kosten (Lohn geht komplett an den Worker, Gebuehr kommt obendrauf)
-                    if let perWorker = job.costPerWorker, let wage = job.costPerWorkerWage, let fee = job.costPerWorkerFee {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("Cost per worker: \(Money.format(perWorker, fractionDigits: 2))")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(.primary)
-                            Text("\(Money.format(wage, fractionDigits: 2)) wage + \(Money.format(fee, fractionDigits: 2)) platform fee (\(PlatformFees.percentLabel(job.feePercent ?? PlatformFees.defaultPlatformPercent)))")
-                                .font(.system(size: 11))
-                                .foregroundColor(.secondary)
-                            if let assigned = job.assignedCost, !job.assignedWorkers.isEmpty {
-                                Text("Assigned (\(job.assignedWorkers.count)): \(Money.format(assigned, fractionDigits: 2)) incl. fee")
-                                    .font(.system(size: 11))
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-                        Divider().padding(.leading, 14)
-                    }
-
-                    // Zugewiesene Mitarbeiter
-                    Text("Assigned Workers")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 14)
-                        .padding(.top, 10)
-                        .padding(.bottom, 4)
-
-                    if job.assignedWorkers.isEmpty {
-                        Text("No workers assigned yet.")
-                            .font(.system(size: 12))
-                            .foregroundColor(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 10)
-                    } else {
-                        ForEach(job.assignedWorkers) { worker in
-                            workerRow(worker)
-                        }
-                    }
-
-                    Button { showAddWorker = true } label: {
-                        Label("Add Worker", systemImage: "plus")
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
                             .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(SS.primary)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 10)
-                            .background(SS.primary.opacity(0.07))
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                            .padding(.horizontal, 14)
-                            .padding(.bottom, 12)
+                            .foregroundStyle(DS.Color.muted)
+                            .accessibilityHidden(true)
                     }
-                    .buttonStyle(.plain)
-                    .sheet(isPresented: $showAddWorker) {
-                        AddWorkerSheet(jobId: job.id, jobTitle: job.title) { newWorker in
-                            onAssign?(newWorker)
-                        }
-                    }
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
                 }
-                .background(Color.gray.opacity(0.03))
+                .buttonStyle(.dsPressable)
+                .accessibilityHint(isExpanded ? "Collapses the job" : "Expands the job")
+
+                // Expandiert
+                if isExpanded {
+                    DSDivider()
+                    expandedContent
+                }
             }
         }
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: .black.opacity(0.05), radius: 5, x: 0, y: 2)
     }
 
-    // jobId wird im Sheet benötigt — über Binding weitergeben
-    private func workerRow(_ worker: AssignedWorkerDTO) -> some View {
-        HStack(spacing: 10) {
-            ZStack {
-                Circle()
-                    .fill(Color.gray.opacity(0.12))
-                    .frame(width: 34, height: 34)
-                Text(worker.photoEmoji)
-                    .font(.system(size: 16))
-            }
-            .padding(.leading, 14)
+    private var expandedContent: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.md) {
+            // Schichten (read-only)
+            if !job.shifts.isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("SHIFTS")
+                        .dsFont(.sectionLabel)
+                        .foregroundStyle(DS.Color.muted)
+                        .padding(.bottom, DS.Spacing.xxs)
 
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 6) {
+                    ForEach(Array(job.shifts.enumerated()), id: \.offset) { index, s in
+                        if index > 0 { DSDivider() }
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(s.date)
+                                    .font(DS.Font.make(14, .semibold, relativeTo: .callout))
+                                    .foregroundStyle(DS.Color.text)
+                                Text("\(s.timeRange) · \(s.duration)")
+                                    .dsFont(.caption)
+                                    .foregroundStyle(DS.Color.text2)
+                            }
+                            Spacer()
+                            Text(s.totalPay)
+                                .font(DS.Font.make(13, .semibold, relativeTo: .caption))
+                                .foregroundStyle(DS.Color.primaryText)
+                        }
+                        .padding(.vertical, DS.Spacing.xs)
+                    }
+                }
+            }
+
+            // Kosten (Lohn geht komplett an den Worker, Gebuehr kommt obendrauf)
+            if let perWorker = job.costPerWorker, let wage = job.costPerWorkerWage, let fee = job.costPerWorkerFee {
+                VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
+                    Text("Cost per worker: \(Money.format(perWorker, fractionDigits: 2))")
+                        .font(DS.Font.make(13, .semibold, relativeTo: .caption))
+                        .foregroundStyle(DS.Color.text)
+                    Text("\(Money.format(wage, fractionDigits: 2)) wage + \(Money.format(fee, fractionDigits: 2)) platform fee (\(PlatformFees.percentLabel(job.feePercent ?? PlatformFees.defaultPlatformPercent)))")
+                        .dsFont(.caption)
+                        .foregroundStyle(DS.Color.text2)
+                    if let assigned = job.assignedCost, !job.assignedWorkers.isEmpty {
+                        Text("Assigned (\(job.assignedWorkers.count)): \(Money.format(assigned, fractionDigits: 2)) incl. fee")
+                            .dsFont(.caption)
+                            .foregroundStyle(DS.Color.text2)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(DS.Spacing.sm)
+                .background(DS.Color.surface2, in: RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
+            }
+
+            // Zugewiesene Mitarbeiter
+            VStack(alignment: .leading, spacing: 0) {
+                Text("ASSIGNED WORKERS")
+                    .dsFont(.sectionLabel)
+                    .foregroundStyle(DS.Color.muted)
+                    .padding(.bottom, DS.Spacing.xxs)
+
+                if job.assignedWorkers.isEmpty {
+                    Text("No workers assigned yet.")
+                        .dsFont(.callout)
+                        .foregroundStyle(DS.Color.text2)
+                        .padding(.vertical, DS.Spacing.xs)
+                } else {
+                    ForEach(job.assignedWorkers) { worker in
+                        workerRow(worker)
+                    }
+                }
+            }
+
+            Button { showAddWorker = true } label: {
+                Label("Add Worker", systemImage: "plus")
+            }
+            .buttonStyle(.ds(.soft, size: .medium))
+            .sheet(isPresented: $showAddWorker) {
+                AddWorkerSheet(jobId: job.id, jobTitle: job.title) { newWorker in
+                    onAssign?(newWorker)
+                }
+            }
+        }
+    }
+
+    private func workerRow(_ worker: AssignedWorkerDTO) -> some View {
+        HStack(spacing: DS.Spacing.sm) {
+            DSAvatar(text: worker.photoEmoji, size: 36, shape: .circle, tone: .neutral)
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: DS.Spacing.xs) {
                     Text(worker.name)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.primary)
+                        .font(DS.Font.make(14, .semibold, relativeTo: .callout))
+                        .foregroundStyle(DS.Color.text)
                     if worker.autoAccepted == true { InstantMatchPill() }
                 }
                 if worker.rating > 0 {
                     HStack(spacing: 2) {
                         Image(systemName: "star.fill")
                             .font(.system(size: 10))
-                            .foregroundColor(.yellow)
+                            .foregroundStyle(DS.Color.warning)
                         Text(String(format: "%.1f", worker.rating))
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary)
+                            .dsFont(.caption)
+                            .foregroundStyle(DS.Color.text2)
                     }
                 }
             }
@@ -421,16 +374,19 @@ private struct JobAssignCard: View {
             Spacer()
 
             Button {
+                DS.Haptics.warning()
                 onUnassign(worker.applyId)
             } label: {
                 Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 18))
-                    .foregroundColor(.red.opacity(0.7))
+                    .font(.system(size: 20))
+                    .foregroundStyle(DS.Color.danger)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .padding(.trailing, 14)
+            .buttonStyle(.dsPressable)
+            .accessibilityLabel("Remove \(worker.name)")
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, DS.Spacing.xxs)
     }
 }
 
@@ -450,83 +406,33 @@ private struct AddWorkerSheet: View {
         NavigationStack {
             Group {
                 if isLoading {
-                    ProgressView()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if applicants.isEmpty {
-                    VStack(spacing: 14) {
-                        Image(systemName: "person.crop.circle.badge.questionmark")
-                            .font(.system(size: 44))
-                            .foregroundColor(.secondary.opacity(0.4))
-                        Text("No pending applicants")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(.secondary)
-                        Text("All applicants have already been accepted or declined.")
-                            .font(.system(size: 13))
-                            .foregroundColor(.secondary.opacity(0.7))
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 40)
+                    VStack(spacing: DS.Spacing.sm) {
+                        ForEach(0..<3, id: \.self) { _ in
+                            DSSkeletonBlock(height: 64, radius: DS.Radius.card)
+                        }
                     }
+                    .padding(DS.Spacing.screenEdge)
+                    .frame(maxHeight: .infinity, alignment: .top)
+                } else if applicants.isEmpty {
+                    DSEmptyState(
+                        systemIcon: "person.crop.circle.badge.questionmark",
+                        title: "No pending applicants",
+                        message: "All applicants have already been accepted or declined."
+                    )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    List(applicants) { applicant in
-                        HStack(spacing: 12) {
-                            // Avatar
-                            ZStack {
-                                Circle()
-                                    .fill(SS.primary.opacity(0.12))
-                                    .frame(width: 44, height: 44)
-                                Text(String(applicant.workerName.prefix(1)))
-                                    .font(.system(size: 18, weight: .bold))
-                                    .foregroundColor(SS.primary)
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            ForEach(Array(applicants.enumerated()), id: \.element.id) { index, applicant in
+                                if index > 0 { DSDivider() }
+                                applicantRow(applicant)
                             }
-
-                            // Info
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(applicant.workerName)
-                                    .font(.system(size: 15, weight: .semibold))
-                                if applicant.rating > 0 {
-                                    HStack(spacing: 3) {
-                                        Image(systemName: "star.fill")
-                                            .font(.system(size: 11))
-                                            .foregroundColor(.yellow)
-                                        Text(String(format: "%.1f", applicant.rating))
-                                            .font(.system(size: 12))
-                                            .foregroundColor(.secondary)
-                                    }
-                                }
-                                if let loc = applicant.location {
-                                    Label(loc, systemImage: "mappin")
-                                        .font(.system(size: 11))
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-
-                            Spacer()
-
-                            // Assign Button
-                            Button {
-                                Task { await assign(applicant) }
-                            } label: {
-                                if assigningId == applicant.applyId {
-                                    ProgressView().scaleEffect(0.8)
-                                } else {
-                                    Text("Assign")
-                                        .font(.system(size: 13, weight: .semibold))
-                                        .foregroundColor(.white)
-                                        .padding(.horizontal, 14)
-                                        .padding(.vertical, 7)
-                                        .background(SS.primary)
-                                        .clipShape(Capsule())
-                                }
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(assigningId != nil)
                         }
-                        .padding(.vertical, 4)
+                        .padding(.horizontal, DS.Spacing.screenEdge)
                     }
-                    .listStyle(.plain)
                 }
             }
+            .dsBackground()
             .navigationTitle("Add Worker to \(jobTitle)")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -536,6 +442,48 @@ private struct AddWorkerSheet: View {
             }
         }
         .task { await loadApplicants() }
+    }
+
+    private func applicantRow(_ applicant: JobApplicantDTO) -> some View {
+        HStack(spacing: DS.Spacing.sm) {
+            DSAvatar(text: DSAvatar.initials(from: applicant.workerName), size: 44, shape: .circle)
+
+            VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
+                Text(applicant.workerName)
+                    .dsFont(.headline)
+                    .foregroundStyle(DS.Color.text)
+                if applicant.rating > 0 {
+                    HStack(spacing: 3) {
+                        Image(systemName: "star.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(DS.Color.warning)
+                        Text(String(format: "%.1f", applicant.rating))
+                            .dsFont(.caption)
+                            .foregroundStyle(DS.Color.text2)
+                    }
+                }
+                if let loc = applicant.location {
+                    Label(loc, systemImage: "mappin")
+                        .dsFont(.caption)
+                        .foregroundStyle(DS.Color.muted)
+                }
+            }
+
+            Spacer()
+
+            Button {
+                Task { await assign(applicant) }
+            } label: {
+                if assigningId == applicant.applyId {
+                    ProgressView().tint(DS.Color.onPrimary)
+                } else {
+                    Text("Assign")
+                }
+            }
+            .buttonStyle(.ds(.primary, size: .medium, fullWidth: false))
+            .disabled(assigningId != nil)
+        }
+        .padding(.vertical, DS.Spacing.sm)
     }
 
     private func loadApplicants() async {
@@ -550,6 +498,7 @@ private struct AddWorkerSheet: View {
         assigningId = applicant.applyId
         do {
             try await APIClient.shared.acceptApplicant(applyId: applicant.applyId)
+            DS.Haptics.success()
             let newWorker = AssignedWorkerDTO(
                 applyId:    applicant.applyId,
                 userId:     applicant.userId,

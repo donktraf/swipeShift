@@ -28,13 +28,14 @@ enum ApplicantShiftFit: Equatable {
         case .conflict:  return "xmark.octagon.fill"
         }
     }
-    var color: Color {
+    var tone: DS.Tone {
         switch self {
-        case .available: return .green
-        case .outside:   return .orange
-        case .conflict:  return .red
+        case .available: return .success
+        case .outside:   return .warning
+        case .conflict:  return .danger
         }
     }
+    var color: Color { tone.foreground }
 
     private static let weekdayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] // Calendar.weekday 1 = Sonntag
 
@@ -80,14 +81,14 @@ struct ApplicantShiftFitLabel: View {
             HStack(spacing: 5) {
                 Circle().fill(fit.color).frame(width: 6, height: 6)
                 Text(fit.text)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(fit.color)
+                    .font(DS.Font.make(11, .semibold, relativeTo: .caption))
+                    .foregroundStyle(fit.color)
                     .lineLimit(1)
             }
         } else {
             Label(fit.text, systemImage: fit.icon)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(fit.color)
+                .font(DS.Font.make(12, .semibold, relativeTo: .caption))
+                .foregroundStyle(fit.color)
         }
     }
 }

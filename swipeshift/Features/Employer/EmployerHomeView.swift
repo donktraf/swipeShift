@@ -17,7 +17,7 @@ struct EmployerHomeView: View {
         NavigationStack {
             ZStack(alignment: .bottom) {
 
-                SS.background().ignoresSafeArea()
+                DS.Color.bg.ignoresSafeArea()
 
                 // MARK: - Tab Content
                 Group {
@@ -35,17 +35,22 @@ struct EmployerHomeView: View {
 
                     case .applicants:
                         AllApplicantsView()
+                            .padding(.bottom, DS.tabBarInset)
 
                     case .messages:
                         MessagesView(isEmployerMode: true)
                             .environmentObject(messageStore)
+                            .padding(.bottom, DS.tabBarInset)
 
                     case .profile:
                         EmployerProfileTab()
                             .environmentObject(userStore)
+                            .dsTabBarInset()
                     }
                 }
-                .padding(.bottom, 80)
+                // Dashboard, Jobs und Profil scrollen unter der schwebenden TabBar weiter (Inset via .dsTabBarInset());
+                // Bewerber und Messages behalten den festen Abstand.
+                .ignoresSafeArea(edges: .bottom)
 
                 // MARK: - Tab Bar
                 VStack(spacing: 0) {
@@ -87,67 +92,6 @@ struct EmployerHomeView: View {
                     .environmentObject(userStore)
             }
         }
-    }
-}
-
-// MARK: - Employer Jobs Tab
-private struct EmployerJobsTab: View {
-    let onPostJob: () -> Void
-
-    var body: some View {
-        VStack(spacing: 24) {
-            Spacer()
-            Image(systemName: "briefcase.fill")
-                .font(.system(size: 48))
-                .foregroundColor(.white.opacity(0.3))
-            Text("Posted Jobs")
-                .font(.system(size: 24, weight: .bold))
-                .foregroundColor(.white.opacity(0.7))
-            Text("Your posted jobs will appear here.")
-                .font(.subheadline)
-                .foregroundColor(.white.opacity(0.4))
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
-
-            Button(action: onPostJob) {
-                Label("Post a Job", systemImage: "plus.circle.fill")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(SS.primary)
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 12)
-                    .background(Color.white)
-                    .clipShape(Capsule())
-                    .shadow(color: .black.opacity(0.08), radius: 8, x: 0, y: 4)
-            }
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(SS.background().ignoresSafeArea())
-    }
-}
-
-// MARK: - Employer Placeholder Tab
-private struct EmployerPlaceholderTab: View {
-    let title: String
-    let icon: String
-    let description: String
-
-    var body: some View {
-        VStack(spacing: 16) {
-            Image(systemName: icon)
-                .font(.system(size: 48))
-                .foregroundColor(.white.opacity(0.3))
-            Text(title)
-                .font(.system(size: 24, weight: .bold))
-                .foregroundColor(.white.opacity(0.7))
-            Text(description)
-                .font(.subheadline)
-                .foregroundColor(.white.opacity(0.4))
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(SS.background().ignoresSafeArea())
     }
 }
 

@@ -94,31 +94,25 @@ struct AllApplicantsView: View {
     }
 
     var body: some View {
-        SubScreenShell(title: jobTitle ?? "All Applicants") {
-            VStack(spacing: 16) {
+        SubScreenShell(title: jobTitle ?? "All Applicants", padded: true) {
+            VStack(spacing: DS.Spacing.md) {
                 // Filter-Bar
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
+                    HStack(spacing: DS.Spacing.xs) {
                         ForEach(ApplicantFilter.allCases, id: \.self) { filter in
                             filterChip(filter)
                         }
                     }
-                    .padding(.horizontal, 16)
                 }
 
-                if isLoading {
-                    ProgressView()
-                        .foregroundColor(.white)
-                        .padding(.top, 60)
-
+                if isLoading && applicants.isEmpty {
+                    skeleton
                 } else if let err = errorMessage {
                     errorView(err)
-
                 } else if filtered.isEmpty {
                     emptyView
-
                 } else {
-                    VStack(spacing: 10) {
+                    VStack(spacing: DS.Spacing.sm) {
                         ForEach(filtered) { applicant in
                             NavigationLink {
                                 DetailedWorkerView(
@@ -140,16 +134,24 @@ struct AllApplicantsView: View {
                                     }
                                 )
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.dsPressable)
                         }
                     }
-                    .padding(.horizontal, 16)
                 }
             }
         }
         .task { await load() }
         .refreshable { await load() }
         .applicantChatNavigation(chatNavigation)
+    }
+
+    private var skeleton: some View {
+        VStack(spacing: DS.Spacing.sm) {
+            ForEach(0..<3, id: \.self) { _ in
+                DSSkeletonBlock(height: 190, radius: DS.Radius.card)
+            }
+        }
+        .accessibilityLabel("Loading applicants")
     }
 
     /// Chat nur bei angenommener Bewerbung (Backend oder gerade lokal angenommen) mit Conversation
@@ -169,62 +171,37 @@ struct AllApplicantsView: View {
             }
         }()
 
-        return Button { selectedFilter = filter } label: {
-            HStack(spacing: 4) {
-                Text(filter.rawValue)
-                    .font(.system(size: 13, weight: .semibold))
-                if count > 0 {
-                    Text("\(count)")
-                        .font(.system(size: 11, weight: .bold))
-                        .padding(.horizontal, 5).padding(.vertical, 2)
-                        .background(selectedFilter == filter ? Color.white.opacity(0.3) : SS.primary.opacity(0.12))
-                        .clipShape(Capsule())
-                }
-            }
-            .foregroundColor(selectedFilter == filter ? .white : .secondary)
-            .padding(.horizontal, 14).padding(.vertical, 8)
-            .background(selectedFilter == filter ? SS.primary : Color(uiColor: .systemBackground))
-            .clipShape(Capsule())
-            .shadow(color: .black.opacity(0.05), radius: 3, x: 0, y: 1)
+        return DSChip(count > 0 ? "\(filter.rawValue) \(count)" : filter.rawValue,
+                      isSelected: selectedFilter == filter) {
+            selectedFilter = filter
         }
-        .buttonStyle(.plain)
-        .animation(.easeInOut(duration: 0.15), value: selectedFilter)
     }
 
     // MARK: - Empty / Error
 
     private var emptyView: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "person.2.slash")
-                .font(.system(size: 44))
-                .foregroundColor(.white.opacity(0.3))
-            Text("No Applicants")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(.white.opacity(0.6))
-            Text("Once someone applies for your jobs, they will appear here.")
-                .font(.system(size: 13))
-                .foregroundColor(.white.opacity(0.4))
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 60)
+        DSEmptyState(
+            systemIcon: "person.2.slash",
+            title: "No Applicants",
+            message: "Once someone applies for your jobs, they will appear here."
+        )
+        .padding(.top, DS.Spacing.xl)
     }
 
     private func errorView(_ msg: String) -> some View {
-        VStack(spacing: 12) {
+        VStack(spacing: DS.Spacing.sm) {
             Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 36))
-                .foregroundColor(.orange.opacity(0.7))
+                .font(.system(size: 32))
+                .foregroundStyle(DS.Color.warning)
             Text(msg)
-                .font(.system(size: 14))
-                .foregroundColor(.white.opacity(0.6))
+                .dsFont(.callout)
+                .foregroundStyle(DS.Color.text2)
                 .multilineTextAlignment(.center)
             Button("Try Again") { Task { await load() } }
-                .buttonStyle(SSPrimaryButtonStyle())
-                .padding(.horizontal, 60)
+                .buttonStyle(.ds(.soft, size: .medium, fullWidth: false))
         }
-        .padding(.top, 40).padding(.horizontal, 24)
+        .padding(.top, DS.Spacing.xl)
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Actions
@@ -254,6 +231,7 @@ struct AllApplicantsView: View {
     private func accept(_ applicant: Applicant) async {
         do {
             try await APIClient.shared.acceptApplicant(applyId: applicant.applyId)
+            DS.Haptics.success()
             withAnimation { localStates[applicant.applyId] = .accepted }
         } catch {
             errorMessage = error.localizedDescription
@@ -264,6 +242,7 @@ struct AllApplicantsView: View {
     private func decline(_ applicant: Applicant) async {
         do {
             try await APIClient.shared.declineApplicant(applyId: applicant.applyId)
+            DS.Haptics.warning()
             withAnimation { localStates[applicant.applyId] = .declined }
         } catch {
             errorMessage = error.localizedDescription

@@ -18,16 +18,16 @@ struct ReliabilityLabel: View {
     var font: CGFloat = 12
 
     private var tint: Color {
-        if summary.isNew { return summary.noShows > 0 || summary.lateCancellations > 0 ? .orange : .secondary }
-        if let rate = summary.showUpRate, rate >= 90, summary.noShows == 0 { return .green }
-        if let rate = summary.showUpRate, rate >= 75 { return .orange }
-        return .red
+        if summary.isNew { return summary.noShows > 0 || summary.lateCancellations > 0 ? DS.Color.warning : DS.Color.muted }
+        if let rate = summary.showUpRate, rate >= 90, summary.noShows == 0 { return DS.Color.success }
+        if let rate = summary.showUpRate, rate >= 75 { return DS.Color.warning }
+        return DS.Color.danger
     }
 
     var body: some View {
         Label(summary.text, systemImage: "checkmark.shield")
-            .font(.system(size: font, weight: .medium))
-            .foregroundColor(tint)
+            .font(DS.Font.make(font, .semibold, relativeTo: .caption))
+            .foregroundStyle(tint)
             .lineLimit(2)
     }
 }
@@ -46,7 +46,7 @@ struct AttendanceSectionView: View {
     var body: some View {
         Group {
             if let response, response.ended, !response.workers.isEmpty {
-                card(response)
+                section(response)
             }
         }
         .task { await load() }
@@ -57,60 +57,54 @@ struct AttendanceSectionView: View {
         }
     }
 
-    private func card(_ response: JobAttendanceResponse) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+    private func section(_ response: JobAttendanceResponse) -> some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
             Text("Record attendance")
-                .font(.system(size: 15, weight: .bold)).foregroundColor(.primary)
+                .dsFont(.headline).foregroundStyle(DS.Color.text)
             Text(response.guidance)
-                .font(.system(size: 12)).foregroundColor(.secondary)
+                .dsFont(.caption).foregroundStyle(DS.Color.text2)
             if let deadline = response.deadline, response.workers.contains(where: { $0.pending }) {
                 Text("If you don't record anything by \(deadline.formatted(date: .abbreviated, time: .shortened)), workers count as showed up.")
-                    .font(.system(size: 12)).foregroundColor(.secondary)
+                    .dsFont(.caption).foregroundStyle(DS.Color.text2)
             }
             ForEach(response.workers) { worker in
-                Divider()
+                DSDivider()
                 workerRow(worker)
             }
         }
-        .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: SS.cardRadius))
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
-        .padding(.horizontal, 16)
     }
 
     private func workerRow(_ worker: AttendanceWorker) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
             HStack {
-                Text(worker.name).font(.system(size: 14, weight: .semibold))
+                Text(worker.name).font(DS.Font.make(15, .semibold, relativeTo: .callout))
+                    .foregroundStyle(DS.Color.text)
                 Spacer()
                 if worker.pending {
-                    Text("Needs your input")
-                        .font(.system(size: 11, weight: .semibold)).foregroundColor(.orange)
-                        .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(Color.orange.opacity(0.12)).clipShape(Capsule())
+                    DSBadge("Needs your input", .tone(.warning))
                 } else if worker.attendanceSource == "auto" {
-                    Text("Recorded automatically").font(.system(size: 11)).foregroundColor(.secondary)
+                    Text("Recorded automatically").dsFont(.caption).foregroundStyle(DS.Color.muted)
                 } else if worker.attendanceSource == "admin" {
-                    Text("Decided by SwipeShift").font(.system(size: 11)).foregroundColor(.secondary)
+                    Text("Decided by SwipeShift").dsFont(.caption).foregroundStyle(DS.Color.muted)
                 }
             }
-            HStack(spacing: 8) {
+            HStack(spacing: DS.Spacing.xs) {
                 ForEach(AttendanceStatus.allCases) { status in
                     optionButton(status, worker: worker)
                 }
             }
             if worker.disputeStatus == "pending" {
                 Text("The worker disputed this entry\(worker.disputeNote.map { ": \"\($0)\"" } ?? ""). It is under review and can't be changed now.")
-                    .font(.system(size: 11)).foregroundColor(.orange)
+                    .dsFont(.caption).foregroundStyle(DS.Color.warning)
             } else if worker.disputeStatus == "resolved" {
-                Text("The worker's dispute was reviewed.").font(.system(size: 11)).foregroundColor(.secondary)
+                Text("The worker's dispute was reviewed.").dsFont(.caption).foregroundStyle(DS.Color.muted)
             } else if !worker.canRecord {
                 Text("The 48-hour window to record attendance has ended.")
-                    .font(.system(size: 11)).foregroundColor(.secondary)
+                    .dsFont(.caption).foregroundStyle(DS.Color.muted)
             }
         }
+        .padding(.vertical, DS.Spacing.xxs)
     }
 
     private func optionButton(_ status: AttendanceStatus, worker: AttendanceWorker) -> some View {
@@ -119,16 +113,18 @@ struct AttendanceSectionView: View {
             Task { await record(worker, status) }
         } label: {
             Label(status.label, systemImage: status.icon)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(selected ? .white : status.color)
+                .font(DS.Font.make(12, .semibold, relativeTo: .caption))
+                .foregroundStyle(selected ? DS.Color.onPrimary : status.color)
                 .lineLimit(1).minimumScaleFactor(0.8)
-                .frame(maxWidth: .infinity).padding(.vertical, 8)
-                .background(selected ? status.color : status.color.opacity(0.1))
-                .clipShape(RoundedRectangle(cornerRadius: 9))
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .background(selected ? status.color : status.tone.soft,
+                            in: RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
+                .contentShape(RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.dsPressable)
         .disabled(!worker.canRecord || workingId == worker.applyId)
         .opacity(worker.canRecord ? 1 : 0.5)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     @MainActor
@@ -144,11 +140,22 @@ struct AttendanceSectionView: View {
         defer { workingId = nil }
         do {
             try await APIClient.shared.recordAttendance(applyId: worker.applyId, status: status)
+            DS.Haptics.selection()
             await load()
             onChanged()
         } catch {
             errorMessage = error.localizedDescription
             await load()
+        }
+    }
+}
+
+private extension AttendanceStatus {
+    var tone: DS.Tone {
+        switch self {
+        case .attended: return .success
+        case .late:     return .warning
+        case .noShow:   return .danger
         }
     }
 }
@@ -161,11 +168,11 @@ struct AttendanceScreen: View {
     var onChanged: () -> Void = {}
 
     var body: some View {
-        SubScreenShell(title: "Attendance") {
-            VStack(spacing: 16) {
+        SubScreenShell(title: "Attendance", padded: true) {
+            VStack(alignment: .leading, spacing: DS.Spacing.md) {
                 Text(jobTitle)
-                    .font(.system(size: 17, weight: .bold)).foregroundColor(.white)
-                    .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16)
+                    .dsFont(.title).foregroundStyle(DS.Color.text)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 AttendanceSectionView(jobId: jobId, onChanged: onChanged)
             }
         }

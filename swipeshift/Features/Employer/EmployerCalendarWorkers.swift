@@ -30,18 +30,19 @@ struct CalendarShiftWorkersSection: View {
     let logoEmoji: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
             HStack {
                 Text("Confirmed workers")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.secondary)
+                    .font(DS.Font.make(12, .semibold, relativeTo: .caption))
+                    .foregroundStyle(DS.Color.muted)
                 Spacer()
                 if let averageRating {
                     HStack(spacing: 3) {
-                        Image(systemName: "star.fill").foregroundColor(.yellow)
+                        Image(systemName: "star.fill").foregroundStyle(DS.Color.warning)
                         Text(String(format: "%.1f avg", averageRating)).fontWeight(.semibold)
+                            .foregroundStyle(DS.Color.text)
                     }
-                    .font(.system(size: 12))
+                    .dsFont(.caption)
                 }
             }
 
@@ -54,11 +55,11 @@ struct CalendarShiftWorkersSection: View {
                         showActions: false
                     )
                 } label: {
-                    HStack(spacing: 10) {
-                        ApplicantAvatar(photoUrl: worker.photoUrl, size: 32)
+                    HStack(spacing: DS.Spacing.sm) {
+                        ApplicantAvatar(photoUrl: worker.photoUrl, size: 32, initials: DSAvatar.initials(from: worker.name))
                         Text(worker.name)
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(.primary)
+                            .font(DS.Font.make(14, .medium, relativeTo: .callout))
+                            .foregroundStyle(DS.Color.text)
                         Spacer()
                         ApplicantRatingLabel(
                             average: worker.summary?.ratingAverage,
@@ -66,11 +67,13 @@ struct CalendarShiftWorkersSection: View {
                         )
                         Image(systemName: "chevron.right")
                             .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(.secondary.opacity(0.6))
+                            .foregroundStyle(DS.Color.muted)
+                            .accessibilityHidden(true)
                     }
+                    .frame(minHeight: 44)
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.dsPressable)
             }
         }
     }

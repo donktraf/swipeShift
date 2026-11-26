@@ -73,25 +73,24 @@ struct ReviewFilterSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             Text("Filter")
-                .font(.system(size: 17, weight: .semibold))
-                .padding(.top, 20).padding(.bottom, 12)
+                .dsFont(.headline)
+                .foregroundStyle(DS.Color.text)
+                .padding(.top, DS.Spacing.lg).padding(.bottom, DS.Spacing.sm)
 
             ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: DS.Spacing.xl) {
                     ratingSection
-                    Divider()
                     rehireSection
-                    Divider()
                     categorySection
-                    Divider()
                     dateSection
                 }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 16)
+                .padding(.horizontal, DS.Spacing.screenEdge)
+                .padding(.bottom, DS.Spacing.md)
             }
 
             footer
         }
+        .dsBackground()
         .onAppear { draft = filters }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
@@ -101,15 +100,10 @@ struct ReviewFilterSheet: View {
 
     private var ratingSection: some View {
         section("Minimum Rating", note: "Past Reviews only") {
-            HStack(spacing: 8) {
+            HStack(spacing: DS.Spacing.xs) {
                 ForEach([1, 2, 3, 4, 5], id: \.self) { stars in
-                    chip(selected: draft.minRating == stars) {
+                    DSChip("\(stars)+ ★", isSelected: draft.minRating == stars) {
                         draft.minRating = draft.minRating == stars ? nil : stars
-                    } label: {
-                        HStack(spacing: 3) {
-                            Image(systemName: "star.fill").font(.system(size: 11))
-                            Text("\(stars)+").font(.system(size: 13, weight: .semibold))
-                        }
                     }
                 }
             }
@@ -118,12 +112,10 @@ struct ReviewFilterSheet: View {
 
     private var rehireSection: some View {
         section("Would Rehire", note: "Past Reviews only") {
-            HStack(spacing: 8) {
+            HStack(spacing: DS.Spacing.xs) {
                 ForEach([(true, "Yes"), (false, "No")], id: \.0) { value, label in
-                    chip(selected: draft.wouldRehire == value) {
+                    DSChip(label, isSelected: draft.wouldRehire == value) {
                         draft.wouldRehire = draft.wouldRehire == value ? nil : value
-                    } label: {
-                        Text(label).font(.system(size: 13, weight: .semibold))
                     }
                 }
             }
@@ -134,13 +126,11 @@ struct ReviewFilterSheet: View {
         section("Job Category") {
             if categories.isEmpty {
                 Text("No categories in your reviews yet.")
-                    .font(.system(size: 13)).foregroundColor(.secondary)
+                    .dsFont(.callout).foregroundStyle(DS.Color.muted)
             } else {
                 FlowChips(items: categories) { category in
-                    chip(selected: draft.category == category) {
+                    DSChip(category, isSelected: draft.category == category) {
                         draft.category = draft.category == category ? nil : category
-                    } label: {
-                        Text(category).font(.system(size: 13, weight: .semibold))
                     }
                 }
             }
@@ -150,20 +140,19 @@ struct ReviewFilterSheet: View {
     private var dateSection: some View {
         section("Shift Date") {
             FlowChips(items: ReviewDateRange.allCases) { range in
-                chip(selected: draft.dateRange == range) {
+                DSChip(range.rawValue, isSelected: draft.dateRange == range) {
                     draft.dateRange = draft.dateRange == range ? nil : range
-                } label: {
-                    Text(range.rawValue).font(.system(size: 13, weight: .semibold))
                 }
             }
             if draft.dateRange == .custom {
-                VStack(spacing: 8) {
+                VStack(spacing: DS.Spacing.xs) {
                     DatePicker("From", selection: $draft.customFrom, displayedComponents: .date)
                     DatePicker("To", selection: $draft.customTo, in: draft.customFrom..., displayedComponents: .date)
                 }
-                .font(.system(size: 14))
-                .tint(SS.primary)
-                .padding(.top, 4)
+                .dsFont(.callout)
+                .foregroundStyle(DS.Color.text)
+                .tint(DS.Color.primary)
+                .padding(.top, DS.Spacing.xxs)
                 .onChange(of: draft.customFrom) { _, newFrom in
                     if draft.customTo < newFrom { draft.customTo = newFrom }
                 }
@@ -172,22 +161,16 @@ struct ReviewFilterSheet: View {
     }
 
     private var footer: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: DS.Spacing.sm) {
             Button("Reset") { draft = ReviewFilters() }
-                .font(.system(size: 15, weight: .semibold)).foregroundColor(.secondary)
-                .frame(maxWidth: .infinity).padding(.vertical, 14)
-                .background(Color(uiColor: .systemGray6))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .buttonStyle(.ds(.secondary))
             Button("Apply") {
                 filters = draft
                 dismiss()
             }
-            .font(.system(size: 15, weight: .semibold)).foregroundColor(.white)
-            .frame(maxWidth: .infinity).padding(.vertical, 14)
-            .background(SS.primary)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .buttonStyle(.ds(.primary))
         }
-        .padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 28)
+        .padding(.horizontal, DS.Spacing.screenEdge).padding(.top, DS.Spacing.xs).padding(.bottom, DS.Spacing.lg)
     }
 
     // MARK: Building Blocks
@@ -197,31 +180,17 @@ struct ReviewFilterSheet: View {
         note: String? = nil,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
             HStack(spacing: 6) {
-                Text(title)
-                    .font(.system(size: 13, weight: .semibold)).foregroundColor(.secondary)
+                Text(title.uppercased())
+                    .dsFont(.sectionLabel).foregroundStyle(DS.Color.muted)
+                    .accessibilityAddTraits(.isHeader)
                 if let note {
-                    Text("· \(note)").font(.system(size: 12)).foregroundColor(.secondary.opacity(0.7))
+                    Text("· \(note)").dsFont(.caption).foregroundStyle(DS.Color.muted)
                 }
             }
             content()
         }
-    }
-
-    private func chip<Label: View>(
-        selected: Bool,
-        action: @escaping () -> Void,
-        @ViewBuilder label: () -> Label
-    ) -> some View {
-        Button(action: action) {
-            label()
-                .foregroundColor(selected ? .white : SS.primary)
-                .padding(.horizontal, 12).padding(.vertical, 7)
-                .background(selected ? SS.primary : SS.primary.opacity(0.1))
-                .clipShape(Capsule())
-        }
-        .buttonStyle(.plain)
     }
 }
 
@@ -233,7 +202,7 @@ private struct FlowChips<Item: Hashable, ChipView: View>: View {
     @ViewBuilder let chip: (Item) -> ChipView
 
     var body: some View {
-        FlowLayout(spacing: 8) {
+        FlowLayout(spacing: DS.Spacing.xs) {
             ForEach(items, id: \.self) { chip($0) }
         }
     }

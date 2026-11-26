@@ -9,7 +9,7 @@ import SwiftUI
 private struct AttentionItem: Identifiable {
     let id = UUID()
     let icon: String
-    let iconColor: Color
+    let tone: DS.Tone
     let title: String
     let subtitle: String
     let actionLabel: String
@@ -21,9 +21,10 @@ private struct TrendItem: Identifiable {
     let id = UUID()
     let value: String
     let label: String
-    let delta: String       // z.B. "+3 this week"
+    let delta: String       // z.B. "this week"
     let deltaPositive: Bool
     let icon: String
+    var tone: DS.Tone = .primary
 }
 
 // MARK: - EmployerDashboardView
@@ -44,6 +45,7 @@ struct EmployerDashboardView: View {
     @State private var jobsNeedingWorkersCount: Int = 0
     @State private var pendingReviewsCount: Int = 0
     @State private var pastReviews: [PastReviewItem] = []
+    @State private var isLoading = true
 
     private var activeJobs:    Int    { stats?.activeJobs    ?? 0 }
     private var newApplicants: Int    { stats?.newApplicants ?? 0 }
@@ -62,7 +64,7 @@ struct EmployerDashboardView: View {
         var items: [AttentionItem] = []
         if newApplicants > 0 {
             items.append(AttentionItem(
-                icon: "person.crop.circle.badge.clock", iconColor: .orange,
+                icon: "person.crop.circle.badge.clock", tone: .warning,
                 title: "\(newApplicants) pending application\(newApplicants == 1 ? "" : "s")",
                 subtitle: "Applicants are waiting for your response.",
                 actionLabel: "View Now",
@@ -77,14 +79,14 @@ struct EmployerDashboardView: View {
         // Instant Matches (automatisch angenommen) separat von "New Applications"; nur wenn vorhanden
         if let instant = stats?.instantMatchesThisWeek, instant > 0 {
             items.insert(TrendItem(value: "\(instant)", label: "Instant Matches",
-                                   delta: "this week", deltaPositive: true, icon: "bolt.fill"), at: 2)
+                                   delta: "this week", deltaPositive: true, icon: "bolt.fill", tone: .primary), at: 2)
         }
         return items
     }
 
     private var baseTrends: [TrendItem] {[
         TrendItem(value: "\(stats?.jobsFilledThisWeek ?? 0)", label: "Jobs Filled",
-                  delta: "this week", deltaPositive: true, icon: "checkmark.circle"),
+                  delta: "this week", deltaPositive: true, icon: "checkmark.circle", tone: .success),
         TrendItem(value: "\(stats?.applicationsThisWeek ?? 0)", label: "New Applications",
                   delta: "this week", deltaPositive: true, icon: "person.crop.circle.badge.plus"),
         TrendItem(
@@ -93,15 +95,15 @@ struct EmployerDashboardView: View {
             delta: avgWorkerRating != nil
                 ? "based on \(pastReviews.count) review\(pastReviews.count == 1 ? "" : "s")"
                 : "Available after your first completed job",
-            deltaPositive: true, icon: "star"
+            deltaPositive: true, icon: "star", tone: .warning
         ),
         TrendItem(value: stats?.topCategory ?? "—", label: "Top Category",
-                  delta: "\(activeJobs) active jobs", deltaPositive: true, icon: "trophy"),
+                  delta: "\(activeJobs) active jobs", deltaPositive: true, icon: "trophy", tone: .neutral),
     ]}
 
     var body: some View {
         ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: DS.Spacing.lg) {
 
                 dashboardHeader
                 statsRow
@@ -109,12 +111,16 @@ struct EmployerDashboardView: View {
                     needsAttentionSection
                 }
                 quickActionsSection
-                navigationSection
                 trendsSection
-
-                Spacer().frame(height: 100)
+                navigationSection
             }
+            .padding(.horizontal, DS.Spacing.screenEdge)
+            .padding(.top, DS.Spacing.md)
+            .padding(.bottom, DS.Spacing.xl)
         }
+        .dsTabBarInset()
+        .refreshable { await loadStats() }
+        .dsBackground()
         .task { await loadStats() }
         // Glocken-Badge: beim Erscheinen und beim Zurueckkommen in den Vordergrund
         .task { await badge.refresh() }
@@ -153,409 +159,278 @@ struct EmployerDashboardView: View {
         jobsNeedingWorkersCount = jobs?.filter { !$0.isFullyStaffed }.count ?? 0
         pendingReviewsCount = reviews?.count ?? 0
         pastReviews = past ?? []
+        isLoading = false
     }
 
     // MARK: - Header
     private var dashboardHeader: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(userStore.currentUser?.companyName ?? "My Company")
-                        .font(.system(size: 26, weight: .bold))
-                        .foregroundColor(.white)
+        HStack(alignment: .top, spacing: DS.Spacing.sm) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("My company")
+                    .font(DS.Font.make(13, .semibold, relativeTo: .footnote))
+                    .foregroundStyle(DS.Color.muted)
+                Text(userStore.currentUser?.companyName ?? "My Company")
+                    .dsFont(.display)
+                    .foregroundStyle(DS.Color.text)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
 
-                    if let location = userStore.currentUser?.location {
-                        HStack(spacing: 4) {
-                            Image(systemName: "mappin")
-                                .font(.system(size: 12))
-                                .foregroundColor(.white.opacity(0.7))
-                            Text(location)
-                                .font(.system(size: 13))
-                                .foregroundColor(.white.opacity(0.7))
-                        }
+                if let location = userStore.currentUser?.location {
+                    HStack(spacing: 6) {
+                        Image(systemName: "mappin")
+                            .font(.system(size: 12, weight: .semibold))
+                            .accessibilityHidden(true)
+                        Text(location)
+                            .font(DS.Font.make(13, .semibold, relativeTo: .footnote))
+                            .lineLimit(1)
                     }
-                }
-
-                Spacer()
-
-                // Benachrichtigungs-Icon
-                Button { showNotifications = true } label: {
-                    Image(systemName: "bell")
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundColor(.white)
-                        .padding(10)
-                        .background(Color.white.opacity(0.15))
-                        .clipShape(Circle())
-                        .notificationBadge(badge.unreadCount)
+                    .foregroundStyle(DS.Color.text2)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(DS.Color.surface, in: Capsule())
+                    .overlay(Capsule().strokeBorder(DS.Color.border, lineWidth: 1))
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("Location \(location)")
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-            .padding(.bottom, 16)
+
+            Spacer(minLength: DS.Spacing.sm)
+
+            // Benachrichtigungs-Icon
+            Button {
+                DS.Haptics.light()
+                showNotifications = true
+            } label: {
+                Image(systemName: "bell")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(DS.Color.text)
+                    .frame(width: 44, height: 44)
+                    .background(DS.Color.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(DS.Color.border, lineWidth: 1)
+                    )
+                    .notificationBadge(badge.unreadCount)
+            }
+            .buttonStyle(.dsPressable)
+            .accessibilityLabel(badge.unreadCount > 0 ? "Notifications, \(badge.unreadCount) unread" : "Notifications")
         }
     }
 
-    // MARK: - Stats Reihe
+    // MARK: - Stats
     private var statsRow: some View {
-        HStack(spacing: 10) {
-            StatCard(
-                value: "\(activeJobs)",
-                label: "Active Jobs",
-                icon: "briefcase.fill",
-                color: SS.primary,
-                actionLabel: "View All"
-            ) { onViewJobs?() }
+        VStack(spacing: DS.Spacing.sm) {
+            HStack(spacing: DS.Spacing.sm) {
+                StatTile(
+                    label: "Active jobs", value: "\(activeJobs)", tone: .primary,
+                    actionLabel: "View all"
+                ) { onViewJobs?() }
 
-            StatCard(
-                value: "\(newApplicants)",
-                label: "New Applicants",
-                icon: "person.crop.circle.badge.plus",
-                color: .green,
-                actionLabel: "View All"
-            ) { onViewApplicants?() }
+                StatTile(
+                    label: "New applicants", value: "\(newApplicants)", tone: .warning,
+                    actionLabel: "View all"
+                ) { onViewApplicants?() }
+            }
 
-            StatCard(
+            SpendCard(
                 value: Money.format(monthlySpend),
-                label: "Monthly Spend (incl. fee)",
-                icon: "dollarsign.circle.fill",
-                color: .orange,
-                actionLabel: "Overview"
-            ) { showFinancial = true }
+                wages: stats?.monthlySpendWages,
+                fees: stats?.monthlySpendFees
+            ) {
+                DS.Haptics.light()
+                showFinancial = true
+            }
         }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 16)
+        .dsSkeleton(isLoading && stats == nil)
     }
 
     // MARK: - Needs Attention
     private var needsAttentionSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            SectionHeader(title: "Needs Attention", icon: "exclamationmark.triangle.fill", iconColor: .orange)
-                .padding(.horizontal, 16)
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            Text("Needs attention")
+                .dsFont(.headline)
+                .foregroundStyle(DS.Color.text)
+                .accessibilityAddTraits(.isHeader)
 
-            VStack(spacing: 8) {
-                ForEach(attentionItems) { item in
-                    AttentionCard(item: item)
+            ForEach(attentionItems) { item in
+                DSCard(action: item.action) {
+                    HStack(spacing: DS.Spacing.sm) {
+                        Circle()
+                            .fill(item.tone.foreground)
+                            .frame(width: 10, height: 10)
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(item.title)
+                                .font(DS.Font.make(15, .bold))
+                                .foregroundStyle(DS.Color.text)
+                            Text(item.subtitle)
+                                .dsFont(.caption)
+                                .foregroundStyle(DS.Color.muted)
+                        }
+                        Spacer(minLength: DS.Spacing.xs)
+                        Text(item.actionLabel)
+                            .font(DS.Font.make(14, .bold))
+                            .foregroundStyle(DS.Color.primaryText)
+                    }
                 }
             }
-            .padding(.horizontal, 16)
         }
-        .padding(.bottom, 20)
     }
 
     // MARK: - Quick Actions
     private var quickActionsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            SectionHeader(title: "Quick Actions", icon: "bolt.fill", iconColor: SS.primary)
-                .padding(.horizontal, 16)
-
-            HStack(spacing: 10) {
-                // Post a New Job
-                Button {
-                    onPostJob?()
-                } label: {
-                    QuickActionCard(
-                        icon: "plus.circle.fill",
-                        label: "Post a Job",
-                        color: SS.primary
-                    )
-                }
-                .buttonStyle(.plain)
-
-                // View All Posted Jobs
-                Button {
-                    onViewJobs?()
-                } label: {
-                    QuickActionCard(
-                        icon: "list.bullet.rectangle.portrait",
-                        label: "View All Jobs",
-                        color: .indigo
-                    )
-                }
-                .buttonStyle(.plain)
+        HStack(spacing: DS.Spacing.sm) {
+            Button {
+                onPostJob?()
+            } label: {
+                Label("Post a job", systemImage: "plus")
             }
-            .padding(.horizontal, 16)
-        }
-        .padding(.bottom, 20)
-    }
+            .buttonStyle(.ds(.primary))
 
-    // MARK: - Navigation Section
-    private var navigationSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            SectionHeader(title: "Navigation", icon: "square.grid.2x2", iconColor: .gray)
-                .padding(.horizontal, 16)
-
-            VStack(spacing: 0) {
-                NavGroup(title: "Job Management") {
-                    NavRow(icon: "doc.text", label: "Posted Jobs", badge: activeJobs > 0 ? "\(activeJobs)" : nil) { onViewJobs?() }
-                    Divider().padding(.leading, 52)
-                    NavRow(icon: "pencil.and.list.clipboard", label: "Drafts", badge: nil) { onViewJobs?() }
-                    Divider().padding(.leading, 52)
-                    NavRow(icon: "checkmark.circle", label: "Completed Jobs", badge: nil) { onViewJobs?() }
-                }
-
-                Spacer().frame(height: 10)
-
-                NavGroup(title: "Worker Management") {
-                    NavRow(icon: "person.crop.circle.badge.questionmark", label: "Applicants", badge: newApplicants > 0 ? "\(newApplicants)" : nil) { onViewApplicants?() }
-                    Divider().padding(.leading, 52)
-                    NavRow(icon: "person.2.badge.gearshape", label: "Assign Workers",
-                           badge: jobsNeedingWorkersCount > 0 ? "\(jobsNeedingWorkersCount)" : nil) { showAssignWorkers = true }
-                    Divider().padding(.leading, 52)
-                    NavRow(icon: "star.bubble", label: "Leave Reviews",
-                           badge: pendingReviewsCount > 0 ? "\(pendingReviewsCount)" : nil) { showLeaveReviews = true }
-                }
+            Button {
+                onViewJobs?()
+            } label: {
+                Text("View all jobs")
             }
-            .padding(.horizontal, 16)
+            .buttonStyle(.ds(.secondary))
         }
-        .padding(.bottom, 20)
     }
 
     // MARK: - Trends
     private var trendsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            SectionHeader(title: "This Week", icon: "chart.bar.fill", iconColor: .teal)
-                .padding(.horizontal, 16)
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            Text("This week")
+                .dsFont(.headline)
+                .foregroundStyle(DS.Color.text)
+                .accessibilityAddTraits(.isHeader)
 
             LazyVGrid(
-                columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)],
-                spacing: 10
+                columns: [GridItem(.flexible(), spacing: DS.Spacing.sm), GridItem(.flexible(), spacing: DS.Spacing.sm)],
+                spacing: DS.Spacing.sm
             ) {
                 ForEach(trends) { trend in
-                    TrendCard(trend: trend)
+                    DSTile(
+                        label: trend.label,
+                        value: trend.value,
+                        tone: trend.tone,
+                        caption: trend.delta
+                    )
                 }
             }
-            .padding(.horizontal, 16)
+            .dsSkeleton(isLoading && stats == nil)
         }
-        .padding(.bottom, 20)
+    }
+
+    // MARK: - Navigation Section (flach)
+    private var navigationSection: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.lg) {
+            DSSection("Job management") {
+                navRow("Posted jobs", count: activeJobs, first: true) { onViewJobs?() }
+                navRow("Drafts", count: 0) { onViewJobs?() }
+                navRow("Completed jobs", count: 0) { onViewJobs?() }
+            }
+
+            DSSection("Worker management") {
+                navRow("Applicants", count: newApplicants, first: true) { onViewApplicants?() }
+                navRow("Assign workers", count: jobsNeedingWorkersCount) { showAssignWorkers = true }
+                navRow("Leave reviews", count: pendingReviewsCount) { showLeaveReviews = true }
+            }
+        }
+    }
+
+    private func navRow(_ title: String, count: Int, first: Bool = false, action: @escaping () -> Void) -> some View {
+        DSRow(title, showsChevron: true, action: action) {
+            if count > 0 {
+                Text("\(count)")
+                    .font(DS.Font.make(12, .extrabold, relativeTo: .caption))
+                    .foregroundStyle(DS.Color.text2)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(DS.Color.surface2, in: Capsule())
+            }
+        }
     }
 }
 
 // MARK: - Hilfs-Views
 
-private struct StatCard: View {
+/// Antippbare Kennzahl-Kachel mit Aktion ("View all ›").
+private struct StatTile: View {
+    let label: String
     let value: String
-    let label: String
-    let icon: String
-    let color: Color
-    let actionLabel: String?
-    let action: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: icon)
-                    .font(.system(size: 14))
-                    .foregroundColor(color)
-                Spacer()
-            }
-
-            Text(value)
-                .font(.system(size: 24, weight: .bold))
-                .foregroundColor(.primary)
-
-            Text(label)
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-
-            if let action = actionLabel {
-                Button(action: self.action) {
-                    Text(action)
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(color)
-                }
-            }
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
-    }
-}
-
-private struct AttentionCard: View {
-    let item: AttentionItem
-
-    var body: some View {
-        Button(action: item.action) {
-            HStack(spacing: 12) {
-                Image(systemName: item.icon)
-                    .font(.system(size: 20))
-                    .foregroundColor(item.iconColor)
-                    .frame(width: 40, height: 40)
-                    .background(item.iconColor.opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(item.title)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.primary)
-                    Text(item.subtitle)
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
-                }
-
-                Spacer()
-
-                Text(item.actionLabel)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(item.iconColor)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(item.iconColor.opacity(0.1))
-                    .clipShape(Capsule())
-            }
-            .padding(12)
-            .background(Color(uiColor: .systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 14))
-            .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-private struct QuickActionCard: View {
-    let icon: String
-    let label: String
-    let color: Color
-
-    var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: icon)
-                .font(.system(size: 28))
-                .foregroundColor(color)
-            Text(label)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(.primary)
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 18)
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
-    }
-}
-
-private struct SectionHeader: View {
-    let title: String
-    let icon: String
-    let iconColor: Color
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(iconColor)
-            Text(title)
-                .font(.system(size: 17, weight: .bold))
-                .foregroundColor(.white)
-        }
-    }
-}
-
-private struct NavGroup<Content: View>: View {
-    let title: String
-    let content: Content
-
-    init(title: String, @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.content = content()
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(title)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(.secondary)
-                .padding(.horizontal, 14)
-                .padding(.top, 10)
-                .padding(.bottom, 4)
-            content
-        }
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
-    }
-}
-
-private struct NavRow: View {
-    let icon: String
-    let label: String
-    let badge: String?
+    let tone: DS.Tone
+    let actionLabel: String
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 12) {
-                Image(systemName: icon)
-                    .font(.system(size: 16))
-                    .foregroundColor(SS.primary)
-                    .frame(width: 28)
-                    .padding(.leading, 14)
-
+            VStack(alignment: .leading, spacing: 6) {
                 Text(label)
-                    .font(.system(size: 15))
-                    .foregroundColor(.primary)
-
-                Spacer()
-
-                if let badge {
-                    Text(badge)
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(SS.primary)
-                        .clipShape(Capsule())
-                }
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.secondary.opacity(0.4))
-                    .padding(.trailing, 14)
+                    .font(DS.Font.make(12, .bold, relativeTo: .caption))
+                    .foregroundStyle(tone.foreground)
+                Text(value)
+                    .font(DS.Font.make(28, .extrabold, relativeTo: .title))
+                    .foregroundStyle(DS.Color.text)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                Text("\(actionLabel) ›")
+                    .font(DS.Font.make(12, .semibold, relativeTo: .caption))
+                    .foregroundStyle(tone.foreground)
             }
-            .padding(.vertical, 12)
+            .padding(DS.Spacing.inset)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(tone.soft, in: RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.dsPressable)
+        .accessibilityElement(children: .combine)
+        .accessibilityHint(actionLabel)
     }
 }
 
-private struct TrendCard: View {
-    let trend: TrendItem
+/// Monatsausgaben mit Mini-Balken (Loehne vs. Plattform-Gebuehr, nur wenn das Backend die Aufteilung liefert).
+private struct SpendCard: View {
+    let value: String
+    let wages: Double?
+    let fees: Double?
+    let action: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        DSCard(action: action) {
             HStack {
-                Image(systemName: trend.icon)
-                    .font(.system(size: 14))
-                    .foregroundColor(SS.primary)
-                Spacer()
-            }
-
-            Text(trend.value)
-                .font(.system(size: 22, weight: .bold))
-                .foregroundColor(.primary)
-
-            Text(trend.label)
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
-                .lineLimit(1)
-
-            HStack(spacing: 3) {
-                Image(systemName: trend.deltaPositive ? "arrow.up.right" : "arrow.down.right")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundColor(trend.deltaPositive ? .green : .red)
-                Text(trend.delta)
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
+                VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                    Text("Monthly spend · incl. fee")
+                        .font(DS.Font.make(12, .bold, relativeTo: .caption))
+                        .foregroundStyle(DS.Color.muted)
+                    Text(value)
+                        .font(DS.Font.make(24, .extrabold, relativeTo: .title2))
+                        .foregroundStyle(DS.Color.text)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                }
+                Spacer(minLength: DS.Spacing.sm)
+                if let wages, let fees, wages + fees > 0 {
+                    let maxValue = max(wages, fees)
+                    HStack(alignment: .bottom, spacing: DS.Spacing.xs) {
+                        bar(height: 40 * wages / maxValue, color: DS.Color.primary)
+                        bar(height: 40 * fees / maxValue, color: DS.Color.warning)
+                    }
+                    .frame(height: 40, alignment: .bottom)
+                    .accessibilityHidden(true)
+                }
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(DS.Color.muted)
+                    .accessibilityHidden(true)
             }
         }
-        .padding(12)
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Opens financial overview")
+    }
+
+    private func bar(height: CGFloat, color: Color) -> some View {
+        RoundedRectangle(cornerRadius: 4, style: .continuous)
+            .fill(color)
+            .frame(width: 8, height: max(4, height))
     }
 }

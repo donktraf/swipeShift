@@ -93,13 +93,15 @@ private struct EmployerCalJob: Identifiable {
 private enum ShiftStatus {
     case needsWorkers, partiallyStaffed, fullyStaffed
 
-    var color: Color {
+    var tone: DS.Tone {
         switch self {
-        case .needsWorkers:     return .orange
-        case .partiallyStaffed: return SS.primary
-        case .fullyStaffed:     return .green
+        case .needsWorkers:     return .warning
+        case .partiallyStaffed: return .primary
+        case .fullyStaffed:     return .success
         }
     }
+
+    var color: Color { tone.foreground }
 
     var label: String {
         switch self {
@@ -138,24 +140,23 @@ struct EmployerCalendarView: View {
     }
 
     var body: some View {
-        SubScreenShell(title: "Calendar") {
-            VStack(spacing: 0) {
+        SubScreenShell(title: "Calendar", padded: true) {
+            VStack(alignment: .leading, spacing: DS.Spacing.md) {
                 controlsRow
-                    .padding(.bottom, 12)
 
                 if isLoading && allJobs.isEmpty {
-                    ProgressView().tint(.white).frame(maxWidth: .infinity).padding(.top, 40)
+                    skeleton
                 } else if let errorMessage, allJobs.isEmpty {
-                    VStack(spacing: 12) {
+                    VStack(spacing: DS.Spacing.sm) {
                         Text(errorMessage)
-                            .font(.system(size: 14))
-                            .foregroundColor(.white.opacity(0.8))
+                            .dsFont(.callout)
+                            .foregroundStyle(DS.Color.text2)
                             .multilineTextAlignment(.center)
                         Button("Try Again") { Task { await load() } }
-                            .buttonStyle(SSPrimaryButtonStyle())
-                            .padding(.horizontal, 60)
+                            .buttonStyle(.ds(.soft, size: .medium, fullWidth: false))
                     }
-                    .padding(.top, 40).padding(.horizontal, 24)
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, DS.Spacing.xl)
                 } else if mode == .month {
                     monthContent
                 } else {
@@ -163,7 +164,16 @@ struct EmployerCalendarView: View {
                 }
             }
         }
+        .refreshable { await load() }
         .task { await load() }
+    }
+
+    private var skeleton: some View {
+        VStack(spacing: DS.Spacing.sm) {
+            DSSkeletonBlock(height: 300, radius: DS.Radius.card)
+            DSSkeletonBlock(height: 80, radius: DS.Radius.card)
+        }
+        .accessibilityLabel("Loading calendar")
     }
 
     @MainActor
@@ -182,14 +192,12 @@ struct EmployerCalendarView: View {
     // MARK: - Controls
 
     private var controlsRow: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: DS.Spacing.xs) {
             // Monat/Woche Toggle
-            HStack(spacing: 0) {
-                modeButton("Month", target: .month)
-                modeButton("Week", target: .week)
-            }
-            .background(Color.white.opacity(0.15))
-            .clipShape(Capsule())
+            DSChip("Month", isSelected: mode == .month) { mode = .month }
+            DSChip("Week", isSelected: mode == .week) { mode = .week }
+
+            Spacer(minLength: 0)
 
             // Filter
             Menu {
@@ -199,47 +207,34 @@ struct EmployerCalendarView: View {
             } label: {
                 HStack(spacing: 5) {
                     Image(systemName: "line.3.horizontal.decrease.circle")
-                        .font(.system(size: 13))
                     Text(selectedFilter.rawValue)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(DS.Font.make(14, .semibold, relativeTo: .callout))
                     if selectedFilter != .all {
-                        Circle().fill(.white).frame(width: 6, height: 6)
+                        Circle().fill(DS.Color.onPrimary).frame(width: 6, height: 6)
                     }
                 }
-                .foregroundColor(.white)
+                .foregroundStyle(selectedFilter != .all ? DS.Color.onPrimary : DS.Color.text2)
                 .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background(selectedFilter != .all ? SS.primary.opacity(0.9) : Color.white.opacity(0.2))
-                .clipShape(Capsule())
+                .frame(minHeight: 44)
+                .background(
+                    selectedFilter != .all ? DS.Color.primary : DS.Color.surface,
+                    in: RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
+                        .strokeBorder(selectedFilter != .all ? DS.Color.primary : DS.Color.border, lineWidth: 1)
+                )
             }
-
-            Spacer()
+            .accessibilityLabel("Filter: \(selectedFilter.rawValue)")
         }
-        .padding(.horizontal, 16)
-    }
-
-    private func modeButton(_ label: String, target: EmployerCalendarMode) -> some View {
-        Button { withAnimation(.easeInOut(duration: 0.18)) { mode = target } } label: {
-            Text(label)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(mode == target ? SS.primary : .white.opacity(0.7))
-                .padding(.horizontal, 16)
-                .padding(.vertical, 7)
-                .background(mode == target ? Color.white : Color.clear)
-                .clipShape(Capsule())
-        }
-        .buttonStyle(.plain)
     }
 
     // MARK: - Month Content
 
     private var monthContent: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(spacing: 20) {
-                monthGrid
-                upcomingJobsList
-                Spacer().frame(height: 24)
-            }
+        VStack(alignment: .leading, spacing: DS.Spacing.lg) {
+            monthGrid
+            upcomingJobsList
         }
     }
 
@@ -250,57 +245,55 @@ struct EmployerCalendarView: View {
                 Button { shiftMonth(-1) } label: {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(.white)
-                        .padding(8)
+                        .foregroundStyle(DS.Color.text)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.dsPressable)
+                .accessibilityLabel("Previous month")
 
                 Spacer()
 
                 Text(displayedMonth.formatted(.dateTime.month(.wide).year()))
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(.white)
+                    .dsFont(.headline)
+                    .foregroundStyle(DS.Color.text)
 
                 Spacer()
 
                 Button { shiftMonth(1) } label: {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(.white)
-                        .padding(8)
+                        .foregroundStyle(DS.Color.text)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.dsPressable)
+                .accessibilityLabel("Next month")
             }
-            .padding(.horizontal, 12)
 
             // Weekday Headers
             HStack(spacing: 0) {
                 ForEach(["Mon","Tue","Wed","Thu","Fri","Sat","Sun"], id: \.self) { d in
                     Text(d)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.5))
+                        .font(DS.Font.make(11, .semibold, relativeTo: .caption2))
+                        .foregroundStyle(DS.Color.muted)
                         .frame(maxWidth: .infinity)
                 }
             }
-            .padding(.vertical, 8)
+            .padding(.bottom, DS.Spacing.xs)
 
             // Day cells
             let days = monthDays()
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 7), spacing: 4) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 7), spacing: DS.Spacing.xxs) {
                 ForEach(days, id: \.self) { date in
                     if let date {
                         dayCell(date)
                     } else {
-                        Color.clear.frame(height: 38)
+                        Color.clear.frame(height: 44)
                     }
                 }
             }
-            .padding(.horizontal, 8)
-            .padding(.bottom, 12)
         }
-        .background(Color.white.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .padding(.horizontal, 16)
     }
 
     private func dayCell(_ date: Date) -> some View {
@@ -308,44 +301,45 @@ struct EmployerCalendarView: View {
         let isSelected = calendar.isDate(date, inSameDayAs: selectedDate)
         let hasJob     = jobDates.contains(dateKey(date))
 
-        return Button { selectedDate = date } label: {
+        return Button {
+            DS.Haptics.selection()
+            selectedDate = date
+        } label: {
             VStack(spacing: 2) {
                 Text("\(calendar.component(.day, from: date))")
-                    .font(.system(size: 14, weight: isToday ? .bold : .regular))
-                    .foregroundColor(isSelected ? SS.primary : isToday ? .white : .white.opacity(0.85))
-                    .frame(width: 30, height: 30)
-                    .background(isSelected ? Color.white : isToday ? Color.white.opacity(0.2) : Color.clear)
-                    .clipShape(Circle())
+                    .font(DS.Font.make(14, isToday || isSelected ? .bold : .regular, relativeTo: .callout))
+                    .foregroundStyle(isSelected ? DS.Color.onPrimary : isToday ? DS.Color.primaryText : DS.Color.text)
+                    .frame(width: 32, height: 32)
+                    .background(isSelected ? DS.Color.primary : isToday ? DS.Color.primarySoft : Color.clear, in: Circle())
 
                 Circle()
-                    .fill(hasJob ? Color.orange : Color.clear)
+                    .fill(hasJob ? DS.Color.warning : Color.clear)
                     .frame(width: 5, height: 5)
             }
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .frame(height: 42)
+        .buttonStyle(.dsPressable)
+        .accessibilityLabel(date.formatted(.dateTime.weekday(.wide).day().month(.wide)))
+        .accessibilityValue(hasJob ? "Has jobs" : "")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     private var upcomingJobsList: some View {
         let dayJobs = filteredJobs.filter { calendar.isDate($0.date, inSameDayAs: selectedDate) }
-        return VStack(alignment: .leading, spacing: 10) {
-            Text(selectedDate.formatted(.dateTime.weekday(.wide).day().month(.wide)))
-                .font(.system(size: 14, weight: .bold))
-                .foregroundColor(.white.opacity(0.8))
-                .padding(.horizontal, 16)
-
+        return DSSection(selectedDate.formatted(.dateTime.weekday(.wide).day().month(.wide)), ruled: false) {
             if dayJobs.isEmpty {
                 Text("No jobs on this day.")
-                    .font(.system(size: 13))
-                    .foregroundColor(.white.opacity(0.4))
-                    .padding(.horizontal, 16)
+                    .dsFont(.callout)
+                    .foregroundStyle(DS.Color.muted)
+                    .padding(.vertical, DS.Spacing.xs)
             } else {
-                VStack(spacing: 8) {
+                VStack(spacing: DS.Spacing.sm) {
                     ForEach(dayJobs) { job in
                         EmployerCalJobCard(job: job)
                     }
                 }
-                .padding(.horizontal, 16)
+                .padding(.top, DS.Spacing.xs)
             }
         }
     }
@@ -354,96 +348,98 @@ struct EmployerCalendarView: View {
 
     private var weekContent: some View {
         let weekDays = currentWeekDays()
-        return ScrollView(showsIndicators: false) {
-            VStack(spacing: 0) {
-                // Day Headers
-                HStack(spacing: 0) {
-                    // Time gutter
-                    Color.clear.frame(width: 40)
-                    ForEach(weekDays, id: \.self) { day in
-                        let isToday = calendar.isDateInToday(day)
-                        VStack(spacing: 2) {
-                            Text(day.formatted(.dateTime.weekday(.short)))
-                                .font(.system(size: 11))
-                                .foregroundColor(.white.opacity(0.5))
-                            Text("\(calendar.component(.day, from: day))")
-                                .font(.system(size: 14, weight: .bold))
-                                .foregroundColor(isToday ? SS.primary : .white)
-                                .frame(width: 28, height: 28)
-                                .background(isToday ? Color.white : Color.clear)
-                                .clipShape(Circle())
-                        }
-                        .frame(maxWidth: .infinity)
+        return VStack(spacing: 0) {
+            // Day Headers
+            HStack(spacing: 0) {
+                // Time gutter
+                Color.clear.frame(width: 40)
+                ForEach(weekDays, id: \.self) { day in
+                    let isToday = calendar.isDateInToday(day)
+                    VStack(spacing: 2) {
+                        Text(day.formatted(.dateTime.weekday(.short)))
+                            .font(DS.Font.make(11, .medium, relativeTo: .caption2))
+                            .foregroundStyle(DS.Color.muted)
+                        Text("\(calendar.component(.day, from: day))")
+                            .font(DS.Font.make(14, .bold, relativeTo: .callout))
+                            .foregroundStyle(isToday ? DS.Color.onPrimary : DS.Color.text)
+                            .frame(width: 28, height: 28)
+                            .background(isToday ? DS.Color.primary : Color.clear, in: Circle())
                     }
+                    .frame(maxWidth: .infinity)
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 8)
-                .background(Color.white.opacity(0.06))
-
-                // Timetable (06:00–02:00 next day)
-                ScrollView(showsIndicators: false) {
-                    ZStack(alignment: .topLeading) {
-                        // Hour lines
-                        VStack(spacing: 0) {
-                            ForEach(6..<26, id: \.self) { hour in
-                                HStack(alignment: .top, spacing: 0) {
-                                    Text(String(format: "%02d:00", hour % 24))
-                                        .font(.system(size: 10))
-                                        .foregroundColor(.white.opacity(0.35))
-                                        .frame(width: 40, alignment: .leading)
-                                        .padding(.leading, 8)
-                                    Divider()
-                                        .background(Color.white.opacity(0.1))
-                                }
-                                .frame(height: 56)
-                            }
-                        }
-
-                        // Job overlays
-                        HStack(alignment: .top, spacing: 0) {
-                            Color.clear.frame(width: 40)
-                            ForEach(weekDays, id: \.self) { day in
-                                let dayJobs = filteredJobs.filter { calendar.isDate($0.date, inSameDayAs: day) }
-                                ZStack(alignment: .topLeading) {
-                                    Color.clear
-                                    ForEach(dayJobs) { job in
-                                        let topOffset = CGFloat(max(job.startHour - 6, 0)) * 56
-                                        let height = CGFloat(job.durationHours) * 56 - 4
-                                        weekJobBlock(job)
-                                            .frame(height: max(height, 28))
-                                            .offset(y: topOffset + 2)
-                                    }
-                                }
-                                .frame(maxWidth: .infinity)
-                            }
-                        }
-                        .frame(maxWidth: .infinity)
-                    }
-                }
-                .frame(height: 400)
             }
+            .padding(.vertical, DS.Spacing.xs)
+            .background(DS.Color.surface2)
+
+            // Timetable (06:00–02:00 next day)
+            ScrollView(showsIndicators: false) {
+                ZStack(alignment: .topLeading) {
+                    // Hour lines
+                    VStack(spacing: 0) {
+                        ForEach(6..<26, id: \.self) { hour in
+                            HStack(alignment: .top, spacing: 0) {
+                                Text(String(format: "%02d:00", hour % 24))
+                                    .font(DS.Font.make(10, .medium, relativeTo: .caption2))
+                                    .foregroundStyle(DS.Color.muted)
+                                    .frame(width: 40, alignment: .leading)
+                                DSDivider()
+                                    .frame(maxHeight: .infinity, alignment: .top)
+                            }
+                            .frame(height: 56)
+                        }
+                    }
+
+                    // Job overlays
+                    HStack(alignment: .top, spacing: 0) {
+                        Color.clear.frame(width: 40)
+                        ForEach(weekDays, id: \.self) { day in
+                            let dayJobs = filteredJobs.filter { calendar.isDate($0.date, inSameDayAs: day) }
+                            ZStack(alignment: .topLeading) {
+                                Color.clear
+                                ForEach(dayJobs) { job in
+                                    let topOffset = CGFloat(max(job.startHour - 6, 0)) * 56
+                                    let height = CGFloat(job.durationHours) * 56 - 4
+                                    weekJobBlock(job)
+                                        .frame(height: max(height, 28))
+                                        .offset(y: topOffset + 2)
+                                }
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+            .frame(height: 400)
         }
+        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
+                .strokeBorder(DS.Color.border, lineWidth: 1)
+        )
     }
 
     private func weekJobBlock(_ job: EmployerCalJob) -> some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(job.title)
-                .font(.system(size: 10, weight: .bold))
-                .foregroundColor(.white)
+                .font(DS.Font.make(10, .bold, relativeTo: .caption2))
                 .lineLimit(1)
             Text(job.timeLabel)
-                .font(.system(size: 9))
-                .foregroundColor(.white.opacity(0.8))
+                .font(DS.Font.make(9, .medium, relativeTo: .caption2))
             Text("\(job.totalSpots - job.openSpots)/\(job.totalSpots)")
-                .font(.system(size: 9))
-                .foregroundColor(.white.opacity(0.7))
+                .font(DS.Font.make(9, .medium, relativeTo: .caption2))
         }
+        .foregroundStyle(job.status.tone.foreground)
         .padding(.horizontal, 4)
         .padding(.vertical, 3)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(job.status.color.opacity(0.85))
-        .clipShape(RoundedRectangle(cornerRadius: 5))
+        .background(job.status.tone.soft, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+        .overlay(alignment: .leading) {
+            Capsule().fill(job.status.tone.foreground).frame(width: 3).padding(.vertical, 2)
+        }
         .padding(.horizontal, 2)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(job.title), \(job.timeLabel), \(job.status.label)")
     }
 
     // MARK: - Helpers
@@ -492,86 +488,67 @@ private struct EmployerCalJobCard: View {
     let job: EmployerCalJob
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            header
-            details
-            if let notes = job.jobNotes {
-                VStack(alignment: .leading, spacing: 4) {
-                    Label("Your notes for workers", systemImage: "note.text")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(SS.primary)
-                    Text(notes)
-                        .font(.system(size: 13))
-                        .foregroundColor(.primary)
+        DSCard {
+            VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                header
+                details
+                if let notes = job.jobNotes {
+                    VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
+                        Label("Your notes for workers", systemImage: "note.text")
+                            .font(DS.Font.make(12, .semibold, relativeTo: .caption))
+                            .foregroundStyle(DS.Color.primaryText)
+                        Text(notes)
+                            .dsFont(.callout)
+                            .foregroundStyle(DS.Color.text)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            if !job.workers.isEmpty {
-                Divider()
-                CalendarShiftWorkersSection(
-                    workers: job.workers,
-                    averageRating: job.averageWorkerRating,
-                    jobId: job.id, jobTitle: job.title, payText: job.payText,
-                    shiftText: job.shiftText, location: job.location, logoEmoji: job.logoEmoji
-                )
+                if !job.workers.isEmpty {
+                    DSDivider()
+                    CalendarShiftWorkersSection(
+                        workers: job.workers,
+                        averageRating: job.averageWorkerRating,
+                        jobId: job.id, jobTitle: job.title, payText: job.payText,
+                        shiftText: job.shiftText, location: job.location, logoEmoji: job.logoEmoji
+                    )
+                }
             }
         }
-        .padding(12)
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
     }
 
     /// Kategorie + Schichtkosten
     private var details: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: DS.Spacing.xs) {
             if let category = job.category, !category.isEmpty {
-                Text(category)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(SS.primary)
-                    .padding(.horizontal, 8).padding(.vertical, 3)
-                    .background(SS.primary.opacity(0.1))
-                    .clipShape(Capsule())
+                DSBadge(category, .tone(.primary))
             }
             Label("Shift cost \(Money.format(job.shiftCost)) incl. fee", systemImage: "banknote")
-                .font(.system(size: 12))
-                .foregroundColor(.secondary)
+                .dsFont(.caption)
+                .foregroundStyle(DS.Color.text2)
             Spacer()
         }
     }
 
     private var header: some View {
-        HStack(spacing: 12) {
-            // Status-Stripe
-            RoundedRectangle(cornerRadius: 3)
-                .fill(job.status.color)
-                .frame(width: 4)
-                .padding(.vertical, 2)
-
-            Text(job.logoEmoji)
-                .font(.system(size: 18))
-                .frame(width: 36, height: 36)
-                .background(Color.gray.opacity(0.07))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+        HStack(spacing: DS.Spacing.sm) {
+            DSAvatar(text: job.logoEmoji, size: 40)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(job.title)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.primary)
+                    .dsFont(.headline)
+                    .foregroundStyle(DS.Color.text)
                 Text("\(job.timeLabel) · \(job.location)")
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
+                    .dsFont(.caption)
+                    .foregroundStyle(DS.Color.text2)
             }
 
             Spacer()
 
-            VStack(alignment: .trailing, spacing: 2) {
+            VStack(alignment: .trailing, spacing: DS.Spacing.xxs) {
                 Text("\(job.totalSpots - job.openSpots)/\(job.totalSpots)")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundColor(job.status.color)
-                Text(job.status.label)
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
+                    .font(DS.Font.make(14, .bold, relativeTo: .callout))
+                    .foregroundStyle(job.status.tone.foreground)
+                DSBadge(job.status.label, .tone(job.status.tone))
             }
         }
     }

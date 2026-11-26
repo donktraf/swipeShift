@@ -60,10 +60,10 @@ struct SavedApplicantsView: View {
     @State private var unsaveError: String?
 
     var body: some View {
-        SubScreenShell(title: "Saved Applicants") {
+        SubScreenShell(title: "Saved Applicants", padded: true) {
             VStack(spacing: 0) {
                 if isLoading && saved.isEmpty {
-                    ProgressView().tint(.white).padding(.top, 40)
+                    skeleton
                 } else if let errorMessage, saved.isEmpty {
                     errorView(errorMessage)
                 } else if saved.isEmpty {
@@ -74,6 +74,7 @@ struct SavedApplicantsView: View {
             }
         }
         .task { await load() }
+        .refreshable { await load() }
         .alert("Something went wrong", isPresented: Binding(
             get: { unsaveError != nil },
             set: { if !$0 { unsaveError = nil } }
@@ -82,6 +83,15 @@ struct SavedApplicantsView: View {
         } message: {
             Text(unsaveError ?? "")
         }
+    }
+
+    private var skeleton: some View {
+        VStack(spacing: DS.Spacing.sm) {
+            ForEach(0..<3, id: \.self) { _ in
+                DSSkeletonBlock(height: 170, radius: DS.Radius.card)
+            }
+        }
+        .accessibilityLabel("Loading saved applicants")
     }
 
     @MainActor
@@ -97,48 +107,38 @@ struct SavedApplicantsView: View {
     }
 
     private func errorView(_ message: String) -> some View {
-        VStack(spacing: 12) {
+        VStack(spacing: DS.Spacing.sm) {
             Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 36))
-                .foregroundColor(.orange.opacity(0.7))
+                .font(.system(size: 32))
+                .foregroundStyle(DS.Color.warning)
             Text(message)
-                .font(.system(size: 14))
-                .foregroundColor(.white.opacity(0.7))
+                .dsFont(.callout)
+                .foregroundStyle(DS.Color.text2)
                 .multilineTextAlignment(.center)
             Button("Try Again") { Task { await load() } }
-                .buttonStyle(SSPrimaryButtonStyle())
-                .padding(.horizontal, 60)
+                .buttonStyle(.ds(.soft, size: .medium, fullWidth: false))
         }
-        .padding(.top, 40).padding(.horizontal, 24)
+        .padding(.top, DS.Spacing.xl)
+        .frame(maxWidth: .infinity)
     }
 
     private var savedList: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: DS.Spacing.sm) {
             ForEach(saved) { item in
                 SavedApplicantCard(item: item) {
                     await unsave(item)
                 }
             }
-            .padding(.horizontal, 16)
         }
     }
 
     private var emptyState: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "bookmark.slash")
-                .font(.system(size: 44))
-                .foregroundColor(.white.opacity(0.3))
-            Text("No saved applicants")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(.white.opacity(0.6))
-            Text("Bookmark applicants from the Applicants screen to find them here.")
-                .font(.system(size: 13))
-                .foregroundColor(.white.opacity(0.4))
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 60)
+        DSEmptyState(
+            systemIcon: "bookmark.slash",
+            title: "No saved applicants",
+            message: "Bookmark applicants from the Applicants screen to find them here."
+        )
+        .padding(.top, DS.Spacing.xl)
     }
 
     @MainActor

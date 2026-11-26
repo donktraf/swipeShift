@@ -148,13 +148,13 @@ struct EmployerJob: Identifiable, Decodable, Hashable {
             }
         }
 
-        var color: Color {
+        var badgeStyle: DSBadge.Style {
             switch self {
-            case .active:     return SS.primary
-            case .inProgress: return .orange
-            case .draft:      return .gray
-            case .completed:  return .green
-            case .cancelled:  return .red
+            case .active:     return .published
+            case .inProgress: return .inProgress
+            case .draft:      return .draft
+            case .completed:  return .completed
+            case .cancelled:  return .cancelled
             }
         }
     }
@@ -164,7 +164,7 @@ struct EmployerJob: Identifiable, Decodable, Hashable {
 
 struct AllPostedJobsView: View {
     @State private var jobs: [EmployerJob] = []
-    @State private var isLoading = false
+    @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var selectedTab: PostedJobTab = .active
 
@@ -213,15 +213,17 @@ struct AllPostedJobsView: View {
     }
 
     var body: some View {
-        SubScreenShell(title: "Posted Jobs") {
-            VStack(spacing: 16) {
-                tabBar
-                    .padding(.horizontal, 16)
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: DS.Spacing.md) {
+                Text("Posted jobs")
+                    .dsFont(.display)
+                    .foregroundStyle(DS.Color.text)
+                    .accessibilityAddTraits(.isHeader)
 
-                if isLoading {
-                    ProgressView()
-                        .foregroundColor(.white)
-                        .padding(.top, 60)
+                tabBar
+
+                if isLoading && jobs.isEmpty {
+                    skeletonList
 
                 } else if let err = errorMessage {
                     errorView(err)
@@ -230,7 +232,7 @@ struct AllPostedJobsView: View {
                     emptyView
 
                 } else {
-                    VStack(spacing: 10) {
+                    VStack(spacing: DS.Spacing.sm) {
                         ForEach(filtered) { job in
                             PostedJobCard(
                                 job: job,
@@ -253,10 +255,14 @@ struct AllPostedJobsView: View {
                             )
                         }
                     }
-                    .padding(.horizontal, 16)
                 }
             }
+            .padding(.horizontal, DS.Spacing.screenEdge)
+            .padding(.top, DS.Spacing.md)
+            .padding(.bottom, DS.Spacing.xl)
         }
+        .dsTabBarInset()
+        .dsBackground()
         .task { await load() }
         .refreshable { await load() }
         .navigationDestination(isPresented: $showPayments) {
@@ -349,70 +355,84 @@ struct AllPostedJobsView: View {
         }
     }
 
-    // MARK: - Tab Bar
+    // MARK: - Tab Bar (Pills)
 
     private var tabBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
+            HStack(spacing: DS.Spacing.xs) {
                 ForEach(PostedJobTab.allCases, id: \.self) { tab in
                     let count = countFor(tab)
-                    Button { selectedTab = tab } label: {
-                        HStack(spacing: 4) {
+                    let isOn = selectedTab == tab
+                    Button {
+                        DS.Haptics.selection()
+                        selectedTab = tab
+                    } label: {
+                        HStack(spacing: 6) {
                             Text(tab.rawValue)
-                                .font(.system(size: 13, weight: .semibold))
+                                .font(DS.Font.make(14, .semibold, relativeTo: .callout))
                             if count > 0 {
                                 Text("\(count)")
-                                    .font(.system(size: 11, weight: .bold))
-                                    .padding(.horizontal, 5)
+                                    .font(DS.Font.make(11, .extrabold, relativeTo: .caption2))
+                                    .padding(.horizontal, 6)
                                     .padding(.vertical, 2)
-                                    .background(selectedTab == tab ? Color.white.opacity(0.3) : SS.primary.opacity(0.15))
-                                    .clipShape(Capsule())
+                                    .background(isOn ? DS.Color.onPrimary.opacity(0.25) : DS.Color.surface2, in: Capsule())
                             }
                         }
-                        .foregroundColor(selectedTab == tab ? .white : .secondary)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-                        .background(selectedTab == tab ? SS.primary : Color(uiColor: .systemBackground))
-                        .clipShape(Capsule())
-                        .shadow(color: .black.opacity(0.05), radius: 3, x: 0, y: 1)
+                        .foregroundStyle(isOn ? DS.Color.onPrimary : DS.Color.text2)
+                        .padding(.horizontal, 16)
+                        .frame(minHeight: 44)
+                        .background(isOn ? DS.Color.primary : DS.Color.surface, in: Capsule())
+                        .overlay(Capsule().strokeBorder(isOn ? DS.Color.primary : DS.Color.border, lineWidth: 1))
+                        .contentShape(Capsule())
                     }
-                    .buttonStyle(.plain)
-                    .animation(.easeInOut(duration: 0.15), value: selectedTab)
+                    .buttonStyle(.dsPressable)
+                    .dsAnimation(.snappy, value: selectedTab)
+                    .accessibilityAddTraits(isOn ? .isSelected : [])
                 }
             }
         }
     }
 
-    // MARK: - Empty / Error
+    // MARK: - Loading / Empty / Error
+
+    private var skeletonList: some View {
+        VStack(spacing: DS.Spacing.sm) {
+            ForEach(0..<3, id: \.self) { _ in
+                DSCard {
+                    VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                        HStack(spacing: DS.Spacing.sm) {
+                            DSAvatar(text: "JB", size: 46)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Event staff for a weekend").dsFont(.headline)
+                                Text("Downtown, Los Angeles").dsFont(.caption)
+                            }
+                        }
+                        Text("Applicants 3 new · Spots 4 · Pay $22 / hr").dsFont(.caption)
+                    }
+                }
+            }
+        }
+        .dsSkeleton(true)
+    }
 
     private var emptyView: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "briefcase.badge.plus")
-                .font(.system(size: 44))
-                .foregroundColor(.white.opacity(0.3))
-            Text("No jobs in this category")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(.white.opacity(0.6))
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 60)
+        DSEmptyState(
+            systemIcon: "briefcase",
+            title: "No jobs in this category",
+            message: "Jobs with this status will show up here."
+        )
+        .padding(.top, DS.Spacing.xl)
     }
 
     private func errorView(_ msg: String) -> some View {
-        VStack(spacing: 12) {
-            Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 36))
-                .foregroundColor(.orange.opacity(0.7))
-            Text(msg)
-                .font(.system(size: 14))
-                .foregroundColor(.white.opacity(0.6))
-                .multilineTextAlignment(.center)
-            Button("Try Again") { Task { await load() } }
-                .buttonStyle(SSPrimaryButtonStyle())
-                .padding(.horizontal, 60)
-        }
-        .padding(.top, 40)
-        .padding(.horizontal, 24)
+        DSEmptyState(
+            systemIcon: "exclamationmark.triangle",
+            title: "Couldn't load jobs",
+            message: msg,
+            actionTitle: "Try Again",
+            action: { Task { await load() } }
+        )
+        .padding(.top, DS.Spacing.lg)
     }
 
     // MARK: - Helpers
@@ -487,145 +507,161 @@ private struct PostedJobCard: View {
     let onInlineMessage: (String) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Header
-            HStack(spacing: 12) {
-                Text(job.logoEmoji)
-                    .font(.system(size: 26))
-                    .frame(width: 46, height: 46)
-                    .background(Color.gray.opacity(0.07))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+        DSCard {
+            VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                header
+                statsRow
 
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 8) {
-                        Text(job.title)
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundColor(.primary)
-                            .lineLimit(1)
-                        Spacer()
-                        if job.status == "published", let n = job.newMatchCount, n > 0 {
-                            Text("\(n) new match\(n == 1 ? "" : "es")")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(SS.primary)
-                                .padding(.horizontal, 8).padding(.vertical, 3)
-                                .background(SS.primary.opacity(0.12))
-                                .clipShape(Capsule())
+                // Inline-Bewerber (nur veroeffentlichte Jobs)
+                if job.status == "published", let inline = job.inlineApplicants, !inline.isEmpty {
+                    DSDivider()
+                    VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                        ForEach(inline) { applicant in inlineRow(applicant) }
+                        if job.applicantCount > inline.count {
+                            Button(action: onViewApplicants) {
+                                Text("View all \(job.applicantCount) applicants")
+                                    .font(DS.Font.make(13, .semibold, relativeTo: .footnote))
+                                    .foregroundStyle(DS.Color.primaryText)
+                                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .trailing)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.dsPressable)
                         }
-                        // Status Badge
-                        Text(job.statusEnum.label)
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
-                            .background(job.statusEnum.color)
-                            .clipShape(Capsule())
-                    }
-                    if job.status == "draft", let saved = job.lastSavedDate {
-                        Text("Last saved \(saved.formatted(.relative(presentation: .named)))")
-                            .font(.system(size: 12))
-                            .foregroundColor(.orange)
-                    }
-                    Text(job.location)
-                        .font(.system(size: 13))
-                        .foregroundColor(.secondary)
-                    Text(job.shiftText)
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary.opacity(0.8))
-                }
-            }
-            .padding(14)
-
-            Divider().padding(.horizontal, 14)
-
-            // Stats-Zeile
-            HStack(spacing: 0) {
-                statCell(label: "Applicants", value: applicantsLabel, icon: "person.2.fill")
-                if let instant = job.instantMatchCount, instant > 0 {
-                    Divider().frame(height: 30)
-                    statCell(label: "Instant", value: "\(instant)", icon: "bolt.fill")
-                }
-                Divider().frame(height: 30)
-                statCell(label: "Spots", value: "\(job.openSpots)", icon: "person.badge.plus")
-                Divider().frame(height: 30)
-                statCell(label: "Pay", value: job.payText, icon: "banknote")
-            }
-            .padding(.vertical, 10)
-
-            // Inline-Bewerber (nur veroeffentlichte Jobs)
-            if job.status == "published", let inline = job.inlineApplicants, !inline.isEmpty {
-                Divider().padding(.horizontal, 14)
-                VStack(spacing: 10) {
-                    ForEach(inline) { applicant in inlineRow(applicant) }
-                    if job.applicantCount > inline.count {
-                        Button(action: onViewApplicants) {
-                            Text("View all \(job.applicantCount) applicants")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(SS.primary)
-                        }
-                        .buttonStyle(.plain)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
                     }
                 }
-                .padding(.horizontal, 14).padding(.vertical, 10)
-            }
 
-            // Anwesenheit erfassen: Schicht vorbei, Worker noch ohne Eintrag (48-h-Fenster)
-            if let pending = job.attendancePendingCount, pending > 0 {
-                Divider().padding(.horizontal, 14)
-                Button(action: onRecordAttendance) {
-                    Label("Record attendance (\(pending))", systemImage: "checkmark.shield")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.orange)
-                        .frame(maxWidth: .infinity).padding(.vertical, 10)
+                // Anwesenheit erfassen: Schicht vorbei, Worker noch ohne Eintrag (48-h-Fenster)
+                if let pending = job.attendancePendingCount, pending > 0 {
+                    DSDivider()
+                    Button(action: onRecordAttendance) {
+                        Label("Record attendance (\(pending))", systemImage: "checkmark.shield")
+                    }
+                    .buttonStyle(.ds(.soft, size: .medium))
                 }
-                .buttonStyle(.plain)
-            }
 
-            // Action Buttons (nur bei relevanten Status)
-            let showPayBtn = job.status == "inProgress" || job.status == "completed"
-            let showActionRow = job.status == "draft" || job.status == "published" || job.status == "inProgress" || showPayBtn
-            if showActionRow {
-                Divider().padding(.horizontal, 14)
-                HStack(spacing: 8) {
-                    if job.status == "draft" {
-                        actionButton(label: "Edit", color: SS.primary, action: onEdit)
-                        actionButton(label: "Publish", color: SS.primary, action: onPublish)
-                        actionButton(label: "Delete", color: .red, action: onDelete)
-                    }
-                    if job.status == "published" && (job.totalApplicationCount ?? (job.applicantCount + (job.instantMatchCount ?? 0))) > 0 {
-                        actionButton(label: "View Applicants", color: SS.primary, action: onViewApplicants)
-                    }
-                    if job.status != "cancelled" && job.status != "completed" && job.status != "draft" {
-                        actionButton(label: "Cancel", color: .red, action: onCancel)
-                    }
-                    if showPayBtn {
-                        actionButton(label: "View Payments", color: .teal, action: onViewPayments)
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
+                actionRow
             }
         }
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: .black.opacity(0.05), radius: 6, x: 0, y: 2)
     }
+
+    // MARK: Header
+
+    private var header: some View {
+        HStack(alignment: .top, spacing: DS.Spacing.sm) {
+            DSAvatar(text: job.logoEmoji, size: 46)
+
+            VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
+                Text(job.title)
+                    .dsFont(.headline)
+                    .foregroundStyle(DS.Color.text)
+                    .lineLimit(2)
+
+                HStack(spacing: DS.Spacing.xs) {
+                    DSBadge(job.statusEnum.label, job.statusEnum.badgeStyle)
+                    if job.status == "published", let n = job.newMatchCount, n > 0 {
+                        DSBadge("\(n) new match\(n == 1 ? "" : "es")", .tone(.primary))
+                    }
+                }
+
+                if job.status == "draft", let saved = job.lastSavedDate {
+                    Text("Last saved \(saved.formatted(.relative(presentation: .named)))")
+                        .dsFont(.caption)
+                        .foregroundStyle(DS.Color.warning)
+                }
+                Text(job.location)
+                    .dsFont(.callout)
+                    .foregroundStyle(DS.Color.text2)
+                    .lineLimit(1)
+                Text(job.shiftText)
+                    .dsFont(.caption)
+                    .foregroundStyle(DS.Color.muted)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    // MARK: Stats
+
+    /// Veroeffentlicht: unbeantwortete Bewerbungen ("3 new"); sonst Gesamtzahl ohne "new" ("–" bei 0)
+    private var applicantsLabel: String {
+        if job.status == "published" { return "\(job.applicantCount) new" }
+        let total = job.totalApplicationCount ?? job.applicantCount
+        return total > 0 ? "\(total)" : "–"
+    }
+
+    private var statsRow: some View {
+        HStack(spacing: DS.Spacing.xs) {
+            statCell(label: "Applicants", value: applicantsLabel)
+            if let instant = job.instantMatchCount, instant > 0 {
+                statCell(label: "Instant", value: "\(instant)")
+            }
+            statCell(label: "Spots", value: "\(job.openSpots)")
+            statCell(label: "Pay", value: job.payText)
+        }
+    }
+
+    private func statCell(label: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(DS.Font.make(11, .semibold, relativeTo: .caption2))
+                .foregroundStyle(DS.Color.muted)
+            Text(value)
+                .font(DS.Font.make(14, .bold, relativeTo: .callout))
+                .foregroundStyle(DS.Color.text)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+        .padding(.horizontal, DS.Spacing.xs + 2)
+        .padding(.vertical, DS.Spacing.xs)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DS.Color.surface2, in: RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
+        .accessibilityElement(children: .combine)
+    }
+
+    // MARK: Aktionen
+
+    @ViewBuilder
+    private var actionRow: some View {
+        let showPayBtn = job.status == "inProgress" || job.status == "completed"
+        let showActionRow = job.status == "draft" || job.status == "published" || job.status == "inProgress" || showPayBtn
+        if showActionRow {
+            DSDivider()
+            HStack(spacing: DS.Spacing.xs) {
+                if job.status == "draft" {
+                    Button("Edit", action: onEdit).buttonStyle(.ds(.soft, size: .medium))
+                    Button("Publish", action: onPublish).buttonStyle(.ds(.primary, size: .medium))
+                    Button("Delete", action: onDelete).buttonStyle(.ds(.destructiveSoft, size: .medium))
+                }
+                if job.status == "published" && (job.totalApplicationCount ?? (job.applicantCount + (job.instantMatchCount ?? 0))) > 0 {
+                    Button("View Applicants", action: onViewApplicants).buttonStyle(.ds(.soft, size: .medium))
+                }
+                if job.status != "cancelled" && job.status != "completed" && job.status != "draft" {
+                    Button("Cancel", action: onCancel).buttonStyle(.ds(.destructiveSoft, size: .medium))
+                }
+                if showPayBtn {
+                    Button("View Payments", action: onViewPayments).buttonStyle(.ds(.soft, size: .medium))
+                }
+            }
+        }
+    }
+
+    // MARK: Inline-Bewerber
 
     private func inlineRow(_ applicant: InlineApplicant) -> some View {
         let decision = inlineStates[applicant.applyId]
-        return HStack(spacing: 10) {
+        return HStack(spacing: DS.Spacing.xs + 2) {
             ApplicantAvatar(photoUrl: applicant.profilePhotoUrl, size: 36, initials: applicant.initials)
             VStack(alignment: .leading, spacing: 2) {
                 Text(applicant.name)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.primary)
+                    .font(DS.Font.make(14, .semibold, relativeTo: .callout))
+                    .foregroundStyle(DS.Color.text)
                     .lineLimit(1)
                 ApplicantRatingLabel(average: applicant.ratingAverage, count: applicant.reviewCount)
                 if let reliability = applicant.reliability { ReliabilityLabel(summary: reliability, font: 11) }
                 if let booked = applicant.bookedShifts, !booked.isEmpty {
                     Text("Shifts: \(booked.summaryLabel)")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
+                        .dsFont(.caption)
+                        .foregroundStyle(DS.Color.muted)
                         .lineLimit(1)
                 }
                 if decision == nil, let fit = ApplicantShiftFit.evaluate(
@@ -637,78 +673,34 @@ private struct PostedJobCard: View {
                     ApplicantShiftFitLabel(fit: fit, compact: true)
                 }
             }
-            Spacer(minLength: 6)
+            Spacer(minLength: DS.Spacing.xs)
             switch decision {
             case nil:
-                inlineButton("Decline", systemImage: "xmark", filled: false) { onInlineDecline(applicant) }
-                inlineButton("Accept", systemImage: "checkmark", filled: true) { onInlineAccept(applicant) }
+                inlineButton("Decline", systemImage: "xmark", style: .destructiveSoft) { onInlineDecline(applicant) }
+                inlineButton("Accept", systemImage: "checkmark", style: .primary) { onInlineAccept(applicant) }
             case true?:
                 // Chat erst nach Annahme
                 if let conversationId = applicant.conversationId {
-                    inlineButton("Message", systemImage: "bubble.left.and.bubble.right", filled: false) {
+                    inlineButton("Message", systemImage: "bubble.left.and.bubble.right", style: .soft) {
                         onInlineMessage(conversationId)
                     }
                 } else {
-                    Text("Accepted").font(.system(size: 12, weight: .semibold)).foregroundColor(.green)
+                    DSBadge("Accepted", .upcoming)
                 }
             case false?:
-                Text("Declined").font(.system(size: 12, weight: .semibold)).foregroundColor(.red)
+                DSBadge("Declined", .cancelled)
             }
         }
     }
 
-    private func inlineButton(_ title: String, systemImage: String, filled: Bool, action: @escaping () -> Void) -> some View {
+    private func inlineButton(_ title: String, systemImage: String, style: DSButtonVariant, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Label(title, systemImage: systemImage)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(filled ? .white : (title == "Decline" ? .red : SS.primary))
-                .padding(.horizontal, 10).padding(.vertical, 7)
-                .background(filled ? SS.primary : Color.clear)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 9)
-                        .stroke(filled ? Color.clear : (title == "Decline" ? Color.red.opacity(0.35) : SS.primary.opacity(0.4)), lineWidth: 1)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 9))
+            Image(systemName: systemImage)
+                .font(.system(size: 14, weight: .bold))
+                .frame(minWidth: 20)
         }
-        .buttonStyle(.plain)
-    }
-
-    /// Veroeffentlicht: unbeantwortete Bewerbungen ("3 new"); sonst Gesamtzahl ohne "new" ("–" bei 0)
-    private var applicantsLabel: String {
-        if job.status == "published" { return "\(job.applicantCount) new" }
-        let total = job.totalApplicationCount ?? job.applicantCount
-        return total > 0 ? "\(total)" : "–"
-    }
-
-    private func statCell(label: String, value: String, icon: String) -> some View {
-        VStack(spacing: 3) {
-            Image(systemName: icon)
-                .font(.system(size: 13))
-                .foregroundColor(SS.primary.opacity(0.7))
-            Text(value)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(.primary)
-                .lineLimit(1)
-            Text(label)
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private func actionButton(label: String, color: Color, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(label)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(color)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(color.opacity(0.4), lineWidth: 1)
-                )
-        }
-        .buttonStyle(.plain)
+        .buttonStyle(.ds(style, size: .medium, fullWidth: false))
+        .accessibilityLabel(title)
     }
 }
 
@@ -736,74 +728,56 @@ private struct PublishDraftSheet: View {
     ]
 
     var body: some View {
-        VStack(spacing: 16) {
-            Capsule()
-                .fill(Color.gray.opacity(0.3))
-                .frame(width: 36, height: 4)
-                .padding(.top, 12)
-
-            VStack(spacing: 6) {
-                Text("Publish job?")
-                    .font(.system(size: 20, weight: .bold))
-                Text("\"\(jobTitle)\" will be published immediately and visible to workers.")
-                    .font(.system(size: 14))
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 24)
-            }
-
-            Text("A \(PlatformFees.percentLabel(frozenFeePercent ?? feeConfig.platformFeePercent)) platform fee is added on top of the wages and billed after each shift. Workers receive the full hourly rate.")
-                .font(.system(size: 12))
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 24)
-
-            TermsConsentRow(isAccepted: $termsAccepted)
-                .padding(.horizontal, 16)
-
-            if let errorText {
-                Text(errorText)
-                    .font(.system(size: 13))
-                    .foregroundColor(.red)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 24)
-            }
-
-            VStack(spacing: 10) {
-                if incomplete {
-                    Button("Edit draft") { onEditDraft() }
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(SS.primary)
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
-                } else {
-                    Button {
-                        Task { await run() }
-                    } label: {
-                        Group {
-                            if isPublishing { ProgressView().tint(.white) } else { Text("Publish") }
-                        }
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(termsAccepted ? SS.primary : Color.gray.opacity(0.35))
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!termsAccepted || isPublishing)
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: DS.Spacing.md) {
+                VStack(spacing: DS.Spacing.xs) {
+                    Text("Publish job?")
+                        .dsFont(.title)
+                        .foregroundStyle(DS.Color.text)
+                    Text("\"\(jobTitle)\" will be published immediately and visible to workers.")
+                        .dsFont(.body)
+                        .foregroundStyle(DS.Color.text2)
+                        .multilineTextAlignment(.center)
                 }
-                Button("Cancel") { onCancel() }
-                    .font(.system(size: 15))
-                    .foregroundColor(.secondary)
+
+                Text("A \(PlatformFees.percentLabel(frozenFeePercent ?? feeConfig.platformFeePercent)) platform fee is added on top of the wages and billed after each shift. Workers receive the full hourly rate.")
+                    .dsFont(.caption)
+                    .foregroundStyle(DS.Color.muted)
+                    .multilineTextAlignment(.center)
+
+                TermsConsentRow(isAccepted: $termsAccepted)
+
+                if let errorText {
+                    Text(errorText)
+                        .dsFont(.callout)
+                        .foregroundStyle(DS.Color.danger)
+                        .multilineTextAlignment(.center)
+                }
+
+                VStack(spacing: DS.Spacing.xs) {
+                    if incomplete {
+                        Button("Edit draft") { onEditDraft() }
+                            .buttonStyle(.ds(.primary))
+                    } else {
+                        Button {
+                            Task { await run() }
+                        } label: {
+                            if isPublishing { ProgressView().tint(DS.Color.onPrimary) } else { Text("Publish") }
+                        }
+                        .buttonStyle(.ds(.primary))
+                        .disabled(!termsAccepted || isPublishing)
+                    }
+                    Button("Cancel") { onCancel() }
+                        .buttonStyle(.ds(.secondary))
+                }
             }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 24)
+            .padding(.horizontal, DS.Spacing.screenEdge)
+            .padding(.top, DS.Spacing.lg)
+            .padding(.bottom, DS.Spacing.lg)
         }
-        .background(Color(uiColor: .systemGroupedBackground))
+        .dsBackground()
         .presentationDetents([.fraction(0.6), .large])
+        .presentationDragIndicator(.visible)
         .task { await feeConfig.refresh() }
     }
 
@@ -814,12 +788,15 @@ private struct PublishDraftSheet: View {
         defer { isPublishing = false }
         do {
             try await publish()
+            DS.Haptics.success()
             onPublished()
         } catch let apiError as APIError where apiError.code == "INCOMPLETE_JOB" {
+            DS.Haptics.warning()
             let names = (apiError.missing ?? []).map { Self.fieldLabels[$0] ?? $0 }
             errorText = names.isEmpty ? apiError.message : "This draft is missing: \(names.joined(separator: ", "))."
             incomplete = true
         } catch {
+            DS.Haptics.warning()
             errorText = error.localizedDescription
         }
     }

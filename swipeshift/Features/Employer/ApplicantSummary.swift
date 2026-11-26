@@ -57,30 +57,21 @@ struct ApplicantRatingLabel: View {
     var body: some View {
         if let average {
             HStack(spacing: 3) {
-                Image(systemName: "star.fill").foregroundColor(.yellow)
-                Text(String(format: "%.1f", average)).fontWeight(.semibold)
-                Text("(\(count))").foregroundColor(.secondary)
+                Image(systemName: "star.fill").foregroundStyle(DS.Color.warning)
+                Text(String(format: "%.1f", average)).fontWeight(.semibold).foregroundStyle(DS.Color.text)
+                Text("(\(count))").foregroundStyle(DS.Color.muted)
             }
-            .font(.system(size: 12))
+            .font(DS.Font.make(12, .medium, relativeTo: .caption))
+            .accessibilityElement(children: .combine)
         } else {
-            Text("New")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(SS.primary)
-                .padding(.horizontal, 7).padding(.vertical, 2)
-                .background(SS.primary.opacity(0.1))
-                .clipShape(Capsule())
+            DSBadge("New", .tone(.primary))
         }
     }
 }
 
 struct AdultBadge: View {
     var body: some View {
-        Text("18+")
-            .font(.system(size: 10, weight: .bold))
-            .foregroundColor(.green)
-            .padding(.horizontal, 6).padding(.vertical, 2)
-            .background(Color.green.opacity(0.12))
-            .clipShape(Capsule())
+        DSBadge("18+", .tone(.success))
     }
 }
 
@@ -89,15 +80,14 @@ struct ApplicantTagRow: View {
 
     var body: some View {
         if !tags.isEmpty {
-            HStack(spacing: 6) {
+            HStack(spacing: DS.Spacing.xs) {
                 ForEach(tags, id: \.self) { tag in
                     Text(tag)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(SS.primary)
+                        .font(DS.Font.make(11, .semibold, relativeTo: .caption))
+                        .foregroundStyle(DS.Color.primaryText)
                         .lineLimit(1)
-                        .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(SS.primary.opacity(0.1))
-                        .clipShape(Capsule())
+                        .padding(.horizontal, DS.Spacing.xs).padding(.vertical, 3)
+                        .background(DS.Color.primarySoft, in: Capsule())
                 }
             }
         }
@@ -113,25 +103,25 @@ struct ApplicantAvatar: View {
 
     var body: some View {
         ZStack {
-            Circle().fill(Color.gray.opacity(0.12)).frame(width: size, height: size)
             if let photoUrl, let url = URL(string: photoUrl) {
+                Circle().fill(DS.Color.surface2).frame(width: size, height: size)
                 AsyncImage(url: url) { img in
                     img.resizable().scaledToFill()
                 } placeholder: {
-                    Image(systemName: "person.fill").foregroundColor(.secondary)
+                    Image(systemName: "person.fill").foregroundStyle(DS.Color.muted)
                 }
                 .frame(width: size, height: size)
                 .clipShape(Circle())
             } else if let initials, !initials.isEmpty {
-                Text(initials)
-                    .font(.system(size: size * 0.38, weight: .semibold))
-                    .foregroundColor(.secondary)
+                DSAvatar(text: initials, size: size, shape: .circle, tone: .neutral)
             } else {
+                Circle().fill(DS.Color.surface2).frame(width: size, height: size)
                 Image(systemName: "person.fill")
                     .font(.system(size: size * 0.45))
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(DS.Color.muted)
             }
         }
+        .accessibilityHidden(true)
     }
 }
 
@@ -196,12 +186,7 @@ struct ApplicantChatButton: View {
     var body: some View {
         Button(action: action) {
             Label("Chat", systemImage: "bubble.left.and.bubble.right")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(SS.primary)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
-                .overlay(RoundedRectangle(cornerRadius: 10).stroke(SS.primary.opacity(0.4), lineWidth: 1))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.ds(.soft, size: .medium))
     }
 }

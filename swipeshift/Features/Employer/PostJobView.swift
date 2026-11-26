@@ -168,63 +168,90 @@ struct PostJobView: View {
         (Double(hourlyRateText.replacingOccurrences(of: ",", with: ".")) ?? 0) > 0   // Backend verlangt Lohn > 0 zum Veroeffentlichen
     }
 
+    // MARK: - Fortschritt (Schritte = Abschnittsgruppen, Stand aus den ausgefuellten Pflichtfeldern)
+
+    private static let stepTitles = ["Basics", "Shifts", "Pay", "Details", "Review"]
+
+    private var basicsDone: Bool {
+        !title.trimmingCharacters(in: .whitespaces).isEmpty &&
+        !locationText.trimmingCharacters(in: .whitespaces).isEmpty &&
+        !selectedCategory.isEmpty
+    }
+    private var shiftsDone: Bool { !shifts.isEmpty && shifts.contains { $0.hours > 0 } }
+    private var payDone: Bool { parsedRate > 0 }
+    private var detailsDone: Bool { !jobDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    /// Erster noch nicht erledigter Schritt; alle erledigt → "Review"
+    private var currentStep: Int {
+        if !basicsDone { return 0 }
+        if !shiftsDone { return 1 }
+        if !payDone { return 2 }
+        if !detailsDone { return 3 }
+        return 4
+    }
+
     var body: some View {
-        ZStack(alignment: .bottom) {
-            Color(uiColor: .systemGroupedBackground).ignoresSafeArea()
+        VStack(spacing: 0) {
+            navBar
 
-            VStack(spacing: 0) {
-                navBar
-                Divider()
+            DSProgressSteps(steps: Self.stepTitles, current: currentStep)
+                .padding(.horizontal, DS.Spacing.screenEdge)
+                .padding(.bottom, DS.Spacing.sm)
 
-                ScrollView(showsIndicators: false) {
-                    VStack(spacing: 0) {
-                        basicInfoSection
-                        categorySection
-                        tagsSection
-                        shiftsSection
-                        workersAndPaySection
-                        costSummarySection
-                        descriptionSection
-                        tasksSection
-                        requirementsSection
-                        paymentSection
-                        applicationsSection
-                        cancellationSection
-                        Spacer().frame(height: 110)
-                    }
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: DS.Spacing.lg) {
+                    basicInfoSection
+                    categorySection
+                    tagsSection
+                    shiftsSection
+                    workersAndPaySection
+                    costSummarySection
+                    descriptionSection
+                    tasksSection
+                    requirementsSection
+                    paymentSection
+                    applicationsSection
+                    cancellationSection
                 }
+                .padding(.horizontal, DS.Spacing.screenEdge)
+                .padding(.top, DS.Spacing.xs)
+                .padding(.bottom, DS.Spacing.xl)
             }
+            .scrollDismissesKeyboard(.interactively)
 
             footerBar
         }
+        .dsBackground()
         .navigationBarHidden(true)
         .overlay {
             // Laden fehlgeschlagen: kein (leeres) Formular, sonst koennte der Draft mit Defaults ueberschrieben werden
             if let draftLoadError {
-                ZStack {
-                    Color(uiColor: .systemGroupedBackground).ignoresSafeArea()
-                    VStack(spacing: 14) {
-                        Image(systemName: "exclamationmark.triangle")
-                            .font(.system(size: 36))
-                            .foregroundColor(.orange)
-                        Text("Couldn't load this draft")
-                            .font(.system(size: 17, weight: .semibold))
-                        Text(draftLoadError)
-                            .font(.system(size: 14))
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-                        Button("Retry") { Task { await loadDraftIfNeeded() } }
-                            .buttonStyle(SSPrimaryButtonStyle())
-                        Button("Close") { dismiss() }
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(.horizontal, 40)
+                VStack(spacing: DS.Spacing.sm) {
+                    DSEmptyState(
+                        systemIcon: "exclamationmark.triangle",
+                        title: "Couldn't load this draft",
+                        message: draftLoadError,
+                        actionTitle: "Retry",
+                        action: { Task { await loadDraftIfNeeded() } }
+                    )
+                    Button("Close") { dismiss() }
+                        .buttonStyle(.ds(.secondary, size: .medium, fullWidth: false))
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(DS.Color.bg.ignoresSafeArea())
             } else if isLoadingDraft {
-                ZStack {
-                    Color(uiColor: .systemGroupedBackground).ignoresSafeArea()
-                    ProgressView()
+                VStack(alignment: .leading, spacing: DS.Spacing.md) {
+                    DSSkeletonBlock(width: 120, height: 14)
+                    DSSkeletonBlock(height: 50, radius: DS.Radius.control)
+                    DSSkeletonBlock(height: 50, radius: DS.Radius.control)
+                    DSSkeletonBlock(height: 50, radius: DS.Radius.control)
+                    DSSkeletonBlock(width: 160, height: 14)
+                    DSSkeletonBlock(height: 120, radius: DS.Radius.control)
+                    Spacer()
                 }
+                .padding(DS.Spacing.screenEdge)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(DS.Color.bg.ignoresSafeArea())
             }
         }
         .task {
@@ -258,230 +285,170 @@ struct PostJobView: View {
 
     // MARK: - Nav Bar
     private var navBar: some View {
-        HStack {
-            Button { dismiss() } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.primary)
-                    .frame(width: 36, height: 36)
-                    .background(Color(uiColor: .secondarySystemGroupedBackground))
-                    .clipShape(Circle())
-            }
+        HStack(spacing: DS.Spacing.sm) {
+            DSIconButton(systemName: "xmark", label: "Close") { dismiss() }
 
-            Spacer()
+            Spacer(minLength: 0)
 
-            Text(isEditing ? "Edit Draft" : "Post a Job")
-                .font(.system(size: 17, weight: .semibold))
+            Text(isEditing ? "Edit draft" : "Post a job")
+                .dsFont(.headline)
+                .foregroundStyle(DS.Color.text)
+                .accessibilityAddTraits(.isHeader)
 
-            Spacer()
+            Spacer(minLength: 0)
 
-            Color.clear.frame(width: 36, height: 36)
+            Color.clear.frame(width: 44, height: 44)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(Color(uiColor: .systemBackground))
+        .padding(.horizontal, DS.Spacing.screenEdge)
+        .padding(.vertical, DS.Spacing.xs)
     }
 
     // MARK: - Grundinfos
     private var basicInfoSection: some View {
-        FormSection(title: "Basic Info") {
-            VStack(spacing: 0) {
-                FormRow(label: "Job Title") {
-                    TextField("e.g. Event Staff", text: $title)
-                        .font(.system(size: 15))
-                }
-                Divider().padding(.leading, 16)
-                FormRow(label: "Company") {
-                    Text(companyName)
-                        .font(.system(size: 15))
-                        .foregroundColor(.secondary)
-                }
-                Divider().padding(.leading, 16)
-                FormRow(label: "Location") {
-                    VStack(alignment: .leading, spacing: 0) {
-                        TextField("City or address", text: $locationText)
-                            .font(.system(size: 15))
-                            .onChange(of: locationText) { _, newValue in
-                                // Vorbefuellung im Bearbeiten-Modus: Koordinaten behalten, keine Vorschlaege oeffnen
-                                if skipNextLocationReset { skipNextLocationReset = false; return }
-                                locationLat = nil
-                                locationLng = nil
-                                showLocationSuggestions = true
-                                locationSearchTask?.cancel()
-                                locationSearchTask = Task {
-                                    try? await Task.sleep(nanoseconds: 350_000_000)
-                                    if Task.isCancelled { return }
-                                    await MainActor.run { locationGeocoder.updateQuery(newValue) }
-                                }
-                            }
+        DSSection("Basic info", ruled: false) {
+            VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                DSTextField("Job title", placeholder: "e.g. Event staff", text: $title)
 
-                        if showLocationSuggestions && !locationGeocoder.suggestions.isEmpty {
-                            VStack(spacing: 0) {
-                                ForEach(locationGeocoder.suggestions) { s in
-                                    Button {
-                                        locationText = s.fullText
-                                        locationLat  = s.lat
-                                        locationLng  = s.lng
-                                        showLocationSuggestions = false
-                                        locationGeocoder.updateQuery("")
-                                    } label: {
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(s.title)
-                                                .font(.system(size: 14))
-                                                .foregroundColor(.primary)
-                                            if !s.subtitle.isEmpty {
-                                                Text(s.subtitle)
-                                                    .font(.system(size: 12))
-                                                    .foregroundColor(.secondary)
-                                            }
-                                        }
-                                        .padding(.vertical, 10)
-                                        .padding(.horizontal, 4)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                    }
-                                    .buttonStyle(.plain)
-                                    Divider()
-                                }
+                DSRow("Company", value: companyName, showsDivider: false)
+
+                VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                    DSTextField("Location", placeholder: "City or address", text: $locationText)
+                        .onChange(of: locationText) { _, newValue in
+                            // Vorbefuellung im Bearbeiten-Modus: Koordinaten behalten, keine Vorschlaege oeffnen
+                            if skipNextLocationReset { skipNextLocationReset = false; return }
+                            locationLat = nil
+                            locationLng = nil
+                            showLocationSuggestions = true
+                            locationSearchTask?.cancel()
+                            locationSearchTask = Task {
+                                try? await Task.sleep(nanoseconds: 350_000_000)
+                                if Task.isCancelled { return }
+                                await MainActor.run { locationGeocoder.updateQuery(newValue) }
                             }
-                            .background(Color(uiColor: .secondarySystemGroupedBackground))
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                            .padding(.top, 4)
+                        }
+
+                    if showLocationSuggestions && !locationGeocoder.suggestions.isEmpty {
+                        VStack(spacing: 0) {
+                            ForEach(locationGeocoder.suggestions) { s in
+                                Button {
+                                    DS.Haptics.selection()
+                                    locationText = s.fullText
+                                    locationLat  = s.lat
+                                    locationLng  = s.lng
+                                    showLocationSuggestions = false
+                                    locationGeocoder.updateQuery("")
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(s.title)
+                                            .dsFont(.body)
+                                            .foregroundStyle(DS.Color.text)
+                                        if !s.subtitle.isEmpty {
+                                            Text(s.subtitle)
+                                                .dsFont(.caption)
+                                                .foregroundStyle(DS.Color.muted)
+                                        }
+                                    }
+                                    .padding(.vertical, DS.Spacing.xs)
+                                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                DSDivider()
+                            }
                         }
                     }
                 }
             }
+            .padding(.top, DS.Spacing.xxs)
         }
     }
 
     // MARK: - Kategorie
     private var categorySection: some View {
-        FormSection(title: "Category") {
+        DSSection("Category", ruled: false) {
             LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 100), spacing: 8)],
-                spacing: 8
+                columns: [GridItem(.flexible(), spacing: DS.Spacing.xs), GridItem(.flexible(), spacing: DS.Spacing.xs)],
+                spacing: DS.Spacing.xs
             ) {
                 ForEach(JobCategory.all, id: \.name) { cat in
-                    let isSelected = selectedCategory == cat.name
-                    Button { selectedCategory = cat.name } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: cat.icon)
-                                .font(.system(size: 13))
-                            Text(cat.name)
-                                .font(.system(size: 13, weight: .medium))
-                        }
-                        .foregroundColor(isSelected ? .white : SS.primary)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .frame(maxWidth: .infinity)
-                        .background(isSelected ? SS.primary : SS.primary.opacity(0.08))
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                    DSChip(cat.name, isSelected: selectedCategory == cat.name) {
+                        selectedCategory = cat.name
                     }
-                    .buttonStyle(.plain)
-                    .animation(.spring(response: 0.2), value: isSelected)
                 }
             }
-            .padding(14)
-            .background(Color(uiColor: .systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .padding(.top, DS.Spacing.xxs)
         }
     }
 
     // MARK: - Tags
     private var tagsSection: some View {
-        FormSection(title: "Job Tags") {
-            VStack(alignment: .leading, spacing: 14) {
+        DSSection("Job tags", ruled: false) {
+            VStack(alignment: .leading, spacing: DS.Spacing.md) {
                 ForEach(tagGroups, id: \.label) { group in
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: DS.Spacing.xs) {
                         Text(group.label)
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.secondary)
+                            .dsFont(.caption)
+                            .foregroundStyle(DS.Color.text2)
 
-                        FlowChips(
-                            items: group.tags,
-                            selected: $selectedTags
-                        )
+                        FlowChips(items: group.tags, selected: $selectedTags)
                     }
                 }
             }
-            .padding(14)
-            .background(Color(uiColor: .systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .padding(.top, DS.Spacing.xxs)
         }
     }
 
     // MARK: - Schichten
     private var shiftsSection: some View {
-        FormSection(title: "Shifts") {
-            VStack(spacing: 10) {
-                ForEach($shifts) { $shift in
-                    ShiftRow(shift: $shift, onRemove: shifts.count > 1 ? {
+        DSSection("Shifts", trailing: "Duration is calculated", ruled: false) {
+            VStack(alignment: .leading, spacing: DS.Spacing.md) {
+                ForEach(Array($shifts.enumerated()), id: \.element.id) { index, $shift in
+                    ShiftRow(index: index, shift: $shift, onRemove: shifts.count > 1 ? {
                         shifts.removeAll { $0.id == shift.id }
                     } : nil)
                 }
 
                 Button {
+                    DS.Haptics.light()
                     shifts.append(DraftShift())
                 } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.system(size: 15))
-                        Text("Add Shift")
-                            .font(.system(size: 14, weight: .semibold))
-                    }
-                    .foregroundColor(SS.primary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(SS.primary.opacity(0.07))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    Label("Add shift", systemImage: "plus")
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.ds(.soft, size: .medium))
 
-                shiftOptionsCard
+                shiftOptions
             }
         }
     }
 
     // Dringlichkeit, Standorttyp, Pause (alles optional)
-    private var shiftOptionsCard: some View {
+    private var shiftOptions: some View {
         VStack(spacing: 0) {
-            ToggleRow(label: "Urgent (needs workers fast)", isOn: $isUrgent)
-            Divider().padding(.leading, 16)
-            ToggleRow(label: "Work at multiple locations", isOn: $multipleLocations)
-            Divider().padding(.leading, 16)
-            ToggleRow(label: "Break included", isOn: $breakIncluded)
+            DSToggleRow("Urgent (needs workers fast)", isOn: $isUrgent)
+            DSToggleRow("Work at multiple locations", isOn: $multipleLocations)
+            DSToggleRow("Break included", isOn: $breakIncluded)
             if breakIncluded {
-                Divider().padding(.leading, 16)
-                FormRow(label: "Break length") {
-                    Picker("", selection: $breakMinutes) {
+                DSRow("Break length") {
+                    Picker("Break length", selection: $breakMinutes) {
                         ForEach(JobOptions.breakMinutes, id: \.self) { Text("\($0) min").tag($0) }
                     }
                     .pickerStyle(.menu)
-                    .tint(SS.primary)
+                    .tint(DS.Color.primaryText)
                 }
             }
         }
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(alignment: .bottom) { DSDivider() }
     }
 
     // MARK: - Mitarbeiter & Lohn
     private var workersAndPaySection: some View {
-        FormSection(title: "Workers & Pay") {
-            VStack(spacing: 0) {
-                FormRow(label: "Number of Workers") {
-                    Stepper("\(numberOfWorkers)", value: $numberOfWorkers, in: 1...50)
-                        .labelsHidden()
-                    Text("\(numberOfWorkers)")
-                        .font(.system(size: 15, weight: .semibold))
-                        .frame(width: 30)
+        DSSection("Workers & pay", ruled: false) {
+            VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                DSRow("Number of workers", showsDivider: false) {
+                    DSStepper(value: $numberOfWorkers, range: 1...50, accessibilityName: "Number of workers")
                 }
-                Divider().padding(.leading, 16)
-                FormRow(label: "Hourly Rate ($)") {
-                    TextField("e.g. 15.00", text: $hourlyRateText)
-                        .keyboardType(.decimalPad)
-                        .font(.system(size: 15))
-                        .multilineTextAlignment(.trailing)
-                }
+                DSTextField("Hourly rate ($)", placeholder: "e.g. 15.00", text: $hourlyRateText)
+                    .keyboardType(.decimalPad)
             }
         }
     }
@@ -494,280 +461,190 @@ struct PostJobView: View {
     @ViewBuilder
     private var costSummarySection: some View {
         if parsedRate > 0, shifts.contains(where: { $0.hours > 0 }) {
-            FormSection(title: "Cost Summary") {
+            DSSection("Cost summary", ruled: false) {
                 FeeSummaryView(shiftHours: shifts.map(\.hours), hourlyRate: parsedRate,
                                workers: numberOfWorkers, percent: effectiveFeePercent)
+                    .padding(.top, DS.Spacing.xxs)
             }
         }
     }
 
     // MARK: - Stellenbeschreibung
     private var descriptionSection: some View {
-        FormSection(title: "Job Description") {
-            TextEditor(text: $jobDescription)
-                .font(.system(size: 15))
-                .frame(minHeight: 100)
-                .padding(10)
-                .background(Color(uiColor: .systemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-                .overlay(
-                    Group {
-                        if jobDescription.isEmpty {
-                            Text("Describe the job, workflow, and work environment…")
-                                .font(.system(size: 15))
-                                .foregroundColor(.secondary.opacity(0.6))
-                                .padding(14)
-                                .allowsHitTesting(false)
-                        }
-                    },
-                    alignment: .topLeading
-                )
+        DSSection("Job description", ruled: false) {
+            DSTextEditor("Description", placeholder: "Describe the job, workflow, and work environment…",
+                         text: $jobDescription, minLines: 4, maxLines: 10)
+                .padding(.top, DS.Spacing.xxs)
         }
     }
 
     // MARK: - Aufgaben
     private var tasksSection: some View {
-        FormSection(title: "Tasks") {
-            VStack(spacing: 8) {
+        DSSection("Tasks", ruled: false) {
+            VStack(alignment: .leading, spacing: DS.Spacing.sm) {
                 ForEach(tasks.indices, id: \.self) { i in
-                    HStack(spacing: 8) {
-                        Image(systemName: "circle.fill")
-                            .font(.system(size: 7))
-                            .foregroundColor(SS.primary)
-                            .padding(.leading, 4)
-
-                        TextField("Describe task", text: $tasks[i])
-                            .font(.system(size: 15))
-                            .padding(.vertical, 10)
-                            .padding(.horizontal, 12)
-                            .background(Color(uiColor: .secondarySystemGroupedBackground))
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                    HStack(alignment: .bottom, spacing: DS.Spacing.xs) {
+                        DSTextField("Task \(i + 1)", placeholder: "Describe task", text: $tasks[i])
 
                         if tasks.count > 1 {
-                            Button { tasks.remove(at: i) } label: {
+                            Button {
+                                DS.Haptics.light()
+                                tasks.remove(at: i)
+                            } label: {
                                 Image(systemName: "minus.circle.fill")
-                                    .foregroundColor(.red.opacity(0.7))
                                     .font(.system(size: 20))
+                                    .foregroundStyle(DS.Color.danger)
+                                    .frame(width: 44, height: 50)
+                                    .contentShape(Rectangle())
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.dsPressable)
+                            .accessibilityLabel("Remove task \(i + 1)")
                         }
                     }
                 }
 
                 Button {
+                    DS.Haptics.light()
                     tasks.append("")
                 } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "plus.circle")
-                            .font(.system(size: 14))
-                        Text("Add Task")
-                            .font(.system(size: 13, weight: .medium))
-                    }
-                    .foregroundColor(SS.primary)
+                    Label("Add task", systemImage: "plus")
                 }
-                .buttonStyle(.plain)
-                .padding(.top, 2)
+                .buttonStyle(.ds(.soft, size: .medium, fullWidth: false))
             }
-            .padding(14)
-            .background(Color(uiColor: .systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .padding(.top, DS.Spacing.xxs)
         }
     }
 
     // MARK: - Anforderungen
     private var requirementsSection: some View {
-        FormSection(title: "Requirements") {
-            VStack(spacing: 0) {
-                // Dress Code
-                PickerRow(label: "Dress Code", options: dressCodeOptions, selection: $selectedDressCode)
-                Divider().padding(.leading, 16)
+        DSSection("Requirements") {
+            PickerRow(label: "Dress code", options: dressCodeOptions, selection: $selectedDressCode)
+            MultiPickerRow(label: "Languages", options: languageOptions, selected: $selectedLanguages)
 
-                // Languages
-                MultiPickerRow(label: "Languages", options: languageOptions, selected: $selectedLanguages)
-                Divider().padding(.leading, 16)
+            DSRow("Min. age") {
+                TextField("Min. age", text: $minAgeText, prompt: Text("e.g. 18").foregroundStyle(DS.Color.muted))
+                    .keyboardType(.numberPad)
+                    .multilineTextAlignment(.trailing)
+                    .font(DS.Font.make(15, .semibold))
+                    .foregroundStyle(DS.Color.text)
+                    .tint(DS.Color.primary)
+                    .frame(maxWidth: 140)
+            }
 
-                // Min Age
-                FormRow(label: "Min. Age") {
-                    TextField("e.g. 18", text: $minAgeText)
-                        .keyboardType(.numberPad)
-                        .font(.system(size: 15))
-                        .multilineTextAlignment(.trailing)
-                }
-                Divider().padding(.leading, 16)
+            // Optionale Anforderungen
+            MultiPickerRow(label: "Required skills", options: JobOptions.skills, selected: $requiredSkills)
+            MultiPickerRow(label: "Physical requirements", options: JobOptions.physical, selected: $physicalRequirements)
+            MultiPickerRow(label: "Certifications", options: JobOptions.certifications, selected: $certifications)
+            PickerRow(label: "Education", options: JobOptions.education, selection: $educationLevel)
+            DSToggleRow("Work authorization required", isOn: $workAuthorizationRequired)
 
-                // Optionale Anforderungen
-                MultiPickerRow(label: "Required Skills", options: JobOptions.skills, selected: $requiredSkills)
-                Divider().padding(.leading, 16)
-                MultiPickerRow(label: "Physical Requirements", options: JobOptions.physical, selected: $physicalRequirements)
-                Divider().padding(.leading, 16)
-                MultiPickerRow(label: "Certifications", options: JobOptions.certifications, selected: $certifications)
-                Divider().padding(.leading, 16)
-                PickerRow(label: "Education", options: JobOptions.education, selection: $educationLevel)
-                Divider().padding(.leading, 16)
-                ToggleRow(label: "Work authorization required", isOn: $workAuthorizationRequired)
-                Divider().padding(.leading, 16)
-
-                // Experience Level (Radio Buttons)
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Experience Level")
-                        .font(.system(size: 14))
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 16)
-                        .padding(.top, 10)
-
-                    VStack(spacing: 0) {
-                        ForEach(expLevelOptions, id: \.self) { option in
-                            Button {
-                                selectedExpLevel = option
-                            } label: {
-                                HStack {
-                                    Text(option)
-                                        .font(.system(size: 15))
-                                        .foregroundColor(.primary)
-                                    Spacer()
-                                    Image(systemName: selectedExpLevel == option ? "largecircle.fill.circle" : "circle")
-                                        .foregroundColor(selectedExpLevel == option ? SS.primary : .gray.opacity(0.4))
-                                        .font(.system(size: 18))
-                                }
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 12)
-                            }
-                            .buttonStyle(.plain)
-                            if option != expLevelOptions.last {
-                                Divider().padding(.leading, 16)
-                            }
-                        }
+            // Experience Level (Radio Buttons)
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Experience level")
+                    .dsFont(.callout)
+                    .foregroundStyle(DS.Color.text2)
+                    .padding(.top, DS.Spacing.sm)
+                    .padding(.bottom, DS.Spacing.xxs)
+                ForEach(expLevelOptions, id: \.self) { option in
+                    let isOn = selectedExpLevel == option
+                    DSRow(option, showsDivider: option != expLevelOptions.first, action: {
+                        DS.Haptics.selection()
+                        selectedExpLevel = option
+                    }) {
+                        Image(systemName: isOn ? "largecircle.fill.circle" : "circle")
+                            .font(.system(size: 20))
+                            .foregroundStyle(isOn ? DS.Color.primary : DS.Color.border)
+                            .accessibilityHidden(true)
                     }
+                    .accessibilityAddTraits(isOn ? .isSelected : [])
                 }
             }
-            .background(Color(uiColor: .systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay(alignment: .top) { DSDivider() }
         }
     }
 
     // MARK: - Zahlung
     private var paymentSection: some View {
-        FormSection(title: "Payment & Contract") {
-            VStack(spacing: 0) {
-                PickerRow(label: "Payment Frequency", options: payFreqOptions, selection: $selectedPayFreq)
-                Divider().padding(.leading, 16)
-                PickerRow(label: "Contract Type", options: contractTypeOptions, selection: $selectedContractType)
-                Divider().padding(.leading, 16)
-                ToggleRow(label: "Same-day pay", isOn: $sameDayPay)
-                Divider().padding(.leading, 16)
-                ToggleRow(label: "Tips included", isOn: $tipsIncluded)
-                Divider().padding(.leading, 16)
-                ToggleRow(label: "Bonus available", isOn: $bonusAvailable)
-                if bonusAvailable {
-                    Divider().padding(.leading, 16)
-                    LimitedTextField(placeholder: "Describe the bonus (optional)", text: $bonusDescription, limit: 200, lines: 1...3)
-                }
-                Divider().padding(.leading, 16)
-                ToggleRow(label: "Repeat work possible", isOn: $repeatWork)
+        DSSection("Payment & contract") {
+            PickerRow(label: "Payment frequency", options: payFreqOptions, selection: $selectedPayFreq)
+            PickerRow(label: "Contract type", options: contractTypeOptions, selection: $selectedContractType)
+            DSToggleRow("Same-day pay", isOn: $sameDayPay)
+            DSToggleRow("Tips included", isOn: $tipsIncluded)
+            DSToggleRow("Bonus available", isOn: $bonusAvailable)
+            if bonusAvailable {
+                DSTextEditor("Bonus", placeholder: "Describe the bonus (optional)", text: $bonusDescription,
+                             minLines: 1, maxLines: 3, maxLength: 200)
+                    .padding(.vertical, DS.Spacing.xs)
             }
-            .background(Color(uiColor: .systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+            DSToggleRow("Repeat work possible", isOn: $repeatWork)
         }
     }
 
     // MARK: - Instant Match
     private var applicationsSection: some View {
-        FormSection(title: "Applications") {
-            VStack(alignment: .leading, spacing: 0) {
-                ToggleRow(label: "Instant Match", isOn: $instantMatch)
-                Text("Qualified applicants are accepted automatically until all spots are filled.")
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 12)
-            }
-            .background(Color(uiColor: .systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+        DSSection("Applications") {
+            DSToggleRow("Instant match", subtitle: "Qualified applicants are accepted automatically until all spots are filled.", showsDivider: false, isOn: $instantMatch)
         }
     }
 
     // MARK: - Cancellation & Notes
     private var cancellationSection: some View {
-        FormSection(title: "Cancellation & Notes") {
-            VStack(spacing: 0) {
-                HStack {
-                    Text("Cancellation policy")
-                        .font(.system(size: 14))
-                        .foregroundColor(.secondary)
-                        .padding(.leading, 16)
-                    Spacer()
-                    Picker("", selection: $cancellationPolicy) {
+        DSSection("Cancellation & notes", ruled: false) {
+            VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                DSRow("Cancellation policy", showsDivider: false) {
+                    Picker("Cancellation policy", selection: $cancellationPolicy) {
                         Text("Please select").tag("")
                         ForEach(JobCancellationPolicy.allCases) { Text($0.label).tag($0.rawValue) }
                     }
                     .pickerStyle(.menu)
-                    .tint(SS.primary)
-                    .padding(.trailing, 8)
+                    .tint(DS.Color.primaryText)
                 }
-                .padding(.vertical, 6)
-                Divider().padding(.leading, 16)
-                LimitedTextField(placeholder: "Cancellation notes (optional)", text: $cancellationNotes, limit: 300, lines: 2...5)
-                Divider().padding(.leading, 16)
-                LimitedTextField(placeholder: "Notes for workers, e.g. meeting point or parking (optional)", text: $jobNotes, limit: 500, lines: 2...6)
+                DSTextEditor("Cancellation notes", placeholder: "Cancellation notes (optional)", text: $cancellationNotes,
+                             minLines: 2, maxLines: 5, maxLength: 300)
+                DSTextEditor("Notes for workers", placeholder: "e.g. meeting point or parking (optional)", text: $jobNotes,
+                             minLines: 2, maxLines: 6, maxLength: 500)
             }
-            .background(Color(uiColor: .systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 14))
         }
     }
 
     // MARK: - Footer
     private var footerBar: some View {
-        VStack(spacing: 0) {
+        VStack(spacing: DS.Spacing.xs) {
             if let err = errorMessage {
                 Text(err)
-                    .font(.system(size: 12))
-                    .foregroundColor(.red)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
+                    .dsFont(.caption)
+                    .foregroundStyle(DS.Color.danger)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            Divider()
-            HStack(spacing: 10) {
+            HStack(spacing: DS.Spacing.sm) {
                 Button {
                     pendingStatus = "draft"
                     showConfirmSheet = true
                 } label: {
-                    Text(isEditing ? "Save Draft" : "Save as Draft")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(SS.primary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(SS.primary.opacity(0.1))
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                    Text("Save draft")
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.ds(.secondary))
                 .disabled(isSubmitting)
 
                 Button {
                     pendingStatus = "published"
                     showConfirmSheet = true
                 } label: {
-                    Group {
-                        if isSubmitting {
-                            ProgressView().tint(.white)
-                        } else {
-                            Text("Post Job")
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundColor(.white)
-                        }
+                    if isSubmitting {
+                        ProgressView().tint(DS.Color.onPrimary)
+                    } else {
+                        Text("Post job")
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(canPost ? SS.primary : Color.gray.opacity(0.35))
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.ds(.primary))
                 .disabled(!canPost || isSubmitting)
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 12)
-            .padding(.bottom, 28)
-            .background(Color(uiColor: .systemBackground))
         }
+        .padding(.horizontal, DS.Spacing.screenEdge)
+        .padding(.top, DS.Spacing.sm)
+        .padding(.bottom, DS.Spacing.sm)
+        .background(DS.Color.surface)
+        .overlay(alignment: .top) { DSDivider() }
     }
 
     // MARK: - Draft laden (Bearbeiten-Modus)
@@ -888,9 +765,11 @@ struct PostJobView: View {
                 try await APIClient.shared.postJob(request)
             }
             isSubmitting = false
+            DS.Haptics.success()
             dismiss()
         } catch {
             isSubmitting = false
+            DS.Haptics.warning()
             errorMessage = error.localizedDescription
         }
     }
@@ -914,97 +793,76 @@ struct PostJobConfirmSheet: View {
     @State private var termsAccepted = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            Capsule()
-                .fill(Color.gray.opacity(0.3))
-                .frame(width: 36, height: 4)
-                .padding(.top, 12)
-                .padding(.bottom, 20)
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: DS.Spacing.md) {
+                VStack(spacing: DS.Spacing.xs) {
+                    Image(systemName: isDraft ? "doc.badge.clock" : "megaphone.fill")
+                        .font(.system(size: 28, weight: .semibold))
+                        .foregroundStyle(isDraft ? DS.Tone.warning.foreground : DS.Tone.primary.foreground)
+                        .frame(width: 64, height: 64)
+                        .background(isDraft ? DS.Tone.warning.soft : DS.Tone.primary.soft, in: Circle())
+                        .accessibilityHidden(true)
 
-            VStack(spacing: 16) {
-                Image(systemName: isDraft ? "doc.badge.clock" : "megaphone.fill")
-                    .font(.system(size: 36))
-                    .foregroundColor(isDraft ? .orange : SS.primary)
-                    .padding(16)
-                    .background((isDraft ? Color.orange : SS.primary).opacity(0.1))
-                    .clipShape(Circle())
-
-                VStack(spacing: 6) {
                     Text(isDraft ? "Save as draft?" : "Post job?")
-                        .font(.system(size: 20, weight: .bold))
+                        .dsFont(.title)
+                        .foregroundStyle(DS.Color.text)
 
                     Text(isDraft
                         ? "The job will be saved but not yet published."
                         : "Once published, workers can apply for \"\(jobTitle)\".")
-                        .font(.system(size: 14))
-                        .foregroundColor(.secondary)
+                        .dsFont(.body)
+                        .foregroundStyle(DS.Color.text2)
                         .multilineTextAlignment(.center)
-                        .padding(.horizontal, 24)
                 }
 
                 HStack(spacing: 6) {
                     Image(systemName: "briefcase")
-                        .font(.system(size: 12))
+                        .font(.system(size: 12, weight: .semibold))
+                        .accessibilityHidden(true)
                     Text(jobTitle.isEmpty ? "No title" : jobTitle)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(DS.Font.make(13, .semibold, relativeTo: .footnote))
+                        .lineLimit(1)
                     Text("·")
                     Text("\(shiftsCount) shift\(shiftsCount == 1 ? "" : "s")")
-                        .font(.system(size: 13))
+                        .dsFont(.caption)
                 }
-                .foregroundColor(.secondary)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(Color(uiColor: .secondarySystemGroupedBackground))
-                .clipShape(Capsule())
-            }
-            .padding(.bottom, 24)
+                .foregroundStyle(DS.Color.text2)
+                .padding(.horizontal, DS.Spacing.inset)
+                .padding(.vertical, DS.Spacing.xs)
+                .background(DS.Color.surface2, in: Capsule())
 
-            if !isDraft && hourlyRate > 0 && shiftHours.contains(where: { $0 > 0 }) {
-                FeeSummaryView(shiftHours: shiftHours, hourlyRate: hourlyRate, workers: workers, percent: feePercent)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 16)
-            }
-
-            if !isDraft {
-                TermsConsentRow(isAccepted: $termsAccepted)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 16)
-            }
-
-            Divider()
-
-            VStack(spacing: 10) {
-                let publishBlocked = !isDraft && !termsAccepted
-                Button(isDraft ? "Save as Draft" : "Publish Now") {
-                    isDraft ? onSaveAsDraft() : onPost()
+                if !isDraft && hourlyRate > 0 && shiftHours.contains(where: { $0 > 0 }) {
+                    FeeSummaryView(shiftHours: shiftHours, hourlyRate: hourlyRate, workers: workers, percent: feePercent)
                 }
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
-                .background(publishBlocked ? Color.gray.opacity(0.35) : (isDraft ? Color.orange : SS.primary))
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-                .disabled(publishBlocked)
 
                 if !isDraft {
-                    Button("Save as Draft") { onSaveAsDraft() }
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundColor(.secondary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
+                    TermsConsentRow(isAccepted: $termsAccepted)
                 }
 
-                Button("Cancel") { onCancel() }
-                    .font(.system(size: 15))
-                    .foregroundColor(.secondary)
+                VStack(spacing: DS.Spacing.xs) {
+                    let publishBlocked = !isDraft && !termsAccepted
+                    Button(isDraft ? "Save as draft" : "Publish now") {
+                        isDraft ? onSaveAsDraft() : onPost()
+                    }
+                    .buttonStyle(.ds(.primary))
+                    .disabled(publishBlocked)
+
+                    if !isDraft {
+                        Button("Save as draft") { onSaveAsDraft() }
+                            .buttonStyle(.ds(.soft))
+                    }
+
+                    Button("Cancel") { onCancel() }
+                        .buttonStyle(.ds(.secondary))
+                }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 16)
-            .padding(.bottom, 32)
+            .padding(.horizontal, DS.Spacing.screenEdge)
+            .padding(.top, DS.Spacing.lg)
+            .padding(.bottom, DS.Spacing.lg)
         }
-        .background(Color(uiColor: .systemGroupedBackground))
-        .presentationDetents(isDraft ? [.medium] : [.fraction(0.8), .large])
-        .presentationDragIndicator(.hidden)
+        .dsBackground()
+        .presentationDetents(isDraft ? [.medium, .large] : [.fraction(0.8), .large])
+        .presentationDragIndicator(.visible)
     }
 }
 
@@ -1033,41 +891,50 @@ struct FeeSummaryView: View {
     var body: some View {
         let perWorker = total(workers: 1)
         let all = total(workers: workers)
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Per worker, per shift")
-                .font(.system(size: 12, weight: .semibold)).foregroundColor(.secondary)
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+            heading("Per worker, per shift")
             ForEach(Array(activeHours.enumerated()), id: \.offset) { i, h in
                 let b = PlatformFees.breakdown(hours: h, hourlyRate: hourlyRate, workers: 1, percent: percent)
                 if activeHours.count > 1 {
-                    Text("Shift \(i + 1)").font(.system(size: 12, weight: .medium))
+                    Text("Shift \(i + 1)")
+                        .font(DS.Font.make(12, .semibold, relativeTo: .caption))
+                        .foregroundStyle(DS.Color.text)
                 }
                 row("Wage (\(hoursText(h)) × \(Money.format(hourlyRate, fractionDigits: 2)))", b.wages)
                 row("Platform fee (\(PlatformFees.percentLabel(percent)))", b.fees)
                 row("Total per worker", b.total, bold: true)
             }
-            Divider()
-            Text("All \(workers) worker\(workers == 1 ? "" : "s") × \(activeHours.count) shift\(activeHours.count == 1 ? "" : "s")")
-                .font(.system(size: 12, weight: .semibold)).foregroundColor(.secondary)
+            DSDivider().padding(.vertical, DS.Spacing.xxs)
+            heading("All \(workers) worker\(workers == 1 ? "" : "s") × \(activeHours.count) shift\(activeHours.count == 1 ? "" : "s")")
             row("Wages", all.wages)
             row("Platform fee (\(PlatformFees.percentLabel(percent)))", all.fees)
             row("You pay in total", all.total, bold: true)
             row("Worker receives (each, full wage)", perWorker.wages, accent: true)
             Text("The platform fee is added on top and billed after the shift. No-shows are not billed.")
-                .font(.system(size: 11)).foregroundColor(.secondary)
+                .dsFont(.caption)
+                .foregroundStyle(DS.Color.muted)
         }
-        .padding(14)
+        .padding(DS.Spacing.inset)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .background(DS.Color.surface2, in: RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous))
+        .accessibilityElement(children: .contain)
+    }
+
+    private func heading(_ text: String) -> some View {
+        Text(text)
+            .font(DS.Font.make(12, .bold, relativeTo: .caption))
+            .foregroundStyle(DS.Color.text2)
     }
 
     private func row(_ label: String, _ amount: Double, bold: Bool = false, accent: Bool = false) -> some View {
         HStack {
-            Text(label).font(.system(size: 13, weight: bold ? .semibold : .regular))
-            Spacer()
-            Text(Money.format(amount, fractionDigits: 2)).font(.system(size: 13, weight: bold ? .bold : .semibold))
+            Text(label).font(DS.Font.make(14, bold ? .bold : .medium, relativeTo: .callout))
+            Spacer(minLength: DS.Spacing.xs)
+            Text(Money.format(amount, fractionDigits: 2))
+                .font(DS.Font.make(14, bold ? .extrabold : .semibold, relativeTo: .callout))
         }
-        .foregroundColor(accent ? .green : .primary)
+        .foregroundStyle(accent ? DS.Color.success : DS.Color.text)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -1076,155 +943,74 @@ struct TermsConsentRow: View {
     @Binding var isAccepted: Bool
 
     var body: some View {
-        Button { isAccepted.toggle() } label: {
-            HStack(alignment: .top, spacing: 10) {
+        DSCard(action: {
+            DS.Haptics.selection()
+            isAccepted.toggle()
+        }) {
+            HStack(alignment: .top, spacing: DS.Spacing.sm) {
                 Image(systemName: isAccepted ? "checkmark.square.fill" : "square")
-                    .font(.system(size: 20))
-                    .foregroundColor(isAccepted ? SS.primary : .gray.opacity(0.5))
+                    .font(.system(size: 22))
+                    .foregroundStyle(isAccepted ? DS.Color.primary : DS.Color.muted)
+                    .accessibilityHidden(true)
                 Text("I agree to the SwipeShift Terms for Employers and confirm this job information is accurate.")
-                    .font(.system(size: 13))
-                    .foregroundColor(.primary)
+                    .dsFont(.callout)
+                    .foregroundStyle(DS.Color.text)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(14)
-            .background(Color(uiColor: .secondarySystemGroupedBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 14))
         }
-        .buttonStyle(.plain)
         .accessibilityAddTraits(isAccepted ? .isSelected : [])
     }
 }
 
-// MARK: - ToggleRow
-private struct ToggleRow: View {
-    let label: String
-    @Binding var isOn: Bool
-
-    var body: some View {
-        Toggle(isOn: $isOn) {
-            Text(label)
-                .font(.system(size: 14))
-                .foregroundColor(.primary)
-        }
-        .tint(SS.primary)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .background(Color(uiColor: .systemBackground))
-    }
-}
-
-// MARK: - LimitedTextField (mehrzeilig mit Zeichenlimit + Zaehler)
-private struct LimitedTextField: View {
-    let placeholder: String
-    @Binding var text: String
-    let limit: Int
-    let lines: ClosedRange<Int>
-
-    var body: some View {
-        VStack(alignment: .trailing, spacing: 4) {
-            TextField(placeholder, text: $text, axis: .vertical)
-                .lineLimit(lines)
-                .font(.system(size: 15))
-                .onChange(of: text) { _, newValue in
-                    if newValue.count > limit { text = String(newValue.prefix(limit)) }
-                }
-            Text("\(text.count)/\(limit)")
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(Color(uiColor: .systemBackground))
-    }
-}
-
-// MARK: - ShiftRow
+// MARK: - ShiftRow (flach: Datum / Start / Ende / Dauer)
 private struct ShiftRow: View {
+    let index: Int
     @Binding var shift: DraftShift
     let onRemove: (() -> Void)?
 
     var body: some View {
-        VStack(spacing: 0) {
+        VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Image(systemName: "calendar")
-                    .foregroundColor(SS.primary)
-                    .font(.system(size: 14))
-                Text("Date")
-                    .font(.system(size: 14))
-                    .foregroundColor(.secondary)
+                Text("Shift \(index + 1)")
+                    .font(DS.Font.make(13, .bold, relativeTo: .footnote))
+                    .foregroundStyle(DS.Color.text2)
                 Spacer()
-                DatePicker("", selection: $shift.date, displayedComponents: .date)
-                    .labelsHidden()
-                    .tint(SS.primary)
-
                 if let remove = onRemove {
-                    Button(action: remove) {
+                    Button {
+                        DS.Haptics.light()
+                        remove()
+                    } label: {
                         Image(systemName: "minus.circle.fill")
-                            .foregroundColor(.red.opacity(0.7))
-                            .font(.system(size: 18))
+                            .font(.system(size: 20))
+                            .foregroundStyle(DS.Color.danger)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
-                    .padding(.leading, 6)
+                    .buttonStyle(.dsPressable)
+                    .accessibilityLabel("Remove shift \(index + 1)")
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
+            .frame(minHeight: 44)
 
-            Divider().padding(.leading, 14)
-
-            HStack {
-                Image(systemName: "clock")
-                    .foregroundColor(SS.primary)
-                    .font(.system(size: 14))
-                Text("Start")
-                    .font(.system(size: 14))
-                    .foregroundColor(.secondary)
-                Spacer()
-                DatePicker("", selection: $shift.startTime, displayedComponents: .hourAndMinute)
+            DSRow("Date", systemIcon: "calendar") {
+                DatePicker("Date", selection: $shift.date, displayedComponents: .date)
                     .labelsHidden()
-                    .tint(SS.primary)
+                    .tint(DS.Color.primary)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-
-            Divider().padding(.leading, 14)
-
-            HStack {
-                Image(systemName: "clock.badge.checkmark")
-                    .foregroundColor(SS.primary)
-                    .font(.system(size: 14))
-                Text("End")
-                    .font(.system(size: 14))
-                    .foregroundColor(.secondary)
-                Spacer()
-                DatePicker("", selection: $shift.endTime, displayedComponents: .hourAndMinute)
+            DSRow("Start", systemIcon: "clock") {
+                DatePicker("Start", selection: $shift.startTime, displayedComponents: .hourAndMinute)
                     .labelsHidden()
-                    .tint(SS.primary)
+                    .tint(DS.Color.primary)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-
-            Divider().padding(.leading, 14)
-
-            HStack {
-                Image(systemName: "hourglass")
-                    .foregroundColor(.secondary)
-                    .font(.system(size: 14))
-                Text("Duration")
-                    .font(.system(size: 14))
-                    .foregroundColor(.secondary)
-                Spacer()
-                Text(shift.durationText)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(SS.primary)
-                    .padding(.horizontal, 14)
+            DSRow("End", systemIcon: "clock.badge.checkmark") {
+                DatePicker("End", selection: $shift.endTime, displayedComponents: .hourAndMinute)
+                    .labelsHidden()
+                    .tint(DS.Color.primary)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
+            DSRow("Duration", value: shift.durationText, accentValue: true, systemIcon: "hourglass", iconTone: .neutral)
         }
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(alignment: .bottom) { DSDivider() }
     }
 }
 
@@ -1234,23 +1020,9 @@ private struct FlowChips: View {
     @Binding var selected: Set<String>
 
     var body: some View {
-        LazyVGrid(
-            columns: [GridItem(.adaptive(minimum: 100, maximum: 180), spacing: 8)],
-            spacing: 8
-        ) {
+        DSFlowLayout(spacing: DS.Spacing.xs) {
             ForEach(items, id: \.self) { item in
-                let isOn = selected.contains(item)
-                Button { toggle(item) } label: {
-                    Text(item)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(isOn ? .white : SS.primary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(isOn ? SS.primary : SS.primary.opacity(0.08))
-                        .clipShape(Capsule())
-                }
-                .buttonStyle(.plain)
-                .animation(.spring(response: 0.2), value: isOn)
+                DSChip(item, isSelected: selected.contains(item)) { toggle(item) }
             }
         }
     }
@@ -1261,125 +1033,49 @@ private struct FlowChips: View {
     }
 }
 
-// MARK: - FormSection
-private struct FormSection<Content: View>: View {
-    let title: String
-    let content: Content
-
-    init(title: String, @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.content = content()
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(.secondary)
-                .padding(.horizontal, 20)
-            content
-                .padding(.horizontal, 16)
-        }
-        .padding(.top, 20)
-    }
-}
-
-// MARK: - FormRow
-private struct FormRow<Content: View>: View {
-    let label: String
-    let content: Content
-
-    init(label: String, @ViewBuilder content: () -> Content) {
-        self.label = label
-        self.content = content()
-    }
-
-    var body: some View {
-        HStack {
-            Text(label)
-                .font(.system(size: 14))
-                .foregroundColor(.secondary)
-                .padding(.leading, 16)
-            Spacer()
-            content
-                .padding(.trailing, 16)
-        }
-        .padding(.vertical, 12)
-        .background(Color(uiColor: .systemBackground))
-    }
-}
-
-// MARK: - PickerRow
+// MARK: - PickerRow (Menue-Auswahl, flache Zeile)
 private struct PickerRow: View {
     let label: String
     let options: [String]
     @Binding var selection: String
 
     var body: some View {
-        HStack {
-            Text(label)
-                .font(.system(size: 14))
-                .foregroundColor(.secondary)
-                .padding(.leading, 16)
-            Spacer()
-            Picker("", selection: $selection) {
+        DSRow(label) {
+            Picker(label, selection: $selection) {
                 Text("Please select").tag("")
                 ForEach(options, id: \.self) { opt in
                     Text(opt).tag(opt)
                 }
             }
             .pickerStyle(.menu)
-            .tint(SS.primary)
-            .padding(.trailing, 8)
+            .tint(DS.Color.primaryText)
         }
-        .padding(.vertical, 6)
-        .background(Color(uiColor: .systemBackground))
     }
 }
 
-// MARK: - MultiPickerRow
+// MARK: - MultiPickerRow (Chips)
 private struct MultiPickerRow: View {
     let label: String
     let options: [String]
     @Binding var selected: Set<String>
 
-    var displayText: String {
-        selected.isEmpty ? "None selected" : selected.sorted().joined(separator: ", ")
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
             Text(label)
-                .font(.system(size: 14))
-                .foregroundColor(.secondary)
-                .padding(.horizontal, 16)
-                .padding(.top, 10)
+                .dsFont(.callout)
+                .foregroundStyle(DS.Color.text2)
 
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 90), spacing: 8)],
-                spacing: 8
-            ) {
-                ForEach(options, id: \.self) { lang in
-                    let on = selected.contains(lang)
-                    Button {
-                        if on { selected.remove(lang) } else { selected.insert(lang) }
-                    } label: {
-                        Text(lang)
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(on ? .white : SS.primary)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(on ? SS.primary : SS.primary.opacity(0.08))
-                            .clipShape(Capsule())
+            DSFlowLayout(spacing: DS.Spacing.xs) {
+                ForEach(options, id: \.self) { option in
+                    DSChip(option, isSelected: selected.contains(option)) {
+                        if selected.contains(option) { selected.remove(option) } else { selected.insert(option) }
                     }
-                    .buttonStyle(.plain)
-                    .animation(.spring(response: 0.2), value: on)
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 10)
         }
-        .background(Color(uiColor: .systemBackground))
+        .padding(.vertical, DS.Spacing.sm)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .top) { DSDivider() }
     }
 }
 

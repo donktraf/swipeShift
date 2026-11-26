@@ -93,16 +93,14 @@ struct LeaveReviewsView: View {
     }
 
     var body: some View {
-        SubScreenShell(title: "Leave Reviews") {
-            VStack(spacing: 0) {
-                tabBar.padding(.bottom, 12)
+        SubScreenShell(title: "Leave Reviews", padded: true) {
+            VStack(alignment: .leading, spacing: DS.Spacing.md) {
+                tabBar
 
-                sortFilterRow.padding(.horizontal, 16).padding(.bottom, 12)
+                sortFilterRow
 
                 if isLoading {
-                    ProgressView()
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 60)
+                    skeleton
                 } else if let err = errorMessage {
                     errorView(err)
                 } else {
@@ -110,6 +108,7 @@ struct LeaveReviewsView: View {
                 }
             }
         }
+        .refreshable { await loadData() }
         .task { await loadData() }
         .sheet(isPresented: $showSortSheet)   { sortSheet }
         .sheet(isPresented: $showFilterSheet) {
@@ -146,6 +145,15 @@ struct LeaveReviewsView: View {
 
     // MARK: - Content List
 
+    private var skeleton: some View {
+        VStack(spacing: DS.Spacing.sm) {
+            ForEach(0..<3, id: \.self) { _ in
+                DSSkeletonBlock(height: 120, radius: DS.Radius.card)
+            }
+        }
+        .accessibilityLabel("Loading reviews")
+    }
+
     @ViewBuilder
     private var contentList: some View {
         switch selectedTab {
@@ -155,14 +163,10 @@ struct LeaveReviewsView: View {
             } else if filteredPending.isEmpty {
                 emptyView(icon: "checkmark.seal", message: "No pending reviews.\nAll shifts have been reviewed.")
             } else {
-                ScrollView(showsIndicators: false) {
-                    VStack(spacing: 12) {
-                        ForEach(filteredPending) { item in
-                            PendingReviewCard(item: item) { reviewToEdit = ReviewFormContext(item: item, draft: nil) }
-                        }
+                VStack(spacing: DS.Spacing.sm) {
+                    ForEach(filteredPending) { item in
+                        PendingReviewCard(item: item) { reviewToEdit = ReviewFormContext(item: item, draft: nil) }
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 24)
                 }
             }
         case .drafts:
@@ -171,18 +175,14 @@ struct LeaveReviewsView: View {
             } else if filteredDrafts.isEmpty {
                 emptyView(icon: "doc.text", message: "No drafts saved.\nUse \"Save as Draft\" in the review form to finish a review later.")
             } else {
-                ScrollView(showsIndicators: false) {
-                    VStack(spacing: 12) {
-                        ForEach(filteredDrafts) { item in
-                            DraftReviewCard(
-                                item: item,
-                                onOpen:   { reviewToEdit = ReviewFormContext(item: item.review, draft: item.draft) },
-                                onDelete: { draftToDelete = item }
-                            )
-                        }
+                VStack(spacing: DS.Spacing.sm) {
+                    ForEach(filteredDrafts) { item in
+                        DraftReviewCard(
+                            item: item,
+                            onOpen:   { reviewToEdit = ReviewFormContext(item: item.review, draft: item.draft) },
+                            onDelete: { draftToDelete = item }
+                        )
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 24)
                 }
             }
         case .past:
@@ -191,23 +191,19 @@ struct LeaveReviewsView: View {
             } else if filteredPast.isEmpty {
                 emptyView(icon: "star.slash", message: "No past reviews yet.")
             } else {
-                ScrollView(showsIndicators: false) {
-                    VStack(spacing: 12) {
-                        ForEach(filteredPast) { item in
-                            PastReviewCard(item: item)
-                        }
+                VStack(spacing: DS.Spacing.sm) {
+                    ForEach(filteredPast) { item in
+                        PastReviewCard(item: item)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 24)
                 }
             }
         }
     }
 
-    // MARK: - Tab Bar
+    // MARK: - Tab Bar (segmentierte Pills)
 
     private var tabBar: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: DS.Spacing.xxs) {
             ForEach(ReviewTab.allCases, id: \.self) { tab in
                 let count: Int = {
                     switch tab {
@@ -217,64 +213,51 @@ struct LeaveReviewsView: View {
                     }
                 }()
                 Button {
-                    withAnimation(.easeInOut(duration: 0.18)) { selectedTab = tab }
+                    DS.Haptics.selection()
+                    selectedTab = tab
                 } label: {
-                    VStack(spacing: 4) {
-                        HStack(spacing: 4) {
-                            Text(tab.rawValue)
-                                .font(.system(size: 13, weight: selectedTab == tab ? .bold : .regular))
-                                .foregroundColor(selectedTab == tab ? .white : .white.opacity(0.5))
-                            if count > 0 {
-                                Text("\(count)")
-                                    .font(.system(size: 11, weight: .bold))
-                                    .foregroundColor(selectedTab == tab ? SS.primary : .white.opacity(0.4))
-                                    .padding(.horizontal, 5).padding(.vertical, 1)
-                                    .background(selectedTab == tab ? Color.white : Color.white.opacity(0.12))
-                                    .clipShape(Capsule())
-                            }
-                        }
-                        Rectangle()
-                            .fill(selectedTab == tab ? Color.white : Color.clear)
-                            .frame(height: 2)
-                            .clipShape(Capsule())
-                    }
+                    Text(count > 0 ? "\(tab.rawValue) \(count)" : tab.rawValue)
+                        .font(DS.Font.make(12, .semibold, relativeTo: .caption))
+                        .foregroundStyle(selectedTab == tab ? DS.Color.onPrimary : DS.Color.text2)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .frame(maxWidth: .infinity, minHeight: 36)
+                        .background(selectedTab == tab ? DS.Color.primary : Color.clear, in: Capsule())
+                        .frame(minHeight: 44)
+                        .contentShape(Capsule())
                 }
-                .buttonStyle(.plain)
-                .frame(maxWidth: .infinity)
+                .buttonStyle(.dsPressable)
+                .accessibilityAddTraits(selectedTab == tab ? .isSelected : [])
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 4)
+        .padding(DS.Spacing.xxs)
+        .background(DS.Color.surface2, in: Capsule())
+        .dsAnimation(.snappy, value: selectedTab)
     }
 
     // MARK: - Sort + Filter Row
 
     private var sortFilterRow: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: DS.Spacing.xs) {
             Button { showSortSheet = true } label: {
                 sortFilterChip(icon: "arrow.up.arrow.down",
                                label: selectedSort.rawValue,
                                active: selectedSort != .mostRecent)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.dsPressable)
 
             Button { showFilterSheet = true } label: {
                 sortFilterChip(icon: "line.3.horizontal.decrease.circle",
                                label: activeFilters > 0 ? "Filter (\(activeFilters))" : "Filter",
                                active: activeFilters > 0)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.dsPressable)
 
             if activeFilters > 0 {
                 Button { clearFilters() } label: {
                     Text("Reset")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.red)
-                        .padding(.horizontal, 12).padding(.vertical, 7)
-                        .background(Color.red.opacity(0.08))
-                        .clipShape(Capsule())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.ds(.destructiveSoft, size: .medium, fullWidth: false))
             }
             Spacer()
         }
@@ -283,36 +266,24 @@ struct LeaveReviewsView: View {
     // MARK: - Empty + Error Views
 
     private func emptyView(icon: String, message: String) -> some View {
-        VStack(spacing: 14) {
-            Image(systemName: icon)
-                .font(.system(size: 44))
-                .foregroundColor(.white.opacity(0.3))
-            Text(message)
-                .font(.system(size: 14))
-                .foregroundColor(.white.opacity(0.5))
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 60)
+        DSEmptyState(systemIcon: icon, title: "Nothing here", message: message)
+            .padding(.top, DS.Spacing.xl)
     }
 
     private func errorView(_ msg: String) -> some View {
-        VStack(spacing: 14) {
+        VStack(spacing: DS.Spacing.sm) {
             Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 40))
-                .foregroundColor(.orange.opacity(0.7))
+                .font(.system(size: 32))
+                .foregroundStyle(DS.Color.warning)
             Text(msg)
-                .font(.system(size: 13))
-                .foregroundColor(.white.opacity(0.6))
+                .dsFont(.callout)
+                .foregroundStyle(DS.Color.text2)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
             Button("Retry") { Task { await loadData() } }
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(SS.primary)
+                .buttonStyle(.ds(.soft, size: .medium, fullWidth: false))
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, 60)
+        .padding(.top, DS.Spacing.xl)
     }
 
     // MARK: - Sort Sheet
@@ -320,28 +291,29 @@ struct LeaveReviewsView: View {
     private var sortSheet: some View {
         VStack(spacing: 0) {
             Text("Sort")
-                .font(.system(size: 17, weight: .semibold))
-                .padding(.top, 20).padding(.bottom, 12)
-            ForEach(ReviewSort.allCases, id: \.self) { option in
-                Button {
-                    selectedSort = option
-                    showSortSheet = false
-                } label: {
-                    HStack {
-                        Text(option.rawValue).font(.system(size: 15)).foregroundColor(.primary)
-                        Spacer()
+                .dsFont(.headline)
+                .foregroundStyle(DS.Color.text)
+                .padding(.top, DS.Spacing.lg).padding(.bottom, DS.Spacing.sm)
+            VStack(spacing: 0) {
+                ForEach(ReviewSort.allCases, id: \.self) { option in
+                    DSRow(option.rawValue, action: {
+                        DS.Haptics.selection()
+                        selectedSort = option
+                        showSortSheet = false
+                    }) {
                         if selectedSort == option {
-                            Image(systemName: "checkmark").foregroundColor(SS.primary)
+                            Image(systemName: "checkmark")
+                                .foregroundStyle(DS.Color.primaryText)
                                 .font(.system(size: 14, weight: .semibold))
                         }
                     }
-                    .padding(.horizontal, 24).padding(.vertical, 14)
+                    .accessibilityAddTraits(selectedSort == option ? .isSelected : [])
                 }
-                .buttonStyle(.plain)
-                Divider().padding(.leading, 24)
             }
+            .padding(.horizontal, DS.Spacing.screenEdge)
             Spacer()
         }
+        .dsBackground()
         .presentationDetents([.fraction(0.4)])
         .presentationDragIndicator(.visible)
     }
@@ -354,31 +326,31 @@ struct LeaveReviewsView: View {
 
     /// Es gibt Reviews, aber keine passt zu den aktiven Filtern
     private var noMatchesView: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "line.3.horizontal.decrease.circle")
-                .font(.system(size: 36)).foregroundColor(.white.opacity(0.3))
-            Text("No reviews match your filters.")
-                .font(.system(size: 14)).foregroundColor(.white.opacity(0.6))
-            Button("Clear Filters") { clearFilters() }
-                .font(.system(size: 14, weight: .semibold)).foregroundColor(.white)
-                .padding(.horizontal, 16).padding(.vertical, 8)
-                .background(Color.white.opacity(0.2)).clipShape(Capsule())
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 60)
+        DSEmptyState(
+            systemIcon: "line.3.horizontal.decrease.circle",
+            title: "No matches",
+            message: "No reviews match your filters.",
+            actionTitle: "Clear Filters",
+            action: { clearFilters() }
+        )
+        .padding(.top, DS.Spacing.xl)
     }
 
     private func sortFilterChip(icon: String, label: String, active: Bool) -> some View {
         HStack(spacing: 5) {
-            Image(systemName: icon).font(.system(size: 12))
-            Text(label).font(.system(size: 13, weight: .semibold))
-            if active { Circle().fill(SS.primary).frame(width: 6, height: 6) }
+            Image(systemName: icon).font(.system(size: 12, weight: .semibold))
+            Text(label).font(DS.Font.make(13, .semibold, relativeTo: .caption))
+            if active { Circle().fill(DS.Color.primary).frame(width: 6, height: 6) }
         }
-        .foregroundColor(active ? SS.primary : .secondary)
-        .padding(.horizontal, 12).padding(.vertical, 7)
-        .background(active ? SS.primary.opacity(0.1) : Color(uiColor: .systemBackground))
-        .clipShape(Capsule())
-        .shadow(color: .black.opacity(0.04), radius: 2, x: 0, y: 1)
+        .foregroundStyle(active ? DS.Color.primaryText : DS.Color.text2)
+        .padding(.horizontal, DS.Spacing.sm)
+        .frame(minHeight: 44)
+        .background(active ? DS.Color.primarySoft : DS.Color.surface,
+                    in: RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
+                .strokeBorder(active ? Color.clear : DS.Color.border, lineWidth: 1)
+        )
     }
 
     // MARK: - Data Loading
@@ -414,42 +386,27 @@ private struct PendingReviewCard: View {
     let onReview: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 12) {
-                ZStack {
-                    Circle().fill(Color.gray.opacity(0.12)).frame(width: 44, height: 44)
-                    Text(item.logoEmoji).font(.system(size: 20))
+        DSCard {
+            VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                HStack(spacing: DS.Spacing.sm) {
+                    DSAvatar(text: item.logoEmoji, size: 44, shape: .circle, tone: .neutral)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.workerName)
+                            .dsFont(.headline).foregroundStyle(DS.Color.text)
+                        Text(item.jobTitle)
+                            .dsFont(.caption).foregroundStyle(DS.Color.text2)
+                    }
+                    Spacer()
+                    Text(item.shiftDate.formatted(date: .abbreviated, time: .omitted))
+                        .dsFont(.caption).foregroundStyle(DS.Color.muted)
                 }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(item.workerName)
-                        .font(.system(size: 15, weight: .semibold)).foregroundColor(.primary)
-                    Text(item.jobTitle)
-                        .font(.system(size: 12)).foregroundColor(.secondary)
-                }
-                Spacer()
-                Text(item.shiftDate.formatted(date: .abbreviated, time: .omitted))
-                    .font(.system(size: 12)).foregroundColor(.secondary)
-            }
-            .padding(14)
 
-            Divider().padding(.horizontal, 14)
-
-            Button(action: onReview) {
-                HStack {
-                    Image(systemName: "star.fill").font(.system(size: 14))
-                    Text("Leave a Review").font(.system(size: 14, weight: .semibold))
+                Button(action: onReview) {
+                    Label("Leave a Review", systemImage: "star.fill")
                 }
-                .foregroundColor(.white)
-                .frame(maxWidth: .infinity).padding(.vertical, 12)
-                .background(SS.primary)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-                .padding(12)
+                .buttonStyle(.ds(.primary, size: .medium))
             }
-            .buttonStyle(.plain)
         }
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: .black.opacity(0.05), radius: 5, x: 0, y: 2)
     }
 }
 
@@ -461,51 +418,38 @@ private struct DraftReviewCard: View {
     let onDelete: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button(action: onOpen) {
-                HStack(spacing: 12) {
-                    ZStack {
-                        Circle().fill(Color.gray.opacity(0.12)).frame(width: 44, height: 44)
-                        Text(item.review.logoEmoji).font(.system(size: 20))
-                    }
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 6) {
-                            Text(item.review.workerName)
-                                .font(.system(size: 15, weight: .semibold)).foregroundColor(.primary)
-                            Text("Draft")
-                                .font(.system(size: 10, weight: .bold)).foregroundColor(.orange)
-                                .padding(.horizontal, 6).padding(.vertical, 2)
-                                .background(Color.orange.opacity(0.15)).clipShape(Capsule())
+        DSCard {
+            VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                Button(action: onOpen) {
+                    HStack(spacing: DS.Spacing.sm) {
+                        DSAvatar(text: item.review.logoEmoji, size: 44, shape: .circle, tone: .neutral)
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: DS.Spacing.xs) {
+                                Text(item.review.workerName)
+                                    .dsFont(.headline).foregroundStyle(DS.Color.text)
+                                DSBadge("Draft", .draft)
+                            }
+                            Text(item.review.jobTitle)
+                                .dsFont(.caption).foregroundStyle(DS.Color.text2)
+                            Text("Last edited \(item.updatedAt.formatted(date: .abbreviated, time: .shortened))")
+                                .dsFont(.caption).foregroundStyle(DS.Color.muted)
                         }
-                        Text(item.review.jobTitle)
-                            .font(.system(size: 12)).foregroundColor(.secondary)
-                        Text("Last edited \(item.updatedAt.formatted(date: .abbreviated, time: .shortened))")
-                            .font(.system(size: 11)).foregroundColor(.secondary)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.muted)
+                            .accessibilityHidden(true)
                     }
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .semibold)).foregroundColor(.secondary)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
                 }
-                .padding(14)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
+                .buttonStyle(.dsPressable)
 
-            Divider().padding(.horizontal, 14)
-
-            Button(role: .destructive, action: onDelete) {
-                HStack {
-                    Image(systemName: "trash").font(.system(size: 13))
-                    Text("Delete Draft").font(.system(size: 13, weight: .semibold))
+                Button(role: .destructive, action: onDelete) {
+                    Label("Delete Draft", systemImage: "trash")
                 }
-                .foregroundColor(.red)
-                .frame(maxWidth: .infinity).padding(.vertical, 12)
+                .buttonStyle(.ds(.destructiveSoft, size: .medium))
             }
-            .buttonStyle(.plain)
         }
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: .black.opacity(0.05), radius: 5, x: 0, y: 2)
     }
 }
 
@@ -515,75 +459,71 @@ private struct PastReviewCard: View {
     let item: PastReviewItem
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 12) {
-                ZStack {
-                    Circle().fill(Color.gray.opacity(0.12)).frame(width: 44, height: 44)
-                    Text(item.logoEmoji).font(.system(size: 20))
+        DSCard {
+            VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                HStack(spacing: DS.Spacing.sm) {
+                    DSAvatar(text: item.logoEmoji, size: 44, shape: .circle, tone: .neutral)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.workerName)
+                            .dsFont(.headline).foregroundStyle(DS.Color.text)
+                        if item.isTopWorker { TopWorkerBadge(text: "Top Worker") }
+                        Text(item.jobTitle)
+                            .dsFont(.caption).foregroundStyle(DS.Color.text2)
+                    }
+                    Spacer()
+                    HStack(spacing: 2) {
+                        Image(systemName: "star.fill").font(.system(size: 11)).foregroundStyle(DS.Color.warning)
+                        Text(String(format: "%.1f", item.avgRating))
+                            .font(DS.Font.make(14, .semibold, relativeTo: .callout)).foregroundStyle(DS.Color.text)
+                    }
                 }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(item.workerName)
-                        .font(.system(size: 15, weight: .semibold)).foregroundColor(.primary)
-                    if item.isTopWorker { TopWorkerBadge(text: "Top Worker") }
-                    Text(item.jobTitle)
-                        .font(.system(size: 12)).foregroundColor(.secondary)
+
+                DSDivider()
+
+                VStack(spacing: DS.Spacing.xs) {
+                    miniRatingRow("Communication",  value: item.communication)
+                    miniRatingRow("Teamwork",        value: item.teamwork)
+                    miniRatingRow("Reliability",     value: item.reliability)
+                    miniRatingRow("Under Pressure",  value: item.underPressure)
+                    if let quality = item.workQuality { miniRatingRow("Work Quality", value: quality) }
                 }
-                Spacer()
-                HStack(spacing: 2) {
-                    Image(systemName: "star.fill").font(.system(size: 11)).foregroundColor(.yellow)
-                    Text(String(format: "%.1f", item.avgRating))
-                        .font(.system(size: 13, weight: .semibold)).foregroundColor(.primary)
+
+                if let c = item.comment, !c.isEmpty {
+                    DSDivider()
+                    Text(c).dsFont(.callout).foregroundStyle(DS.Color.text2)
+                }
+
+                DSDivider()
+
+                HStack {
+                    Image(systemName: item.wouldRehire ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        .foregroundStyle(item.wouldRehire ? DS.Color.success : DS.Color.danger).font(.system(size: 14))
+                    Text(item.wouldRehire ? "Would rehire" : "Would not rehire")
+                        .dsFont(.caption).foregroundStyle(DS.Color.text2)
+                    Spacer()
+                    Text(item.createdAt.formatted(date: .abbreviated, time: .omitted))
+                        .dsFont(.caption).foregroundStyle(DS.Color.muted)
                 }
             }
-            .padding(14)
-
-            Divider().padding(.horizontal, 14)
-
-            VStack(spacing: 6) {
-                miniRatingRow("Communication",  value: item.communication)
-                miniRatingRow("Teamwork",        value: item.teamwork)
-                miniRatingRow("Reliability",     value: item.reliability)
-                miniRatingRow("Under Pressure",  value: item.underPressure)
-                if let quality = item.workQuality { miniRatingRow("Work Quality", value: quality) }
-            }
-            .padding(.horizontal, 14).padding(.vertical, 10)
-
-            if let c = item.comment, !c.isEmpty {
-                Divider().padding(.horizontal, 14)
-                Text(c).font(.system(size: 13)).foregroundColor(.secondary).padding(14)
-            }
-
-            Divider().padding(.horizontal, 14)
-
-            HStack {
-                Image(systemName: item.wouldRehire ? "checkmark.circle.fill" : "xmark.circle.fill")
-                    .foregroundColor(item.wouldRehire ? .green : .red).font(.system(size: 14))
-                Text(item.wouldRehire ? "Would rehire" : "Would not rehire")
-                    .font(.system(size: 12)).foregroundColor(.secondary)
-                Spacer()
-                Text(item.createdAt.formatted(date: .abbreviated, time: .omitted))
-                    .font(.system(size: 11)).foregroundColor(.secondary)
-            }
-            .padding(.horizontal, 14).padding(.vertical, 10)
         }
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
     }
 
     private func miniRatingRow(_ label: String, value: Int) -> some View {
-        HStack(spacing: 8) {
-            Text(label).font(.system(size: 12)).foregroundColor(.secondary)
+        HStack(spacing: DS.Spacing.xs) {
+            Text(label).dsFont(.caption).foregroundStyle(DS.Color.text2)
                 .frame(width: 110, alignment: .leading)
             HStack(spacing: 2) {
                 ForEach(1...5, id: \.self) { i in
                     Image(systemName: i <= value ? "star.fill" : "star")
                         .font(.system(size: 10))
-                        .foregroundColor(i <= value ? .yellow : Color.gray.opacity(0.3))
+                        .foregroundStyle(i <= value ? DS.Color.warning : DS.Color.border)
                 }
             }
             Spacer()
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
+        .accessibilityValue("\(value) of 5")
     }
 }
 
@@ -636,124 +576,72 @@ struct ReviewFormSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
-                VStack(spacing: 20) {
+                VStack(alignment: .leading, spacing: DS.Spacing.lg) {
                     // Worker Info Header
-                    HStack(spacing: 12) {
-                        ZStack {
-                            Circle().fill(Color.gray.opacity(0.12)).frame(width: 50, height: 50)
-                            Text(review.logoEmoji).font(.system(size: 24))
-                        }
+                    HStack(spacing: DS.Spacing.sm) {
+                        DSAvatar(text: review.logoEmoji, size: 50, shape: .circle, tone: .neutral)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(review.workerName).font(.system(size: 16, weight: .semibold))
-                            Text(review.jobTitle).font(.system(size: 13)).foregroundColor(.secondary)
+                            Text(review.workerName).dsFont(.headline).foregroundStyle(DS.Color.text)
+                            Text(review.jobTitle).dsFont(.caption).foregroundStyle(DS.Color.text2)
                         }
                         Spacer()
                     }
-                    .padding(.horizontal, 20).padding(.top, 8)
-
-                    Divider()
 
                     // Star Ratings
-                    VStack(spacing: 0) {
+                    DSSection("Ratings") {
                         starRatingRow(label: "Communication",  binding: $communication)
-                        Divider().padding(.leading, 20)
                         starRatingRow(label: "Teamwork",        binding: $teamwork)
-                        Divider().padding(.leading, 20)
                         starRatingRow(label: "Reliability",     binding: $reliability)
-                        Divider().padding(.leading, 20)
                         starRatingRow(label: "Under Pressure",  binding: $underPressure)
-                        Divider().padding(.leading, 20)
                         starRatingRow(label: "Work Quality",    binding: $workQuality)
                     }
-                    .background(Color(uiColor: .secondarySystemGroupedBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-                    .padding(.horizontal, 16)
 
-                    // Would Rehire
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Would rehire?").font(.system(size: 15, weight: .semibold))
-                            Text("Would you book this worker again?")
-                                .font(.system(size: 12)).foregroundColor(.secondary)
-                        }
-                        Spacer()
-                        Toggle("", isOn: $wouldRehire).labelsHidden().tint(SS.primary)
+                    DSSection("Outcome") {
+                        DSToggleRow("Would rehire?", subtitle: "Would you book this worker again?", isOn: $wouldRehire)
+                        DSToggleRow("Highlight as Top Worker", subtitle: "Exceptional performance", isOn: $topWorker)
                     }
-                    .padding(.horizontal, 20).padding(.vertical, 14)
-                    .background(Color(uiColor: .secondarySystemGroupedBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-                    .padding(.horizontal, 16)
-
-                    // Top Worker
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Highlight as Top Worker").font(.system(size: 15, weight: .semibold))
-                            Text("Exceptional performance")
-                                .font(.system(size: 12)).foregroundColor(.secondary)
-                        }
-                        Spacer()
-                        Toggle("", isOn: $topWorker).labelsHidden().tint(SS.primary)
-                    }
-                    .padding(.horizontal, 20).padding(.vertical, 14)
-                    .background(Color(uiColor: .secondarySystemGroupedBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-                    .padding(.horizontal, 16)
 
                     // Kommentar
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Comment (optional)")
-                            .font(.system(size: 13, weight: .semibold)).foregroundColor(.secondary)
-                            .padding(.horizontal, 20)
-                        TextEditor(text: $comment)
-                            .frame(minHeight: 100).padding(12)
-                            .background(Color(uiColor: .secondarySystemGroupedBackground))
-                            .clipShape(RoundedRectangle(cornerRadius: 14))
-                            .padding(.horizontal, 16)
-                            .overlay(alignment: .bottomTrailing) {
-                                Text("\(comment.count)/600")
-                                    .font(.system(size: 11)).foregroundColor(.secondary)
-                                    .padding(.trailing, 24).padding(.bottom, 8)
-                            }
-                            .onChange(of: comment) { _, new in
-                                if new.count > 600 { comment = String(new.prefix(600)) }
-                            }
-                    }
+                    DSTextEditor("Comment (optional)", text: $comment, minLines: 4, maxLines: 10, maxLength: 600)
 
                     if let err = submitError {
                         Text(err)
-                            .font(.system(size: 13)).foregroundColor(.red)
-                            .multilineTextAlignment(.center).padding(.horizontal, 20)
+                            .dsFont(.callout).foregroundStyle(DS.Color.danger)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity)
                     }
 
-                    Button {
-                        Task { await submit() }
-                    } label: {
-                        if isSubmitting {
-                            ProgressView().tint(.white)
-                        } else {
-                            Text("Save Review")
+                    VStack(spacing: DS.Spacing.xs) {
+                        Button {
+                            Task { await submit() }
+                        } label: {
+                            if isSubmitting {
+                                ProgressView().tint(DS.Color.onPrimary)
+                            } else {
+                                Text("Save Review")
+                            }
                         }
-                    }
-                    .disabled(!isValid || isBusy)
-                    .buttonStyle(SSPrimaryButtonStyle(isEnabled: isValid && !isBusy))
-                    .padding(.horizontal, 16)
+                        .disabled(!isValid || isBusy)
+                        .buttonStyle(.ds(.primary))
 
-                    Button {
-                        Task { await saveDraft() }
-                    } label: {
-                        if isSavingDraft {
-                            ProgressView()
-                        } else {
-                            Text("Save as Draft")
-                                .font(.system(size: 15, weight: .semibold)).foregroundColor(SS.primary)
+                        Button {
+                            Task { await saveDraft() }
+                        } label: {
+                            if isSavingDraft {
+                                ProgressView()
+                            } else {
+                                Text("Save as Draft")
+                            }
                         }
+                        .disabled(isBusy)
+                        .buttonStyle(.ds(.secondary))
                     }
-                    .disabled(isBusy)
-                    .frame(maxWidth: .infinity).padding(.vertical, 12)
-                    .padding(.horizontal, 16).padding(.bottom, 28)
+                    .padding(.bottom, DS.Spacing.lg)
                 }
+                .padding(.horizontal, DS.Spacing.screenEdge)
+                .padding(.top, DS.Spacing.xs)
             }
-            .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
+            .dsBackground()
             .navigationTitle("Leave a Review")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -765,11 +653,11 @@ struct ReviewFormSheet: View {
         .overlay(alignment: .bottom) {
             if draftSaved {
                 Label("Draft saved", systemImage: "checkmark.circle.fill")
-                    .font(.system(size: 14, weight: .semibold)).foregroundColor(.white)
-                    .padding(.horizontal, 16).padding(.vertical, 10)
-                    .background(SS.primary).clipShape(Capsule())
-                    .shadow(color: .black.opacity(0.15), radius: 6, y: 2)
-                    .padding(.bottom, 24)
+                    .font(DS.Font.make(14, .semibold, relativeTo: .callout)).foregroundStyle(DS.Color.onPrimary)
+                    .padding(.horizontal, DS.Spacing.md).padding(.vertical, DS.Spacing.xs)
+                    .background(DS.Color.primary, in: Capsule())
+                    .dsCardShadow()
+                    .padding(.bottom, DS.Spacing.xl)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
@@ -825,6 +713,7 @@ struct ReviewFormSheet: View {
                 wouldRehire:   wouldRehire,
                 topWorker:     topWorker
             ))
+            DS.Haptics.success()
             onSuccess()
             dismiss()
         } catch {
@@ -835,17 +724,28 @@ struct ReviewFormSheet: View {
 
     private func starRatingRow(label: String, binding: Binding<Int>) -> some View {
         HStack {
-            Text(label).font(.system(size: 15)).foregroundColor(.primary)
+            Text(label).dsFont(.body).foregroundStyle(DS.Color.text)
             Spacer()
-            HStack(spacing: 6) {
+            HStack(spacing: 0) {
                 ForEach(1...5, id: \.self) { star in
-                    Image(systemName: star <= binding.wrappedValue ? "star.fill" : "star")
-                        .font(.system(size: 22))
-                        .foregroundColor(star <= binding.wrappedValue ? .yellow : Color.gray.opacity(0.3))
-                        .onTapGesture { binding.wrappedValue = star }
+                    Button {
+                        DS.Haptics.selection()
+                        binding.wrappedValue = star
+                    } label: {
+                        Image(systemName: star <= binding.wrappedValue ? "star.fill" : "star")
+                            .font(.system(size: 22))
+                            .foregroundStyle(star <= binding.wrappedValue ? DS.Color.warning : DS.Color.border)
+                            .frame(width: 36, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.dsPressable)
+                    .accessibilityLabel("\(star) star\(star == 1 ? "" : "s")")
                 }
             }
         }
-        .padding(.horizontal, 16).padding(.vertical, 14)
+        .frame(minHeight: 44)
+        .overlay(alignment: .top) { DSDivider() }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(label)
     }
 }

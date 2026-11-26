@@ -31,74 +31,79 @@ struct ApplicantCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            workerInfo
-            if let summary { summaryBlock(summary) }
+        DSCard {
+            VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                workerInfo
+                if let summary { summaryBlock(summary) }
 
-            Divider().padding(.horizontal, 14)
+                if let job = applicant.job {
+                    DSDivider()
+                    jobInfo(job)
+                }
 
-            if let job = applicant.job { jobInfo(job) }
-
-            if !isDecided { decisionButtons }
-            if let onChat {
-                ApplicantChatButton(action: onChat)
-                    .padding(.horizontal, 14)
-                    .padding(.bottom, 12)
+                if !isDecided { decisionButtons }
+                if let onChat {
+                    ApplicantChatButton(action: onChat)
+                }
             }
         }
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: .black.opacity(isDecided ? 0.03 : 0.05), radius: 5, x: 0, y: 2)
         .opacity(localState == .declined ? 0.65 : 1)
-        .animation(.easeInOut(duration: 0.25), value: isDecided)
+        .dsAnimation(.standard, value: isDecided)
+        .accessibilityElement(children: .contain)
     }
 
     // MARK: - Teile
 
     private var workerInfo: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: DS.Spacing.sm) {
             ApplicantAvatar(photoUrl: applicant.user?.profilePhotoUrl)
 
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
+                HStack(spacing: DS.Spacing.xs) {
                     Text(applicant.user?.fullName ?? "Unknown")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(.primary)
+                        .dsFont(.headline)
+                        .foregroundStyle(DS.Color.text)
+                        .lineLimit(1)
                     if summary?.isAdult == true { AdultBadge() }
-                    Spacer()
+                    Spacer(minLength: 0)
                     if applicant.autoAccepted == true { InstantMatchPill() }
                     stateBadge
                     if let onSave {
-                        Button(action: onSave) {
+                        Button {
+                            DS.Haptics.light()
+                            onSave()
+                        } label: {
                             Image(systemName: "bookmark")
-                                .font(.system(size: 16))
-                                .foregroundColor(SS.primary)
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(DS.Color.primaryText)
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.dsPressable)
+                        .accessibilityLabel("Save applicant")
                     }
                 }
                 if let location = applicant.user?.location {
                     Label(location, systemImage: "mappin")
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
+                        .dsFont(.caption)
+                        .foregroundStyle(DS.Color.muted)
                 }
             }
         }
-        .padding(14)
     }
 
     private func summaryBlock(_ summary: ApplicantSummary) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 10) {
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+            HStack(spacing: DS.Spacing.sm) {
                 ApplicantRatingLabel(average: summary.ratingAverage, count: summary.reviewCount)
                 Text(ApplicantFormat.jobsText(summary.completedJobs))
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
-                Spacer()
+                    .dsFont(.caption)
+                    .foregroundStyle(DS.Color.text2)
+                Spacer(minLength: 0)
                 if let appliedAt = applicant.appliedAt {
                     Text(ApplicantFormat.appliedAgo(appliedAt))
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
+                        .dsFont(.caption)
+                        .foregroundStyle(DS.Color.muted)
                 }
             }
             if let reliability = summary.reliability { ReliabilityLabel(summary: reliability) }
@@ -106,88 +111,51 @@ struct ApplicantCard: View {
             if let fit = shiftFit { ApplicantShiftFitLabel(fit: fit) }
             if let availability = summary.availabilityText {
                 Label(availability, systemImage: "clock")
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
+                    .dsFont(.caption)
+                    .foregroundStyle(DS.Color.text2)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.bottom, 12)
     }
 
     private func jobInfo(_ job: ApplicantJob) -> some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                Text(job.logoEmoji)
-                    .font(.system(size: 20))
-                    .frame(width: 36, height: 36)
-                    .background(Color.gray.opacity(0.07))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+        HStack(spacing: DS.Spacing.sm) {
+            DSAvatar(text: job.logoEmoji, size: 36)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(job.title)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.primary)
-                    HStack(spacing: 8) {
-                        Label(applicant.bookedShifts?.cardLabel ?? job.shiftText, systemImage: "calendar")
-                        Label(job.payText,   systemImage: "banknote")
-                    }
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(job.title)
+                    .font(DS.Font.make(14, .semibold, relativeTo: .callout))
+                    .foregroundStyle(DS.Color.text)
+                HStack(spacing: DS.Spacing.xs) {
+                    Label(applicant.bookedShifts?.cardLabel ?? job.shiftText, systemImage: "calendar")
+                    Label(job.payText, systemImage: "banknote")
                 }
+                .dsFont(.caption)
+                .foregroundStyle(DS.Color.text2)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-
-            Divider().padding(.horizontal, 14)
         }
     }
 
     private var decisionButtons: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: DS.Spacing.xs) {
             Button(action: onDecline) {
                 Label("Decline", systemImage: "xmark")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.red)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.red.opacity(0.35), lineWidth: 1))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.ds(.destructiveSoft, size: .medium))
 
             Button(action: onAccept) {
                 Label("Accept", systemImage: "checkmark")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .background(SS.primary)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.ds(.primary, size: .medium))
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
     }
 
     @ViewBuilder
     private var stateBadge: some View {
         switch localState {
-        case .accepted:
-            badge("Accepted", fg: .white, bg: .green)
-        case .declined:
-            badge("Declined", fg: .white, bg: .red)
-        case nil:
-            badge("Pending", fg: SS.primary, bg: SS.primary.opacity(0.1))
+        case .accepted: DSBadge("Accepted", .tone(.success))
+        case .declined: DSBadge("Declined", .cancelled)
+        case nil:       DSBadge("Pending", .tone(.primary))
         }
-    }
-
-    private func badge(_ text: String, fg: Color, bg: Color) -> some View {
-        Text(text)
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundColor(fg)
-            .padding(.horizontal, 8).padding(.vertical, 3)
-            .background(bg)
-            .clipShape(Capsule())
     }
 }
 
@@ -196,11 +164,10 @@ struct InstantMatchPill: View {
     var body: some View {
         HStack(spacing: 3) {
             Image(systemName: "bolt.fill").font(.system(size: 9, weight: .bold))
-            Text("Instant Match").font(.system(size: 11, weight: .semibold))
+            Text("Instant Match").font(DS.Font.make(11, .bold, relativeTo: .caption))
         }
-        .foregroundColor(SS.primary)
-        .padding(.horizontal, 8).padding(.vertical, 3)
-        .background(SS.primary.opacity(0.12))
-        .clipShape(Capsule())
+        .foregroundStyle(DS.Color.primaryText)
+        .padding(.horizontal, DS.Spacing.xs).padding(.vertical, 3)
+        .background(DS.Color.primarySoft, in: Capsule())
     }
 }

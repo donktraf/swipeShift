@@ -99,24 +99,25 @@ struct JobPaymentView: View {
     // MARK: - Body
 
     var body: some View {
-        SubScreenShell(title: "Job Payments") {
-            VStack(spacing: 20) {
+        SubScreenShell(title: "Job Payments", padded: true) {
+            VStack(alignment: .leading, spacing: DS.Spacing.lg) {
                 jobHeader
                 summaryBar
                 if !billedWorkers.isEmpty { feeBreakdownBar }
                 // Anwesenheit nach Schichtende (blendet sich vor Schichtende aus)
                 AttendanceSectionView(jobId: jobId)
 
-                if isLoading {
-                    ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
+                if isLoading && workers.isEmpty {
+                    skeleton
                 } else if let err = errorMessage {
-                    VStack(spacing: 12) {
-                        Text(err).font(.system(size: 13)).foregroundColor(.white.opacity(0.6))
-                            .multilineTextAlignment(.center).padding(.horizontal, 24)
+                    VStack(spacing: DS.Spacing.sm) {
+                        Text(err).dsFont(.callout).foregroundStyle(DS.Color.text2)
+                            .multilineTextAlignment(.center)
                         Button("Retry") { Task { await loadPayments() } }
-                            .font(.system(size: 14, weight: .semibold)).foregroundColor(SS.primary)
+                            .buttonStyle(.ds(.soft, size: .medium, fullWidth: false))
                     }
-                    .padding(.top, 40)
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, DS.Spacing.xl)
                 } else {
                     if !unpaidWorkers.isEmpty {
                         workerSection(title: "Pending Payment", workers: unpaidWorkers, isPaid: false)
@@ -128,10 +129,10 @@ struct JobPaymentView: View {
                         workerSection(title: "Paid", workers: paidWorkers, isPaid: true)
                     }
                     if payableCount > 0 { payActionButton }
-                    Spacer().frame(height: 20)
                 }
             }
         }
+        .refreshable { await loadPayments(showSpinner: false) }
         .task {
             await feeConfig.refresh()
             await loadPayments()
@@ -178,188 +179,125 @@ struct JobPaymentView: View {
         }
     }
 
+    private var skeleton: some View {
+        VStack(spacing: DS.Spacing.sm) {
+            DSSkeletonBlock(height: 84, radius: DS.Radius.tile)
+            DSSkeletonBlock(height: 64, radius: DS.Radius.card)
+            DSSkeletonBlock(height: 64, radius: DS.Radius.card)
+        }
+        .accessibilityLabel("Loading payments")
+    }
+
     // MARK: - Job Header
 
     private var jobHeader: some View {
-        HStack(spacing: 14) {
-            Text(jobEmoji)
-                .font(.system(size: 28))
-                .frame(width: 54, height: 54)
-                .background(Color.white.opacity(0.12))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+        HStack(spacing: DS.Spacing.sm) {
+            DSAvatar(text: jobEmoji, size: 54)
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
                 Text(jobTitle)
-                    .font(.system(size: 17, weight: .bold))
-                    .foregroundColor(.white)
-                HStack(spacing: 4) {
-                    Image(systemName: "mappin.circle")
-                        .font(.system(size: 12))
-                        .foregroundColor(.white.opacity(0.6))
-                    Text(jobLocation)
-                        .font(.system(size: 13))
-                        .foregroundColor(.white.opacity(0.7))
-                }
+                    .dsFont(.title)
+                    .foregroundStyle(DS.Color.text)
+                Label(jobLocation, systemImage: "mappin.circle")
+                    .dsFont(.caption)
+                    .foregroundStyle(DS.Color.text2)
             }
             Spacer()
         }
-        .padding(.horizontal, 16)
     }
 
     // MARK: - Summary Bar
 
     private var summaryBar: some View {
-        HStack(spacing: 0) {
-            summaryCell(label: "Total", value: Money.format(totalAmount), color: .white)
-            Divider().frame(height: 36).opacity(0.2)
-            summaryCell(label: "Paid", value: Money.format(paidAmount), color: .green)
-            Divider().frame(height: 36).opacity(0.2)
-            summaryCell(label: "Remaining", value: Money.format(remainingAmount), color: remainingAmount > 0 ? .orange : .green)
+        HStack(spacing: DS.Spacing.xs) {
+            DSTile(label: "Total", value: Money.format(totalAmount), tone: .primary)
+            DSTile(label: "Paid", value: Money.format(paidAmount), tone: .success)
+            DSTile(label: "Remaining", value: Money.format(remainingAmount), tone: remainingAmount > 0 ? .warning : .success)
         }
-        .padding(.vertical, 14)
-        .background(Color.white.opacity(0.1))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .padding(.horizontal, 16)
     }
 
     /// Job-Summen: Lohn (geht komplett an die Worker) + Plattform-Gebuehr = Gesamt
     private var feeBreakdownBar: some View {
-        VStack(spacing: 6) {
-            feeLine("Worker wages", Money.format(totalWages, fractionDigits: 2))
-            feeLine("Platform fee (\(PlatformFees.percentLabel(feePercent)))", Money.format(totalFees, fractionDigits: 2))
-            Divider().opacity(0.2)
-            feeLine("Total incl. fee", Money.format(totalAmount, fractionDigits: 2), bold: true)
-            if onHoldAmount > 0 {
-                feeLine("On hold (no-show under review, not billed yet)", Money.format(onHoldAmount, fractionDigits: 2))
+        DSSection("Breakdown") {
+            VStack(spacing: 0) {
+                feeLine("Worker wages", Money.format(totalWages, fractionDigits: 2))
+                feeLine("Platform fee (\(PlatformFees.percentLabel(feePercent)))", Money.format(totalFees, fractionDigits: 2))
+                feeLine("Total incl. fee", Money.format(totalAmount, fractionDigits: 2), bold: true)
+                if onHoldAmount > 0 {
+                    feeLine("On hold (no-show under review, not billed yet)", Money.format(onHoldAmount, fractionDigits: 2))
+                }
             }
         }
-        .padding(14)
-        .background(Color.white.opacity(0.1))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .padding(.horizontal, 16)
     }
 
     private func feeLine(_ label: String, _ value: String, bold: Bool = false) -> some View {
-        HStack {
-            Text(label).font(.system(size: 13, weight: bold ? .semibold : .regular))
-            Spacer()
-            Text(value).font(.system(size: 13, weight: bold ? .bold : .regular))
+        HStack(alignment: .firstTextBaseline) {
+            Text(label).font(DS.Font.make(14, bold ? .bold : .regular, relativeTo: .callout))
+            Spacer(minLength: DS.Spacing.sm)
+            Text(value).font(DS.Font.make(14, bold ? .bold : .semibold, relativeTo: .callout))
         }
-        .foregroundColor(.white.opacity(bold ? 1 : 0.75))
-    }
-
-    private func summaryCell(label: String, value: String, color: Color) -> some View {
-        VStack(spacing: 3) {
-            Text(value)
-                .font(.system(size: 18, weight: .bold))
-                .foregroundColor(color)
-            Text(label)
-                .font(.system(size: 11))
-                .foregroundColor(.white.opacity(0.6))
-        }
-        .frame(maxWidth: .infinity)
+        .foregroundStyle(bold ? DS.Color.text : DS.Color.text2)
+        .padding(.vertical, DS.Spacing.xs)
+        .frame(minHeight: 36)
+        .overlay(alignment: .top) { DSDivider() }
     }
 
     // MARK: - Worker Section
 
     private func workerSection(title: String, workers: [PayableWorker], isPaid: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(title)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(.secondary)
-                .padding(.horizontal, 14)
-                .padding(.top, 10)
-                .padding(.bottom, 4)
-
+        DSSection(title) {
             ForEach(workers) { worker in
                 workerRow(worker)
-                if worker.id != workers.last?.id {
-                    Divider().padding(.leading, 62)
-                }
             }
         }
-        .background(Color(uiColor: .systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .padding(.horizontal, 16)
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
     }
 
     private func workerRow(_ worker: PayableWorker) -> some View {
-        HStack(spacing: 12) {
-            // Avatar
-            ZStack {
-                Circle()
-                    .fill(worker.isPaid ? Color.green.opacity(0.12) : SS.primary.opacity(0.12))
-                    .frame(width: 42, height: 42)
-                Text(worker.avatarEmoji)
-                    .font(.system(size: 20))
-            }
-            .padding(.leading, 14)
+        HStack(spacing: DS.Spacing.sm) {
+            DSAvatar(text: worker.avatarEmoji, size: 42, shape: .circle, tone: worker.isPaid ? .success : .primary)
 
             // Info
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
                 Text(worker.name)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.primary)
+                    .font(DS.Font.make(15, .semibold, relativeTo: .callout))
+                    .foregroundStyle(DS.Color.text)
                 Text("\(worker.bookedShifts?.cardLabel ?? worker.shiftDate) · \(worker.hoursWorked, specifier: "%.1f")h × \(Money.hourly(worker.hourlyRate))")
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
+                    .dsFont(.caption)
+                    .foregroundStyle(DS.Color.text2)
             }
 
-            Spacer()
+            Spacer(minLength: DS.Spacing.xs)
 
             // Amount + action
-            VStack(alignment: .trailing, spacing: 4) {
+            VStack(alignment: .trailing, spacing: DS.Spacing.xxs) {
                 Text(Money.format(worker.totalCharged, fractionDigits: 2))
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundColor(.primary)
+                    .font(DS.Font.make(16, .bold, relativeTo: .callout))
+                    .foregroundStyle(DS.Color.text)
                 if !worker.isNoShow && worker.fee != nil {
                     Text("incl. \(Money.format(worker.feeAmount, fractionDigits: 2)) fee")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
+                        .dsFont(.caption)
+                        .foregroundStyle(DS.Color.muted)
                 }
 
                 if worker.isNoShow {
-                    Text("No-show — not billed")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(.red)
-                        .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(Color.red.opacity(0.1))
-                        .clipShape(Capsule())
+                    DSBadge("No-show — not billed", .cancelled)
                 } else if worker.isUnderReview {
-                    Text("Under review")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(.orange)
-                        .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(Color.orange.opacity(0.12))
-                        .clipShape(Capsule())
+                    DSBadge("Under review", .tone(.warning))
                 } else if worker.isPaid {
-                    Text("Paid")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(.green)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(Color.green.opacity(0.1))
-                        .clipShape(Capsule())
+                    DSBadge("Paid", .tone(.success))
                 } else {
                     Button {
                         workerToPay = worker
                     } label: {
                         Text("Pay")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 4)
-                            .background(SS.primary)
-                            .clipShape(Capsule())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.ds(.primary, size: .medium, fullWidth: false))
                     .disabled(isPaying)
                 }
             }
-            .padding(.trailing, 14)
         }
-        .padding(.vertical, 12)
+        .padding(.vertical, DS.Spacing.sm)
+        .overlay(alignment: .top) { DSDivider() }
     }
 
     // MARK: - Pay Action Button
@@ -369,36 +307,28 @@ struct JobPaymentView: View {
         if allPaid && !heldWorkers.isEmpty && paidWorkers.isEmpty {
             EmptyView()
         } else if allPaid {
-            HStack(spacing: 10) {
+            HStack(spacing: DS.Spacing.xs) {
                 Image(systemName: "checkmark.seal.fill")
-                    .foregroundColor(.green)
                 Text("All workers have been paid")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(.green)
+                    .dsFont(.headline)
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 16)
-            .background(Color.green.opacity(0.1))
-            .clipShape(RoundedRectangle(cornerRadius: 14))
-            .padding(.horizontal, 16)
+            .foregroundStyle(DS.Color.success)
+            .frame(maxWidth: .infinity, minHeight: 52)
+            .background(DS.Color.successSoft, in: RoundedRectangle(cornerRadius: DS.Radius.button, style: .continuous))
 
         } else if paidWorkers.isEmpty {
             Button { showPayAllConfirm = true } label: {
                 Text("Pay All Workers  ·  \(Money.format(remainingAmount, fractionDigits: 2)) incl. fee")
-                    .font(.system(size: 15, weight: .semibold))
             }
-            .buttonStyle(SSPrimaryButtonStyle())
+            .buttonStyle(.ds(.primary))
             .disabled(isPaying)
-            .padding(.horizontal, 16)
 
         } else {
             Button { showPayRemainingConfirm = true } label: {
                 Text("Pay Remaining \(unpaidWorkers.count) Worker\(unpaidWorkers.count == 1 ? "" : "s")  ·  \(Money.format(remainingAmount, fractionDigits: 2)) incl. fee")
-                    .font(.system(size: 15, weight: .semibold))
             }
-            .buttonStyle(SSPrimaryButtonStyle())
+            .buttonStyle(.ds(.primary))
             .disabled(isPaying)
-            .padding(.horizontal, 16)
         }
     }
 
@@ -425,6 +355,7 @@ struct JobPaymentView: View {
         Task {
             do {
                 try await requests()
+                DS.Haptics.success()
             } catch {
                 payError = error.localizedDescription
             }
