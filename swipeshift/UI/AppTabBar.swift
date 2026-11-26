@@ -62,9 +62,9 @@ private struct DSFloatingTabBar<Tab: Hashable>: View {
             }
         }
         .padding(6)
-        .background(DS.Color.surface, in: Capsule())
-        .overlay(Capsule().strokeBorder(DS.Color.border, lineWidth: 1))
-        .shadow(color: DS.Color.shadowKey.opacity(0.14), radius: 15, x: 0, y: 8)
+        .background(.ultraThinMaterial, in: Capsule()) // Milchglas: Inhalt scrollt verschwommen dahinter
+        .overlay(Capsule().strokeBorder(DS.Color.border.opacity(0.6), lineWidth: 1))
+        .shadow(color: DS.Color.shadowKey.opacity(0.10), radius: 15, x: 0, y: 8)
         .dsAnimation(.standard, value: selection)
         .frame(maxWidth: .infinity)
         .padding(.horizontal, DS.Spacing.sm)
@@ -89,13 +89,13 @@ private struct DSFloatingTabBar<Tab: Hashable>: View {
                         .transition(.opacity)
                 }
             }
-            .foregroundStyle(isSelected ? DS.Color.onPrimary : DS.Color.muted)
+            .foregroundStyle(isSelected ? DS.Color.primaryText : DS.Color.muted)
             .padding(.horizontal, isSelected ? DS.Spacing.md : 13)
             .frame(minWidth: 44, minHeight: 44)
             .background {
                 if isSelected {
                     Capsule()
-                        .fill(DS.Color.primary)
+                        .fill(DS.Color.primary.opacity(0.14)) // zarte Markierung statt voll blau
                         .matchedGeometryEffect(id: "activePill", in: pillNamespace)
                 }
             }
